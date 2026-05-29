@@ -20,14 +20,22 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * at, but only while holding a stick. Right-clicking with the stick cycles the
  * ring's color through {@link #PALETTE}. Extracts the targeted block + held item
  * each frame; emits the ring as a strip of quads just above the block's top face.
+ *
+ * <p>This is immediate-mode, not retained: there is no persistent ring object.
+ * Each frame is rebuilt from scratch, so the ring "moves" simply because
+ * {@link #extract} reads a new target block, and "disappears" by not emitting.
  */
 public final class BlockTopAnnulusOverlay implements WorldOverlay {
+	// Tuning knobs. SEGMENTS = smoothness; INNER/OUTER_RADIUS = ring thickness;
+	// Y_OFFSET lifts the ring just above the block face to avoid z-fighting with
+	// the top surface; ALPHA = transparency.
 	private static final int SEGMENTS = 64;
 	private static final double INNER_RADIUS = 0.30;
 	private static final double OUTER_RADIUS = 0.45;
 	private static final double Y_OFFSET = 0.01;
 	private static final float ALPHA = 0.85f;
 
+	// The colors the ring cycles through on right-click.
 	private static final float[][] PALETTE = {
 		{1.0f, 0.0f, 0.0f}, // red
 		{0.0f, 1.0f, 0.0f}, // green
@@ -35,6 +43,8 @@ public final class BlockTopAnnulusOverlay implements WorldOverlay {
 		{1.0f, 0.9f, 0.0f}, // yellow
 	};
 
+	// Written on the client tick / extraction path and read on the render thread,
+	// so these must be volatile.
 	private volatile BlockPos target;
 	private volatile boolean holdingStick = false;
 	private volatile int colorIndex = 0;
@@ -64,6 +74,9 @@ public final class BlockTopAnnulusOverlay implements WorldOverlay {
 
 	@Override
 	public void onUseItem(Player player, InteractionHand hand) {
+		// Trigger scope: this fires on any right-click while holding a stick,
+		// including when aimed at interactive blocks (chests, buttons). Narrow
+		// this later if it becomes undesirable.
 		if (player.getItemInHand(hand).is(Items.STICK)) {
 			colorIndex = (colorIndex + 1) % PALETTE.length;
 			player.swing(hand);
@@ -104,6 +117,9 @@ public final class BlockTopAnnulusOverlay implements WorldOverlay {
 			float innerX1 = (float) (centerX + INNER_RADIUS * cos1);
 			float innerZ1 = (float) (centerZ + INNER_RADIUS * sin1);
 
+			// A flat (zero-thickness) shape must be emitted with both windings,
+			// or back-face culling hides it from one side (symptom: the ring is
+			// visible only when viewed from below).
 			// Top-facing winding (visible from above).
 			vertex(buffer, positionMatrix, outerX0, y, outerZ0, red, green, blue);
 			vertex(buffer, positionMatrix, outerX1, y, outerZ1, red, green, blue);

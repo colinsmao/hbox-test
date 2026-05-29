@@ -192,7 +192,13 @@ for end-to-end render smoke tests (run headless in CI with XVFB).
   and low-level rendering contact inside the managers so widgets stay decoupled.
   See **Implemented widgets & rendering gotchas** below.
 
-## Implemented widgets & rendering gotchas
+## Implemented widgets & frameworks
+
+This covers the **overall design philosophy** only. Locally-relevant, file-
+specific gotchas (double-sided winding, immediate-mode rebuild, `volatile`
+render-state fields, the use-key debounce vs. `UseItemCallback`, tuning knobs,
+the through-walls variant, the GPU-cleanup choice) live as **comments in the
+relevant source files**, per the convention below — they are not duplicated here.
 
 ### HUD framework
 
@@ -204,46 +210,16 @@ call `OverlayManager.register(...)` — one line, no Fabric-API contact.
 
 ### In-world framework
 
-`WorldOverlay` has an `extract(...)` (snapshot game state) + `emit(...)` (append
-quads) split, mirroring Mojang's extract/draw phases, plus an `onUseItem(...)`
-hook. `WorldOverlayManager` owns everything Fabric/GPU-related: registers the
-`LevelRenderEvents` phases, owns **one** shared filled `RenderPipeline` +
-`BufferBuilder` so all visible overlays batch into a single draw call, translates
-the pose by `-cameraPos`, handles the `MeshData` → `MappableRingBuffer` → render
-pass GPU handoff, frees GPU resources on
-`ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
-mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on mid-session
-renderer reload), and dispatches `onUseItem` on the use-key rising edge.
-
-### `BlockTopAnnulusOverlay`
-
-- `extract`: read `Minecraft.getInstance().hitResult` (targeted `BlockPos` or
-  `null`) and whether the main hand holds a stick.
-- `isVisible`: true iff a block is targeted **and** a stick is held.
-- `onUseItem`: advance `colorIndex` through `PALETTE` and `player.swing(hand)`.
-- `emit`: build the ring as `SEGMENTS` (64) quads between inner/outer radius in
-  the horizontal plane at `blockTop + Y_OFFSET`, centered on the block.
-
-Gotchas (all the hard-won, non-obvious ones):
-
-- **Immediate-mode, not retained:** no persistent ring object — each frame is
-  rebuilt; the ring "moves"/"disappears" purely by what `extract` reads and
-  whether `emit` runs. The only persistent object is the reused GPU vertex
-  buffer (a scratchpad), not a scene object.
-- **Double-sided:** flat/zero-thickness shapes must emit **both** windings or
-  back-face culling hides them from one side (symptom: visible only from below).
-- **Input debounce:** per-click actions must edge-detect the use key, not use
-  `UseItemCallback` (which re-fires every tick while held — see constraints).
-- **`volatile` mutable state:** `target`, `holdingStick`, `colorIndex` are
-  written on the tick/extract path and read while drawing.
-- **Tuning knobs** (in `BlockTopAnnulusOverlay`): `INNER_RADIUS` /
-  `OUTER_RADIUS` (thickness), `SEGMENTS` (smoothness), `Y_OFFSET` (z-fighting),
-  `ALPHA`, `PALETTE`, and the `Items.STICK` trigger item. For a through-walls
-  variant, add `withDepthStencilState(Optional.empty())` to the pipeline builder
-  in `WorldOverlayManager`.
-- **Trigger scope:** the cycle fires on any right-click while holding a stick,
-  including when aimed at interactive blocks (chests, buttons). Narrow later if
-  undesired.
+`WorldOverlay` splits into `extract(...)` (snapshot game state) + `emit(...)`
+(append quads), mirroring Mojang's extract/draw phases, plus an `onUseItem(...)`
+hook. The model is **immediate-mode** (geometry is rebuilt every frame), not
+retained. `WorldOverlayManager` owns everything Fabric/GPU-related — the
+`LevelRenderEvents` phases, a single shared filled `RenderPipeline` +
+`BufferBuilder` (so all visible overlays batch into one draw call), the
+`MeshData` → `MappableRingBuffer` → render-pass GPU handoff, and the use-key
+rising-edge dispatch — so widgets stay decoupled and rendering churn touches one
+file. `BlockTopAnnulusOverlay` is the demo widget (a ring on the targeted
+block's top face, gated on a held stick, right-click to cycle color).
 
 ## Future work / roadmap
 
@@ -265,7 +241,16 @@ The frameworks above are designed to make these incremental:
 
 - Package base: `com.example.overlay` (mod id `overlay`). If the user provides a
   real maven group / mod id / author, update this file and code consistently.
-- Don't add code comments that merely narrate what the code does.
+- **Gotcha placement:** locally-relevant, file-specific gotchas belong as
+  comments in the relevant source file, right next to the code they explain —
+  **not** in this doc. Reserve `AGENTS.md` for *general* gotchas that reflect
+  overall design philosophy (e.g. the cross-cutting rules in **Key technical
+  constraints**). When you discover a new non-obvious gotcha, decide: is it
+  specific to one file/widget (→ code comment) or a project-wide design rule
+  (→ `AGENTS.md`)?
+- Don't add code comments that merely narrate what the code does; comments
+  should explain non-obvious intent, trade-offs, or constraints (i.e. the
+  gotchas above), not restate the code.
 - Don't introduce third-party rendering libraries. The rendering API churns
   every MC version, so a thin in-house abstraction (the managers) is more stable
   than depending on a library that must also track the churn.
