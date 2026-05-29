@@ -9,8 +9,10 @@ A minimal, **client-side graphics overlay** mod for Minecraft, built on the
 (Milestone 1) and **in the world** (Milestone 2), with small parallel
 frameworks so more overlay widgets are easy to add.
 
-**This file (`AGENTS.md`) is the durable source of truth** for scope,
-architecture, versions, constraints, and the build/test process — read it first.
+**Read `AGENTS.md` first** — it holds the always-relevant essentials (scope,
+layout, versions, build/test, project-wide constraints, conventions). Deep,
+subsystem-specific detail lives in focused guides under **`docs/`** (see
+**Subsystem guides**); read the relevant one only when working in that area.
 **[PLAN.md](PLAN.md)** is reserved for the *current short-term plan* (e.g.
 produced in planning mode) and is often empty between tasks; do not put durable
 project knowledge there.
@@ -29,8 +31,8 @@ generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
   block under the crosshair, shown only while holding a stick, with right-click
   cycling its color (one step per click, with an arm-swing). Built on
   `WorldOverlay` / `WorldOverlayManager` + `LevelRenderEvents`, with a use-key
-  rising-edge dispatch for the color cycle. See **Implemented widgets &
-  rendering gotchas** below.
+  rising-edge dispatch for the color cycle. See
+  [`docs/rendering.md`](docs/rendering.md).
 
 ## Repository layout
 
@@ -145,85 +147,39 @@ for end-to-end render smoke tests (run headless in CI with XVFB).
   4. No errors on world load/unload or window resize.
   5. The mod does nothing on a dedicated server.
 
-## Key technical constraints
+## Key constraints (all work)
 
-- **Client-only.** The mod must never be required on a server. Use
+These apply to **any** feature, so they live here rather than in a subsystem
+guide.
+
+- **Client-only.** The mod must never be required on a server: keep
   `"environment": "client"` in `fabric.mod.json`, declare only a `client`
   entrypoint, and put client code in the Loom `client` source set
-  (`splitEnvironmentSourceSets()`).
-- **HUD rendering API:** use the current **`HudElementRegistry`** API. The
-  legacy `HudRenderCallback` is **deprecated (Fabric API 0.116+) — do not use
-  it.** Attach relative to `VanillaHudElements` (e.g. `attachElementBefore(...,
-  VanillaHudElements.CHAT, ...)`) so the overlay inherits the vanilla "hide HUD"
-  (F1) render condition.
-- **Stay high-level where possible:** for the HUD, draw via the draw context
-  (`fill`, `text`). For arbitrary **in-world** geometry there is no high-level
-  path in `26.1.2` — Mojang's extract/draw migration means you must build a
-  `BufferBuilder` and upload it through a `RenderPipeline` yourself. Keep that
-  low-level `RenderSystem`/GPU code quarantined in `WorldOverlayManager` so
-  churn touches one file (see the in-world API note below).
-- **In-world rendering API (`26.1.2`):** rendering is split into an
-  **extraction** phase and a **drawing** phase. Register
-  `LevelRenderEvents.END_EXTRACTION` (read game state into immutable render
-  state) and `LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN` (emit geometry); the
-  drawing context is `LevelRenderContext` (`poseStack()`,
-  `levelState().cameraRenderState.pos`). Translate vertices by `-cameraPos` so
-  world coords are camera-relative. Reuse a vanilla pipeline base
-  (`RenderPipelines.DEBUG_FILLED_SNIPPET`, `QUADS` + `POSITION_COLOR`); only go
-  fully custom for effects vanilla can't do (e.g. through-walls via
-  `withDepthStencilState(Optional.empty())`). Flat/zero-thickness shapes must be
-  **double-sided** (emit both windings) or back-face culling hides them from one
-  side. The legacy `WorldRenderEvents` vertex-consumer path is **gone** here.
-- **Per-click input:** to act once per right-click, edge-detect the use key
-  (`ClientTickEvents.END_CLIENT_TICK` watching `options.keyUse.isDown()`), not
-  `UseItemCallback` — that event re-fires every tick while the button is held
-  for items with no use cooldown (e.g. a stick), causing spam.
-- **`26.1.2` API renames (verified against the resolved jars):** the draw
-  context is **`net.minecraft.client.gui.GuiGraphicsExtractor`** (not
-  `GuiGraphics`); text is drawn with **`text(Font, String, x, y, color,
-  dropShadow)`** (not `drawTextWithShadow`/`drawString`); and identifiers are
-  **`net.minecraft.resources.Identifier`** via
-  `Identifier.fromNamespaceAndPath(...)` (not `ResourceLocation`). The
-  `HudElement` functional method is `extractRenderState(GuiGraphicsExtractor,
-  DeltaTracker)`.
-- **Extension framework:** HUD widgets implement `Overlay` and register via
-  `OverlayManager`; in-world widgets implement `WorldOverlay` (an `extract` +
-  an `emit` method) and register via `WorldOverlayManager`. Keep all Fabric-API
-  and low-level rendering contact inside the managers so widgets stay decoupled.
-  See **Implemented widgets & rendering gotchas** below.
+  (`splitEnvironmentSourceSets()`). This holds for *any* feature, including a
+  future settings screen.
+- **`26.1.2` ≠ `1.21.x`.** Class/package/API names often differ from what you
+  remember (e.g. `Identifier`, not `ResourceLocation`). Verify names against the
+  resolved jars and live docs (see the version note above) — the compiler is the
+  oracle, not training data.
+- **No third-party rendering libraries** — a thin in-house abstraction is more
+  stable than a dependency that must also chase the API churn (see
+  `docs/rendering.md`).
 
-## Implemented widgets & frameworks
+## Subsystem guides
 
-This covers the **overall design philosophy** only. Locally-relevant, file-
-specific gotchas (double-sided winding, immediate-mode rebuild, `volatile`
-render-state fields, the use-key debounce vs. `UseItemCallback`, tuning knobs,
-the through-walls variant, the GPU-cleanup choice) live as **comments in the
-relevant source files**, per the convention below — they are not duplicated here.
+Subsystem-specific depth lives in its own doc so this file stays lean and
+broadly relevant — an agent working on, say, a settings GUI should not have to
+read the rendering internals. Read the relevant guide **before** touching that
+area; add a new guide here as the project grows.
 
-### HUD framework
-
-`Overlay` is a small interface (`id()`, `render(GuiGraphicsExtractor,
-DeltaTracker)`, `isVisible()`). `OverlayManager.bootstrap()` registers built-in
-widgets and attaches a **single** root HUD element via `HudElementRegistry`
-whose render iterates visible overlays. New HUD widgets implement `Overlay` and
-call `OverlayManager.register(...)` — one line, no Fabric-API contact.
-
-### In-world framework
-
-`WorldOverlay` splits into `extract(...)` (snapshot game state) + `emit(...)`
-(append quads), mirroring Mojang's extract/draw phases, plus an `onUseItem(...)`
-hook. The model is **immediate-mode** (geometry is rebuilt every frame), not
-retained. `WorldOverlayManager` owns everything Fabric/GPU-related — the
-`LevelRenderEvents` phases, a single shared filled `RenderPipeline` +
-`BufferBuilder` (so all visible overlays batch into one draw call), the
-`MeshData` → `MappableRingBuffer` → render-pass GPU handoff, and the use-key
-rising-edge dispatch — so widgets stay decoupled and rendering churn touches one
-file. `BlockTopAnnulusOverlay` is the demo widget (a ring on the targeted
-block's top face, gated on a held stick, right-click to cycle color).
+- **Rendering (HUD + in-world):** [`docs/rendering.md`](docs/rendering.md) — the
+  HUD/world render APIs, the `Overlay` / `WorldOverlay` frameworks, `26.1.2`
+  rendering class names, and pointers to the file-specific gotchas in the code.
 
 ## Future work / roadmap
 
-The frameworks above are designed to make these incremental:
+The overlay frameworks (see `docs/rendering.md`) are designed to make these
+incremental:
 
 - **Configuration:** a JSON config (later a Cloth Config / ModMenu screen) to
   toggle individual overlays and set position/scale.
@@ -241,19 +197,20 @@ The frameworks above are designed to make these incremental:
 
 - Package base: `com.example.overlay` (mod id `overlay`). If the user provides a
   real maven group / mod id / author, update this file and code consistently.
-- **Gotcha placement:** locally-relevant, file-specific gotchas belong as
-  comments in the relevant source file, right next to the code they explain —
-  **not** in this doc. Reserve `AGENTS.md` for *general* gotchas that reflect
-  overall design philosophy (e.g. the cross-cutting rules in **Key technical
-  constraints**). When you discover a new non-obvious gotcha, decide: is it
-  specific to one file/widget (→ code comment) or a project-wide design rule
-  (→ `AGENTS.md`)?
+- **Where knowledge goes (keep `AGENTS.md` lean):** when you learn something
+  non-obvious, place it by scope —
+  - specific to one file/widget → a **code comment** next to the code;
+  - specific to one subsystem → that subsystem's guide under **`docs/`**
+    (e.g. `docs/rendering.md`);
+  - a project-wide rule that applies to *any* task → **`AGENTS.md`** (under
+    **Key constraints**).
+
+  Don't put subsystem implementation detail (render pipelines, GUI widget APIs,
+  etc.) in `AGENTS.md`; a future agent working on an unrelated area shouldn't
+  have to read it.
 - Don't add code comments that merely narrate what the code does; comments
-  should explain non-obvious intent, trade-offs, or constraints (i.e. the
-  gotchas above), not restate the code.
-- Don't introduce third-party rendering libraries. The rendering API churns
-  every MC version, so a thin in-house abstraction (the managers) is more stable
-  than depending on a library that must also track the churn.
+  should explain non-obvious intent, trade-offs, or constraints, not restate the
+  code.
 
 ## Git / workflow
 
