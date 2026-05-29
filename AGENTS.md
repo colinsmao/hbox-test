@@ -197,6 +197,14 @@ incremental:
 
 - Package base: `com.example.overlay` (mod id `overlay`). If the user provides a
   real maven group / mod id / author, update this file and code consistently.
+- **Keep the docs current — every session (≈ every PR) updates documentation.**
+  Treat doc upkeep as part of the work, not an afterthought: whenever a change
+  alters behavior, architecture, status, constraints, versions, or adds a
+  non-obvious gotcha, update the relevant docs **in the same PR** so the next
+  agent inherits accurate knowledge. Typical updates: bump **Current status** /
+  **Future work** here, refresh the affected **`docs/<subsystem>.md`** guide, add
+  **code comments** for file-level gotchas, and clear/refresh **`PLAN.md`**.
+  Reviewing the docs for staleness should be a normal step before opening a PR.
 - **Where knowledge goes (keep `AGENTS.md` lean):** when you learn something
   non-obvious, place it by scope —
   - specific to one file/widget → a **code comment** next to the code;
@@ -220,3 +228,7 @@ incremental:
   amend unless asked.
 - After pushing, open/update a PR against `main`.
 - Verify `./gradlew build` passes before considering a code change complete.
+- Before opening/updating the PR, update the relevant documentation in the same
+  PR (see **Conventions → Keep the docs current**): `AGENTS.md` status/constraints,
+  the affected `docs/<subsystem>.md`, code comments, and `PLAN.md`. A PR that
+  changes behavior or architecture but leaves the docs stale is incomplete.
