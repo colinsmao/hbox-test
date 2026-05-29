@@ -50,6 +50,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 public final class WorldOverlayManager {
 	private static final List<WorldOverlay> OVERLAYS = new ArrayList<>();
 
+	// Reuses vanilla's filled debug pipeline (QUADS + POSITION_COLOR). For a
+	// through-walls variant, add .withDepthStencilState(Optional.empty()) here.
 	private static final RenderPipeline FILLED = RenderPipelines.register(
 		RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
 			.withLocation(Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "pipeline/world_overlay_filled"))
@@ -74,12 +76,16 @@ public final class WorldOverlayManager {
 
 		LevelRenderEvents.END_EXTRACTION.register(WorldOverlayManager::extract);
 		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
+		// Free GPU resources at shutdown. We use CLIENT_STOPPING rather than a
+		// GameRenderer#close mixin to avoid mixin plumbing; trade-off: buffers
+		// are freed at shutdown, not on a mid-session renderer reload.
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> close());
 		ClientTickEvents.END_CLIENT_TICK.register(WorldOverlayManager::onClientTick);
 	}
 
-	// Dispatch a use only on the rising edge of the "use item" key, so holding
-	// the button does not spam (a stick has no use cooldown to throttle it).
+	// Dispatch a use only on the rising edge of the "use item" key, so holding the
+	// button does not spam. Deliberately not Fabric's UseItemCallback: that
+	// re-fires every tick while held for items with no use cooldown (e.g. a stick).
 	private static void onClientTick(Minecraft client) {
 		boolean down = client.screen == null && client.options.keyUse.isDown();
 		if (down && !usePressedLastTick && client.player != null) {
@@ -114,6 +120,8 @@ public final class WorldOverlayManager {
 		PoseStack matrices = context.poseStack();
 		Vec3 camera = context.levelState().cameraRenderState.pos;
 
+		// Overlays emit vertices in absolute world coords; translate by -camera
+		// to make them camera-relative, matching the world renderer.
 		matrices.pushPose();
 		matrices.translate(-camera.x, -camera.y, -camera.z);
 
