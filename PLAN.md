@@ -2,35 +2,41 @@
 
 This document is the implementation plan for a minimal, client-side graphics
 overlay mod for Minecraft, built on the [Fabric](https://fabricmc.net/)
-toolchain. The goal of the first milestone is intentionally small: a mod that
-loads cleanly under Fabric and draws something on the in-game HUD. Everything
-else in this plan exists to make that first milestone trivially extensible into
-a real overlay mod later.
+toolchain. Milestone 1 is intentionally small: a mod that loads cleanly under
+Fabric and draws something on the in-game HUD. Milestone 2 extends this to
+**in-world** rendering (drawing geometry in the 3D scene rather than on the
+HUD). Everything else in this plan exists to make these milestones trivially
+extensible into a real overlay mod later.
+
+> **Status:** Milestones 1 and 2 implemented and building. See §11 for the
+> in-world rendering work.
 
 ---
 
 ## 1. Goals and non-goals
 
-### Goals (Milestone 1 — "it loads and draws")
+### Goals
 
-- A buildable Fabric mod that produces a `.jar` consumable by the standard
-  Fabric Loader.
-- Client-side only: the mod must never be required on a server and must not
-  affect gameplay state.
-- Renders a single, obvious overlay element on the HUD (a colored box plus a
-  text label) to prove the rendering path works end-to-end.
-- Reproducible setup: anyone can clone, build, and launch the dev client with a
-  single Gradle command.
-- A clean extension framework so future overlay widgets can be added without
-  touching the bootstrap/registration plumbing.
+- A buildable, client-only Fabric mod that produces a `.jar` consumable by the
+  standard Fabric Loader; never required on a server, never affects gameplay
+  state.
+- **Milestone 1 (done):** render an obvious element on the **HUD** (a colored
+  box + label) to prove the screen-space path end-to-end.
+- **Milestone 2 (done):** render geometry **in the world** (a red ring on the
+  targeted block's top face) to prove the 3D path end-to-end. See §11.
+- Reproducible setup: clone, build, and launch the dev client with a single
+  Gradle command.
+- Clean extension frameworks (HUD + in-world) so new widgets are added without
+  touching the bootstrap/registration/GPU plumbing.
 
-### Non-goals (for Milestone 1)
+### Non-goals (for now)
 
 - No configuration UI, keybinds, or persistence yet (designed for, but not
   built).
 - No server-side logic, networking, or mixins into gameplay.
-- No third-party rendering libraries — we use only the Fabric HUD API and
-  vanilla `GuiGraphics`.
+- No third-party rendering libraries — the rendering API churns every MC
+  version, so a thin in-house abstraction is more stable than a dependency that
+  must also track the churn.
 - No publishing to Modrinth/CurseForge yet.
 
 ---
@@ -46,53 +52,42 @@ time, since they move quickly.
 | Minecraft        | `26.1.2`           | Target game version.                             |
 | Fabric Loader    | `0.19.2`           | Runtime mod loader.                              |
 | Fabric Loom      | `1.16-SNAPSHOT`    | Gradle build plugin.                             |
-| Fabric API       | `0.149.1+26.1.2`   | Provides the HUD rendering API.                  |
+| Fabric API       | `0.149.1+26.1.2`   | Rendering APIs (HUD + in-world).                 |
 | Java (JDK)       | `25`               | Required by this Minecraft version.              |
 | Gradle           | Wrapper-pinned     | Use the `gradlew` shipped with the template.     |
 
-> Note: Minecraft's modern versioning has shifted to a `YY.major.minor` scheme
-> (e.g. `26.1.2`). If targeting an older 1.21.x release instead, drop the JDK
-> requirement to 21 and adjust the Fabric API/Loom versions accordingly.
+> **Year-based versioning.** Since `1.21.11`, Minecraft uses a `YY.major.minor`
+> scheme; `26.1.2` is a **real, current** release (the 2026.1 line), **not** an
+> alias for `1.21.x`. Do not "correct" it back to the old scheme. (If you ever
+> deliberately target an older `1.21.x` build, drop the JDK to 21 and adjust the
+> Fabric API/Loom versions.)
+
+> **Verify against live sources, not memory.** `26.1.2` postdates most models'
+> training cutoffs and its rendering API churns hard, so class/package names
+> often differ from `1.21.x`. Confirm against the current docs
+> (<https://docs.fabricmc.net/develop>, version selector set to `26.1.2`), the
+> Fabric API javadocs (<https://maven.fabricmc.net/docs>), and the resolved jars
+> (the compiler is the most reliable oracle).
 
 ---
 
-## 3. Rendering approach
+## 3. HUD rendering approach (Milestone 1 — done)
 
-Fabric's HUD rendering API was rewritten in the 1.21.6 era. The legacy
-`HudRenderCallback` is **deprecated since Fabric API 0.116 and must not be
-used**. We will use the current **`HudElementRegistry`** API.
+> Implemented; kept as a brief reference. For in-world rendering see §11.
 
-Key facts that shape our design:
+The HUD path uses the current **`HudElementRegistry`** API (the legacy
+`HudRenderCallback` is deprecated since Fabric API 0.116 — do not use it). Key
+facts:
 
-- Each overlay is a `HudElement` — effectively a lambda receiving the draw
-  context and a `DeltaTracker` (partial-tick info). In Minecraft `26.1.2` the
-  `HudElement` functional method is
-  `extractRenderState(GuiGraphicsExtractor, DeltaTracker)`; `GuiGraphicsExtractor`
-  is this version's name for the old `GuiGraphics` draw context.
-- Elements are attached relative to vanilla HUD elements (`VanillaHudElements`),
-  e.g. `attachElementBefore(VanillaHudElements.CHAT, id, element)`, or to the
-  global extremes via `addFirst` / `addLast`.
-- Elements attached relative to a vanilla element inherit that element's render
-  condition (most respect the "hide HUD" / F1 option). `addFirst`/`addLast` do
-  not inherit any render condition.
-- For animations, use `Util.getMillis()` for real-time effects and the
-  `DeltaTracker` partial tick only when the animation must track game ticks.
-
-Reference skeleton (the actual entrypoint we will implement):
-
-```java
-public final class OverlayClient implements ClientModInitializer {
-    @Override
-    public void onInitializeClient() {
-        OverlayManager.bootstrap(); // registers built-in widgets
-        HudElementRegistry.attachElementBefore(
-            VanillaHudElements.CHAT,
-            Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "overlay_root"),
-            OverlayManager::render
-        );
-    }
-}
-```
+- An overlay is a `HudElement`; in `26.1.2` its functional method is
+  `extractRenderState(GuiGraphicsExtractor, DeltaTracker)` (`GuiGraphicsExtractor`
+  is this version's `GuiGraphics`).
+- Attach relative to a `VanillaHudElements` element (e.g.
+  `attachElementBefore(VanillaHudElements.CHAT, id, element)`) so the overlay
+  inherits that element's render condition (respects F1). `addFirst`/`addLast`
+  do not inherit one.
+- `OverlayClient#onInitializeClient` calls `OverlayManager.bootstrap()` and
+  attaches a single root HUD element whose render dispatches to all widgets.
 
 ---
 
@@ -115,10 +110,13 @@ Target layout:
     │   └── OverlayMod.java                  # shared constants (MOD_ID, logger)
     ├── client/java/com/example/overlay/client/
     │   ├── OverlayClient.java               # ClientModInitializer entrypoint
-    │   ├── OverlayManager.java              # registry + render dispatch
-    │   ├── Overlay.java                     # interface for a drawable widget
+    │   ├── OverlayManager.java              # HUD registry + render dispatch
+    │   ├── Overlay.java                     # interface for a HUD widget
+    │   ├── WorldOverlayManager.java         # in-world registry + GPU plumbing (§11)
+    │   ├── WorldOverlay.java                # interface for an in-world widget (§11)
     │   └── widgets/
-    │       └── HelloOverlay.java            # the demo box + label
+    │       ├── HelloOverlay.java            # demo HUD box + label
+    │       └── BlockTopAnnulusOverlay.java  # red ring on targeted block top (§11)
     ├── main/resources/
     │   └── fabric.mod.json
     └── client/resources/
@@ -156,54 +154,25 @@ API contact in one place; future widgets only implement `Overlay` and call
 
 ## 5. `fabric.mod.json` essentials
 
-Client-only declaration with the client entrypoint wired up:
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "overlay",
-  "version": "${version}",
-  "name": "Graphics Overlay",
-  "environment": "client",
-  "entrypoints": {
-    "client": ["com.example.overlay.client.OverlayClient"]
-  },
-  "depends": {
-    "fabricloader": ">=0.19.2",
-    "minecraft": "~26.1.2",
-    "java": ">=25",
-    "fabric-api": "*"
-  }
-}
-```
-
-`"environment": "client"` and only declaring a `client` entrypoint guarantees
-the mod is irrelevant server-side.
+Client-only: set `"environment": "client"` and declare **only** a `client`
+entrypoint (`com.example.overlay.client.OverlayClient`) so the mod is irrelevant
+server-side. Depends on `fabricloader >=0.19.2`, `minecraft ~26.1.2`,
+`java >=25`, and `fabric-api`. See `src/main/resources/fabric.mod.json` for the
+live file.
 
 ---
 
-## 6. Implementation steps
+## 6. Scaffolding notes (Milestone 1 — done)
 
-1. **Scaffold** the project from the Fabric template; set `mod_version`,
-   `maven_group=com.example`, and `archives_base_name=graphics-overlay` in
-   `gradle.properties`. Do **not** add a `mappings` line to `build.gradle`:
-   Minecraft `26.1.2` ships non-obfuscated and Loom rejects explicit mappings
-   ("Cannot use Mojang mappings in a non-obfuscated environment").
-2. **Trim to client-only**: remove the server/`main` entrypoint and gameplay
-   sample code; keep `OverlayMod` (constants/logger) in `main` so both source
-   sets can share it.
-3. **Add the framework**: create `Overlay`, `OverlayManager`, and
-   `OverlayClient`.
-4. **Implement `HelloOverlay`**: draw a filled rectangle with `graphics.fill(...)`
-   and a label with `graphics.text(font, label, x, y, color, true)` (the `true`
-   enables the drop shadow) near a fixed screen corner (top-left, with a margin),
-   pulling the font from the running client (`Minecraft.getInstance().font`).
-5. **Wire registration**: `OverlayClient#onInitializeClient` calls
-   `OverlayManager.bootstrap()` (which registers `HelloOverlay`) and attaches the
-   root HUD element via `HudElementRegistry`.
-6. **Write `fabric.mod.json`** per section 5.
-7. **Build & run** the dev client (see section 7).
-8. **Iterate** on positioning/colors until the overlay is clearly visible.
+The project was generated from `FabricMC/fabric-example-mod`, trimmed to
+client-only, and the HUD framework + `HelloOverlay` added. Two gotchas worth
+remembering:
+
+- Do **not** add a `mappings` line to `build.gradle` — `26.1.2` ships
+  non-obfuscated and Loom rejects explicit mappings ("Cannot use Mojang mappings
+  in a non-obfuscated environment").
+- Keep `OverlayMod` (constants/logger) in the `main` source set so both `main`
+  and `client` can share it; everything else is client-only.
 
 ---
 
@@ -257,12 +226,16 @@ gating with a short manual checklist.
   overlay values) using JUnit 5 in the `test` source set. The Milestone 1 demo
   has little testable logic, but the framework should not block adding tests.
 
-### Manual acceptance checklist (Milestone 1)
+### Manual acceptance checklist
 
 1. `./gradlew runClient` launches without errors in the log.
-2. Enter a world; the overlay box + label is visible at the chosen corner.
-3. Pressing F1 (hide HUD) also hides the overlay (confirms it inherits the
-   vanilla render condition when attached relative to `VanillaHudElements`).
+2. **HUD:** enter a world; the overlay box + label is visible at the chosen
+   corner, and pressing F1 (hide HUD) hides it.
+3. **In-world:** while holding a stick, look at a block; a ring sits flat on its
+   top face, tracks the crosshair to new blocks, and disappears when looking at
+   no block or when not holding a stick. It is visible from above and below
+   (double-sided), without bad z-fighting. Right-clicking the stick advances the
+   color exactly one step per click (holding does not spam) and swings the arm.
 4. No errors are logged on world load/unload or on resizing the window.
 5. The mod does nothing when placed on a dedicated server (server starts and
    runs normally / refuses to require the mod).
@@ -275,8 +248,9 @@ gating with a short manual checklist.
   a Cloth Config / ModMenu screen) to toggle individual overlays and set
   position/scale.
 - **Keybinds**: use Fabric's `KeyBindingHelper` to toggle the overlay on/off.
-- **More widgets**: FPS/coords/biome readouts, a ping/latency widget, a
-  customizable text HUD — each is a new `Overlay` implementation.
+- **More widgets**: HUD readouts (FPS/coords/biome, ping) as new `Overlay`
+  implementations; in-world markers (block/entity highlights, waypoints) as new
+  `WorldOverlay` implementations.
 - **Anchored layout system**: corner/anchor + offset model so widgets can be
   positioned consistently across resolutions and GUI scales.
 - **Data sources**: a small polling/event layer so widgets can subscribe to
@@ -288,12 +262,16 @@ gating with a short manual checklist.
 
 ## 10. Risks and notes
 
-- **Fast-moving API**: the HUD API was rewritten recently; always confirm
-  versions at <https://fabricmc.net/develop> before building, and prefer
-  `HudElementRegistry` over the deprecated `HudRenderCallback`.
+- **Fast-moving API**: both the HUD and world render APIs were rewritten
+  recently; always confirm versions/APIs against live docs and the resolved jars
+  before building. Prefer `HudElementRegistry` (not the deprecated
+  `HudRenderCallback`) and `LevelRenderEvents` (not the removed
+  `WorldRenderEvents`).
 - **Rendering pipeline migration**: Mojang is splitting rendering into extract
-  and draw phases. Sticking to high-level `GuiGraphics` calls (`fill`,
-  `drawTextWithShadow`) keeps us insulated from low-level `RenderSystem` churn.
+  and draw phases. The HUD stays high-level (`fill`, `text`), but **arbitrary
+  in-world geometry has no high-level path** — it requires `BufferBuilder` +
+  `RenderPipeline` + manual GPU upload. Quarantine that low-level
+  `RenderSystem`/GPU code in `WorldOverlayManager` so churn touches one file.
 - **Java version coupling**: this Minecraft version requires JDK 25; mismatched
   JDKs are the most common setup failure — document and check it first.
 - **Non-obfuscated mappings**: MC `26.1.2` is distributed non-obfuscated, so
@@ -302,3 +280,112 @@ gating with a short manual checklist.
   `GuiGraphics`) and identifiers use `net.minecraft.resources.Identifier` (was
   `ResourceLocation`); confirm names against the resolved jars if a future
   version churns them again.
+
+---
+
+## 11. Milestone 2 — in-world rendering
+
+Milestone 2 moves from screen-space (HUD) rendering to **in-world** rendering:
+drawing geometry positioned in the 3D scene. The first widget draws an
+**annulus (ring) flat on the top face of the block the player is looking at**,
+shown **only while holding a stick**; **right-clicking with the stick cycles its
+color** (and plays the arm-swing use animation).
+
+### Why this needs a different path
+
+The HUD path (`HudElementRegistry` + `GuiGraphicsExtractor`) only draws in
+screen space. In-world geometry uses Minecraft's world render loop, which in
+`26.1.2` is split into two phases (Mojang's extract/draw migration):
+
+- **Extraction phase** — gather the (mutable) game state you need and store it
+  as an immutable, thread-safe snapshot ("render state").
+- **Drawing phase** — turn that snapshot into vertices and submit them.
+
+The legacy `WorldRenderEvents` vertex-consumer route is **gone** in this
+version. There is no high-level "draw a shape in the world" call for arbitrary
+geometry; you build a `BufferBuilder` and upload it through a `RenderPipeline`
+yourself. (Boxes/lines/labels can still use vanilla `DebugRenderer`, but a
+filled ring is not expressible there.)
+
+### The in-world framework
+
+Mirrors the HUD framework so widgets stay one-method-simple and all volatile
+rendering code lives in one place:
+
+```java
+public interface WorldOverlay {
+    String id();
+    void extract(LevelExtractionContext context);          // snapshot game state
+    void emit(Matrix4fc positionMatrix, BufferBuilder buffer); // append quads
+    default boolean isVisible() { return true; }
+    default void onUseItem(Player player, InteractionHand hand) {} // right-click hook
+}
+```
+
+`WorldOverlayManager` owns everything Fabric/GPU-related:
+
+- Registers `LevelRenderEvents.END_EXTRACTION` → dispatches `extract(...)` to
+  every overlay, and `LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN` → dispatches
+  the drawing phase.
+- Owns **one** shared filled `RenderPipeline` (built from
+  `RenderPipelines.DEBUG_FILLED_SNIPPET`, `QUADS` + `POSITION_COLOR`) and a
+  shared `BufferBuilder`, so every visible overlay batches into a **single**
+  draw call per frame.
+- Translates the pose by `-cameraPos` (vertices are submitted in absolute world
+  coordinates, made camera-relative for consistency with the world renderer).
+- Handles the GPU handoff: build `MeshData`, upload into a reused/resized
+  `MappableRingBuffer`, draw via a render pass, then rotate the buffer.
+- Frees GPU resources on `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a
+  `GameRenderer#close` mixin to avoid adding mixin plumbing this milestone;
+  trade-off: buffers are freed at shutdown, not on mid-session renderer reload).
+- Dispatches `onUseItem(...)` on the **rising edge** of the use key. A
+  `ClientTickEvents.END_CLIENT_TICK` handler watches `options.keyUse.isDown()`
+  and fires only on the up→down transition. This was deliberately **not** done
+  with Fabric's `UseItemCallback`: that event re-fires every tick while the
+  button is held (a stick has no use cooldown to throttle it), which
+  spam-cycled the color. Edge detection gives exactly one cycle per click.
+
+### The annulus widget (`BlockTopAnnulusOverlay`)
+
+- `extract`: read `Minecraft.getInstance().hitResult` (store the targeted
+  `BlockPos`, else `null`) and whether the main hand holds a stick
+  (`player.getMainHandItem().is(Items.STICK)`).
+- `isVisible`: true iff a block is targeted **and** a stick is held.
+- `onUseItem`: if the used hand holds a stick, advance `colorIndex` through
+  `PALETTE` and call `player.swing(hand)` for the use animation.
+- `emit`: build the ring as `SEGMENTS` (64) quads between an inner and outer
+  radius, in the horizontal plane at `blockTop + small offset` (avoids
+  z-fighting), centered on the block (`x+0.5`, `z+0.5`), colored by the current
+  palette entry.
+
+### Rendering model & gotchas
+
+- **Immediate-mode, not retained:** there is no persistent ring object. Each
+  frame is rebuilt from scratch; the ring "moves" because `extract` reads a new
+  block, and "disappears" by simply not being emitted. The only persistent
+  object is the reused GPU vertex buffer (a scratchpad, fully overwritten each
+  frame), not a scene object.
+- **Double-sided:** flat/zero-thickness shapes must emit **both** windings, or
+  back-face culling hides the ring from one side (symptom: it only appears when
+  viewed from below). `BlockTopAnnulusOverlay.emit` emits each quad twice.
+- **Input debounce:** use repeated-fire (holding a button) must be debounced via
+  use-key edge detection, not the per-tick `UseItemCallback` (see the manager
+  bullet above). `usePressedLastTick` holds the previous state.
+- **Mutable state is `volatile`:** `target`, `holdingStick`, and `colorIndex` are
+  written on the client tick/extraction path and read during drawing, so they
+  are `volatile`.
+- **Build vs runtime:** `./gradlew build` only proves it compiles. Winding,
+  culling, depth/z-fighting, visibility, the once-per-click cycle, and the swing
+  animation are runtime-only — verify with `./gradlew runClient`.
+
+### Tuning knobs
+
+In `BlockTopAnnulusOverlay`: `INNER_RADIUS` / `OUTER_RADIUS` (ring thickness),
+`SEGMENTS` (smoothness), `Y_OFFSET` (z-fighting), `ALPHA`, and the `PALETTE`
+colors (and the `Items.STICK` trigger item). For a through-walls variant, add
+`withDepthStencilState(Optional.empty())` to the pipeline builder in
+`WorldOverlayManager`.
+
+> **Trigger scope:** because the cycle is driven by the use key (not the item-use
+> event), it fires on any right-click while holding a stick, including when aimed
+> at interactive blocks (chests, buttons). Narrow this later if undesired.
