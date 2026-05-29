@@ -12,6 +12,7 @@ public final class OverlayClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		OverlayManager.bootstrap();
+		WorldOverlayManager.bootstrap();
 		HudElementRegistry.attachElementBefore(
 			VanillaHudElements.CHAT,
 			Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "overlay_root"),

@@ -1,16 +1,20 @@
 # Graphics Overlay (Fabric Mod)
 
 A minimal, client-side graphics overlay mod for Minecraft built on the
-[Fabric](https://fabricmc.net/) toolchain. The first milestone is a mod that
-loads under Fabric and draws a simple element on the in-game HUD, with a small
-framework that makes adding more overlay widgets easy.
+[Fabric](https://fabricmc.net/) toolchain. It draws both on the in-game HUD and
+in the 3D world, with small frameworks that make adding more overlay widgets
+easy.
 
 ## Status
 
-Milestone 1 done: the mod builds and runs. `./gradlew build` produces
+Milestones 1 and 2 done: the mod builds and runs. `./gradlew build` produces
 `build/libs/graphics-overlay-1.0.0.jar`, and `./gradlew runClient` launches a dev
-client that draws a demo overlay (a box + "Graphics Overlay" label) in the
-top-left of the HUD, which hides when you press F1.
+client that draws:
+
+- **HUD (Milestone 1):** a demo overlay (a box + "Graphics Overlay" label) in
+  the top-left of the HUD, which hides when you press F1.
+- **In-world (Milestone 2):** a red ring (annulus) flat on the top face of the
+  block under your crosshair.
 
 See **[PLAN.md](PLAN.md)** for the full design: target versions, project
 structure, the overlay framework, and build / install / test instructions.
