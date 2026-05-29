@@ -231,9 +231,11 @@ gating with a short manual checklist.
 1. `./gradlew runClient` launches without errors in the log.
 2. **HUD:** enter a world; the overlay box + label is visible at the chosen
    corner, and pressing F1 (hide HUD) hides it.
-3. **In-world:** look at a block; a red ring sits flat on its top face, tracks
-   the crosshair to new blocks, and disappears when looking at no block. It is
-   visible from above and below (double-sided), without bad z-fighting.
+3. **In-world:** while holding a stick, look at a block; a ring sits flat on its
+   top face, tracks the crosshair to new blocks, and disappears when looking at
+   no block or when not holding a stick. It is visible from above and below
+   (double-sided), without bad z-fighting. Right-clicking the stick advances the
+   color exactly one step per click (holding does not spam) and swings the arm.
 4. No errors are logged on world load/unload or on resizing the window.
 5. The mod does nothing when placed on a dedicated server (server starts and
    runs normally / refuses to require the mod).
@@ -284,8 +286,10 @@ gating with a short manual checklist.
 ## 11. Milestone 2 — in-world rendering
 
 Milestone 2 moves from screen-space (HUD) rendering to **in-world** rendering:
-drawing geometry positioned in the 3D scene. The first widget draws a **red
-annulus (ring) flat on the top face of the block the player is looking at**.
+drawing geometry positioned in the 3D scene. The first widget draws an
+**annulus (ring) flat on the top face of the block the player is looking at**,
+shown **only while holding a stick**; **right-clicking with the stick cycles its
+color** (and plays the arm-swing use animation).
 
 ### Why this needs a different path
 
@@ -314,6 +318,7 @@ public interface WorldOverlay {
     void extract(LevelExtractionContext context);          // snapshot game state
     void emit(Matrix4fc positionMatrix, BufferBuilder buffer); // append quads
     default boolean isVisible() { return true; }
+    default void onUseItem(Player player, InteractionHand hand) {} // right-click hook
 }
 ```
 
@@ -333,15 +338,25 @@ public interface WorldOverlay {
 - Frees GPU resources on `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a
   `GameRenderer#close` mixin to avoid adding mixin plumbing this milestone;
   trade-off: buffers are freed at shutdown, not on mid-session renderer reload).
+- Dispatches `onUseItem(...)` on the **rising edge** of the use key. A
+  `ClientTickEvents.END_CLIENT_TICK` handler watches `options.keyUse.isDown()`
+  and fires only on the up→down transition. This was deliberately **not** done
+  with Fabric's `UseItemCallback`: that event re-fires every tick while the
+  button is held (a stick has no use cooldown to throttle it), which
+  spam-cycled the color. Edge detection gives exactly one cycle per click.
 
 ### The annulus widget (`BlockTopAnnulusOverlay`)
 
-- `extract`: read `Minecraft.getInstance().hitResult`; if it's a
-  `BlockHitResult` of type `BLOCK`, store its `BlockPos`, else `null`.
-- `isVisible`: true iff a block is targeted.
+- `extract`: read `Minecraft.getInstance().hitResult` (store the targeted
+  `BlockPos`, else `null`) and whether the main hand holds a stick
+  (`player.getMainHandItem().is(Items.STICK)`).
+- `isVisible`: true iff a block is targeted **and** a stick is held.
+- `onUseItem`: if the used hand holds a stick, advance `colorIndex` through
+  `PALETTE` and call `player.swing(hand)` for the use animation.
 - `emit`: build the ring as `SEGMENTS` (64) quads between an inner and outer
   radius, in the horizontal plane at `blockTop + small offset` (avoids
-  z-fighting). Centered on the block (`x+0.5`, `z+0.5`).
+  z-fighting), centered on the block (`x+0.5`, `z+0.5`), colored by the current
+  palette entry.
 
 ### Rendering model & gotchas
 
@@ -353,13 +368,24 @@ public interface WorldOverlay {
 - **Double-sided:** flat/zero-thickness shapes must emit **both** windings, or
   back-face culling hides the ring from one side (symptom: it only appears when
   viewed from below). `BlockTopAnnulusOverlay.emit` emits each quad twice.
+- **Input debounce:** use repeated-fire (holding a button) must be debounced via
+  use-key edge detection, not the per-tick `UseItemCallback` (see the manager
+  bullet above). `usePressedLastTick` holds the previous state.
+- **Mutable state is `volatile`:** `target`, `holdingStick`, and `colorIndex` are
+  written on the client tick/extraction path and read during drawing, so they
+  are `volatile`.
 - **Build vs runtime:** `./gradlew build` only proves it compiles. Winding,
-  culling, depth/z-fighting, and visibility are runtime-only — verify with
-  `./gradlew runClient`.
+  culling, depth/z-fighting, visibility, the once-per-click cycle, and the swing
+  animation are runtime-only — verify with `./gradlew runClient`.
 
 ### Tuning knobs
 
 In `BlockTopAnnulusOverlay`: `INNER_RADIUS` / `OUTER_RADIUS` (ring thickness),
-`SEGMENTS` (smoothness), `Y_OFFSET` (z-fighting), and the `RED/GREEN/BLUE/ALPHA`
-color. For a through-walls variant, add `withDepthStencilState(Optional.empty())`
-to the pipeline builder in `WorldOverlayManager`.
+`SEGMENTS` (smoothness), `Y_OFFSET` (z-fighting), `ALPHA`, and the `PALETTE`
+colors (and the `Items.STICK` trigger item). For a through-walls variant, add
+`withDepthStencilState(Optional.empty())` to the pipeline builder in
+`WorldOverlayManager`.
+
+> **Trigger scope:** because the cycle is driven by the use key (not the item-use
+> event), it fires on any right-click while holding a stick, including when aimed
+> at interactive blocks (chests, buttons). Narrow this later if undesired.

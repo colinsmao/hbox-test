@@ -22,9 +22,11 @@ generated from `FabricMC/fabric-example-mod` and trimmed per `PLAN.md` §4.
 - **Milestone 1 (HUD):** `runClient` shows a demo HUD overlay (a box +
   "Graphics Overlay" label, top-left, hidden by F1) via `Overlay` /
   `OverlayManager` + `HudElementRegistry`.
-- **Milestone 2 (in-world):** a red annulus is drawn flat on the top face of the
-  block under the crosshair, via `WorldOverlay` / `WorldOverlayManager` +
-  `LevelRenderEvents`. See `PLAN.md` §11.
+- **Milestone 2 (in-world):** an annulus is drawn flat on the top face of the
+  block under the crosshair, shown only while holding a stick, with right-click
+  cycling its color (one step per click, with an arm-swing). Built on
+  `WorldOverlay` / `WorldOverlayManager` + `LevelRenderEvents`, with a use-key
+  rising-edge dispatch for the color cycle. See `PLAN.md` §11.
 
 ## Target versions (confirm before building)
 
@@ -103,6 +105,10 @@ a system Gradle is installed.
   `withDepthStencilState(Optional.empty())`). Flat/zero-thickness shapes must be
   **double-sided** (emit both windings) or back-face culling hides them from one
   side. The legacy `WorldRenderEvents` vertex-consumer path is **gone** here.
+- **Per-click input:** to act once per right-click, edge-detect the use key
+  (`ClientTickEvents.END_CLIENT_TICK` watching `options.keyUse.isDown()`), not
+  `UseItemCallback` — that event re-fires every tick while the button is held
+  for items with no use cooldown (e.g. a stick), causing spam.
 - **`26.1.2` API renames (verified against the resolved jars):** the draw
   context is **`net.minecraft.client.gui.GuiGraphicsExtractor`** (not
   `GuiGraphics`); text is drawn with **`text(Font, String, x, y, color,

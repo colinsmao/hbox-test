@@ -30,9 +30,11 @@ import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec3;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
@@ -62,6 +64,8 @@ public final class WorldOverlayManager {
 	private static BufferBuilder buffer;
 	private static MappableRingBuffer vertexBuffer;
 
+	private static boolean usePressedLastTick = false;
+
 	private WorldOverlayManager() {
 	}
 
@@ -71,6 +75,19 @@ public final class WorldOverlayManager {
 		LevelRenderEvents.END_EXTRACTION.register(WorldOverlayManager::extract);
 		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> close());
+		ClientTickEvents.END_CLIENT_TICK.register(WorldOverlayManager::onClientTick);
+	}
+
+	// Dispatch a use only on the rising edge of the "use item" key, so holding
+	// the button does not spam (a stick has no use cooldown to throttle it).
+	private static void onClientTick(Minecraft client) {
+		boolean down = client.screen == null && client.options.keyUse.isDown();
+		if (down && !usePressedLastTick && client.player != null) {
+			for (WorldOverlay overlay : OVERLAYS) {
+				overlay.onUseItem(client.player, InteractionHand.MAIN_HAND);
+			}
+		}
+		usePressedLastTick = down;
 	}
 
 	public static void register(WorldOverlay overlay) {

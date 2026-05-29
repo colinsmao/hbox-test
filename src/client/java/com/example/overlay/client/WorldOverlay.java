@@ -3,6 +3,9 @@ package com.example.overlay.client;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import org.joml.Matrix4fc;
 
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
+
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
 /**
@@ -31,5 +34,9 @@ public interface WorldOverlay {
 
 	default boolean isVisible() {
 		return true;
+	}
+
+	/** Called when the player right-clicks ("uses") an item. */
+	default void onUseItem(Player player, InteractionHand hand) {
 	}
 }

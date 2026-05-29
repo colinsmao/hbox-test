@@ -13,8 +13,9 @@ client that draws:
 
 - **HUD (Milestone 1):** a demo overlay (a box + "Graphics Overlay" label) in
   the top-left of the HUD, which hides when you press F1.
-- **In-world (Milestone 2):** a red ring (annulus) flat on the top face of the
-  block under your crosshair.
+- **In-world (Milestone 2):** a ring (annulus) flat on the top face of the block
+  under your crosshair, shown only while holding a stick; right-clicking the
+  stick cycles the ring's color (and swings your arm).
 
 See **[PLAN.md](PLAN.md)** for the full design: target versions, project
 structure, the overlay framework, and build / install / test instructions.
