@@ -15,10 +15,12 @@ plans change.
 
 ## Current status
 
-Planning stage. As of this writing the repo contains only `README.md`,
-`PLAN.md`, and this file. **No Gradle project or mod code exists yet.** When you
-scaffold it, follow the structure in `PLAN.md` §4 and generate from the official
-`FabricMC/fabric-example-mod` template (or <https://fabricmc.net/develop>).
+Milestone 1 scaffolded and building. The repo contains a client-only Fabric
+Gradle project generated from `FabricMC/fabric-example-mod` and trimmed per
+`PLAN.md` §4. `./gradlew build` passes (produces
+`build/libs/graphics-overlay-1.0.0.jar`) and `./gradlew runClient` launches a
+dev client that shows the demo HUD overlay (a box + "Graphics Overlay" label,
+top-left, hidden by F1).
 
 ## Target versions (confirm before building)
 
@@ -36,7 +38,7 @@ and the latest `FabricMC/fabric-example-mod` tag before building.
 > Mismatched JDK is the most common setup failure — verify `java -version` is 25
 > before debugging build issues.
 
-## Build & run (once the Gradle project exists)
+## Build & run
 
 ```bash
 ./gradlew build        # compile + produce build/libs/*.jar (CI gate)
@@ -45,6 +47,11 @@ and the latest `FabricMC/fabric-example-mod` tag before building.
 
 Use the Gradle wrapper (`./gradlew`, or `gradlew.bat` on Windows); do not assume
 a system Gradle is installed.
+
+> **Mappings:** Minecraft `26.1.2` ships **non-obfuscated**, so Loom rejects an
+> explicit `mappings` line — do **not** add `loom.officialMojangMappings()` (or
+> any `mappings ...`) to `build.gradle`, or the build fails with "Cannot use
+> Mojang mappings in a non-obfuscated environment".
 
 ## Key technical constraints
 
@@ -57,9 +64,17 @@ a system Gradle is installed.
   it.** Attach relative to `VanillaHudElements` (e.g. `attachElementBefore(...,
   VanillaHudElements.CHAT, ...)`) so the overlay inherits the vanilla "hide HUD"
   (F1) render condition.
-- **Stay high-level:** draw via `GuiGraphics` (`fill`, `drawTextWithShadow`).
-  Avoid low-level `RenderSystem` calls — Mojang is migrating to an
-  extract/draw rendering pipeline and low-level APIs are churning.
+- **Stay high-level:** draw via the HUD draw context (`fill`, `text`). Avoid
+  low-level `RenderSystem` calls — Mojang is migrating to an extract/draw
+  rendering pipeline and low-level APIs are churning.
+- **`26.1.2` API renames (verified against the resolved jars):** the draw
+  context is **`net.minecraft.client.gui.GuiGraphicsExtractor`** (not
+  `GuiGraphics`); text is drawn with **`text(Font, String, x, y, color,
+  dropShadow)`** (not `drawTextWithShadow`/`drawString`); and identifiers are
+  **`net.minecraft.resources.Identifier`** via
+  `Identifier.fromNamespaceAndPath(...)` (not `ResourceLocation`). The
+  `HudElement` functional method is `extractRenderState(GuiGraphicsExtractor,
+  DeltaTracker)`.
 - **Extension framework:** new overlays implement the `Overlay` interface and
   register via `OverlayManager`; keep all Fabric-API contact inside
   `OverlayManager` so widgets stay decoupled. See `PLAN.md` §4.

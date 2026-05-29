@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "overlay",
+	"version": "${version}",
+	"name": "Graphics Overlay",
+	"description": "A minimal client-side graphics overlay mod that draws a HUD element.",
+	"authors": [
+		"Me!"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.example.overlay.client.OverlayClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.2",
+		"minecraft": "~26.1.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

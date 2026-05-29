@@ -7,15 +7,20 @@ framework that makes adding more overlay widgets easy.
 
 ## Status
 
-Planning. See **[PLAN.md](PLAN.md)** for the full implementation plan, including
-target versions, project structure, the overlay framework design, and build /
-install / test instructions.
+Milestone 1 done: the mod builds and runs. `./gradlew build` produces
+`build/libs/graphics-overlay-1.0.0.jar`, and `./gradlew runClient` launches a dev
+client that draws a demo overlay (a box + "Graphics Overlay" label) in the
+top-left of the HUD, which hides when you press F1.
 
-## Quick start (once implemented)
+See **[PLAN.md](PLAN.md)** for the full design: target versions, project
+structure, the overlay framework, and build / install / test instructions.
+
+## Quick start
 
 ```bash
 ./gradlew build        # build the mod jar
 ./gradlew runClient    # launch a dev client with the mod loaded
 ```
 
-Requires a JDK 25 installation. See [PLAN.md](PLAN.md) for details.
+Requires a JDK 25 installation (`java -version` should report 25). See
+[PLAN.md](PLAN.md) for details.

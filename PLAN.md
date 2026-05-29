@@ -64,8 +64,11 @@ used**. We will use the current **`HudElementRegistry`** API.
 
 Key facts that shape our design:
 
-- Each overlay is a `HudElement` — effectively a lambda receiving a
-  `GuiGraphics` (the draw context) and a `DeltaTracker` (partial-tick info).
+- Each overlay is a `HudElement` — effectively a lambda receiving the draw
+  context and a `DeltaTracker` (partial-tick info). In Minecraft `26.1.2` the
+  `HudElement` functional method is
+  `extractRenderState(GuiGraphicsExtractor, DeltaTracker)`; `GuiGraphicsExtractor`
+  is this version's name for the old `GuiGraphics` draw context.
 - Elements are attached relative to vanilla HUD elements (`VanillaHudElements`),
   e.g. `attachElementBefore(VanillaHudElements.CHAT, id, element)`, or to the
   global extremes via `addFirst` / `addLast`.
@@ -84,7 +87,7 @@ public final class OverlayClient implements ClientModInitializer {
         OverlayManager.bootstrap(); // registers built-in widgets
         HudElementRegistry.attachElementBefore(
             VanillaHudElements.CHAT,
-            Identifier.of(OverlayMod.MOD_ID, "overlay_root"),
+            Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "overlay_root"),
             OverlayManager::render
         );
     }
@@ -136,7 +139,7 @@ public interface Overlay {
     String id();
 
     /** Draw this overlay. Called every frame the HUD is visible. */
-    void render(GuiGraphics graphics, DeltaTracker delta);
+    void render(GuiGraphicsExtractor graphics, DeltaTracker delta);
 
     /** Optional: allow an overlay to hide itself dynamically. */
     default boolean isVisible() { return true; }
@@ -183,15 +186,18 @@ the mod is irrelevant server-side.
 
 1. **Scaffold** the project from the Fabric template; set `mod_version`,
    `maven_group=com.example`, and `archives_base_name=graphics-overlay` in
-   `gradle.properties`.
+   `gradle.properties`. Do **not** add a `mappings` line to `build.gradle`:
+   Minecraft `26.1.2` ships non-obfuscated and Loom rejects explicit mappings
+   ("Cannot use Mojang mappings in a non-obfuscated environment").
 2. **Trim to client-only**: remove the server/`main` entrypoint and gameplay
    sample code; keep `OverlayMod` (constants/logger) in `main` so both source
    sets can share it.
 3. **Add the framework**: create `Overlay`, `OverlayManager`, and
    `OverlayClient`.
 4. **Implement `HelloOverlay`**: draw a filled rectangle with `graphics.fill(...)`
-   and a label with `graphics.drawTextWithShadow(...)` near a fixed screen
-   corner (top-left, with a margin), pulling the font from the running client.
+   and a label with `graphics.text(font, label, x, y, color, true)` (the `true`
+   enables the drop shadow) near a fixed screen corner (top-left, with a margin),
+   pulling the font from the running client (`Minecraft.getInstance().font`).
 5. **Wire registration**: `OverlayClient#onInitializeClient` calls
    `OverlayManager.bootstrap()` (which registers `HelloOverlay`) and attaches the
    root HUD element via `HudElementRegistry`.
@@ -290,3 +296,9 @@ gating with a short manual checklist.
   `drawTextWithShadow`) keeps us insulated from low-level `RenderSystem` churn.
 - **Java version coupling**: this Minecraft version requires JDK 25; mismatched
   JDKs are the most common setup failure — document and check it first.
+- **Non-obfuscated mappings**: MC `26.1.2` is distributed non-obfuscated, so
+  Loom forbids an explicit `mappings` line in `build.gradle`.
+- **`26.1.2` class renames**: the draw context is `GuiGraphicsExtractor` (was
+  `GuiGraphics`) and identifiers use `net.minecraft.resources.Identifier` (was
+  `ResourceLocation`); confirm names against the resolved jars if a future
+  version churns them again.
