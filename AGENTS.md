@@ -9,15 +9,18 @@ A minimal, **client-side graphics overlay** mod for Minecraft, built on the
 (Milestone 1) and **in the world** (Milestone 2), with small parallel
 frameworks so more overlay widgets are easy to add.
 
-Read **[PLAN.md](PLAN.md)** first — it is the source of truth for scope,
-architecture, versions, and the build/test plan. Keep `PLAN.md` updated when
-plans change.
+**This file (`AGENTS.md`) is the durable source of truth** for scope,
+architecture, versions, constraints, and the build/test process — read it first.
+**[PLAN.md](PLAN.md)** is reserved for the *current short-term plan* (e.g.
+produced in planning mode) and is often empty between tasks; do not put durable
+project knowledge there.
 
 ## Current status
 
 Milestones 1 and 2 building. The repo is a client-only Fabric Gradle project
-generated from `FabricMC/fabric-example-mod` and trimmed per `PLAN.md` §4.
-`./gradlew build` passes (produces `build/libs/graphics-overlay-1.0.0.jar`).
+generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
+**Repository layout** below). `./gradlew build` passes (produces
+`build/libs/graphics-overlay-1.0.0.jar`).
 
 - **Milestone 1 (HUD):** `runClient` shows a demo HUD overlay (a box +
   "Graphics Overlay" label, top-left, hidden by F1) via `Overlay` /
@@ -26,7 +29,38 @@ generated from `FabricMC/fabric-example-mod` and trimmed per `PLAN.md` §4.
   block under the crosshair, shown only while holding a stick, with right-click
   cycling its color (one step per click, with an arm-swing). Built on
   `WorldOverlay` / `WorldOverlayManager` + `LevelRenderEvents`, with a use-key
-  rising-edge dispatch for the color cycle. See `PLAN.md` §11.
+  rising-edge dispatch for the color cycle. See **Implemented widgets &
+  rendering gotchas** below.
+
+## Repository layout
+
+Client-only Fabric mod. Loom's `splitEnvironmentSourceSets()` keeps client code
+in the `client` source set so it can never load on a dedicated server; only the
+shared `OverlayMod` (mod id + logger) lives in `main` so both source sets share
+it.
+
+```
+.
+├── build.gradle / gradle.properties / settings.gradle
+├── gradlew / gradlew.bat / gradle/wrapper/...
+└── src
+    ├── main/java/com/example/overlay/
+    │   └── OverlayMod.java                  # shared constants (MOD_ID, logger)
+    ├── main/resources/fabric.mod.json       # client-only; single client entrypoint
+    └── client/java/com/example/overlay/client/
+        ├── OverlayClient.java               # ClientModInitializer entrypoint
+        ├── Overlay.java                     # HUD widget interface
+        ├── OverlayManager.java              # HUD registry + render dispatch
+        ├── WorldOverlay.java                # in-world widget interface
+        ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
+        └── widgets/
+            ├── HelloOverlay.java            # demo HUD box + label
+            └── BlockTopAnnulusOverlay.java  # red ring on targeted block top
+```
+
+`fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`
+entrypoint (`com.example.overlay.client.OverlayClient`), and depends on
+`fabricloader >=0.19.2`, `minecraft ~26.1.2`, `java >=25`, and `fabric-api`.
 
 ## Target versions (confirm before building)
 
@@ -69,12 +103,47 @@ and the latest `FabricMC/fabric-example-mod` tag before building.
 ```
 
 Use the Gradle wrapper (`./gradlew`, or `gradlew.bat` on Windows); do not assume
-a system Gradle is installed.
+a system Gradle is installed. `runClient` downloads the game/dependencies on
+first run and launches a client with Fabric Loader + Fabric API + this mod
+already injected — no manual install needed for testing.
 
 > **Mappings:** Minecraft `26.1.2` ships **non-obfuscated**, so Loom rejects an
 > explicit `mappings` line — do **not** add `loom.officialMojangMappings()` (or
 > any `mappings ...`) to `build.gradle`, or the build fails with "Cannot use
 > Mojang mappings in a non-obfuscated environment".
+
+### Manual install into a real launcher
+
+1. `./gradlew build`, then grab `build/libs/graphics-overlay-1.0.0.jar` (ignore
+   any `*-sources.jar`).
+2. Install **Fabric Loader** for Minecraft `26.1.2` via the official installer
+   (<https://fabricmc.net/use/installer/>).
+3. Download **Fabric API** `0.149.1+26.1.2` from Modrinth/CurseForge.
+4. Drop both the Fabric API jar and the `graphics-overlay` jar into the `mods/`
+   folder of the relevant `.minecraft` profile, then launch that Fabric profile.
+
+## Testing
+
+Rendering is visual, so testing combines an automated build gate with a manual
+checklist. Available Fabric testing tooling (not yet wired up): `fabric-loader-junit`
+for pure logic, and Fabric client gametests via `./gradlew runClientGameTest`
+for end-to-end render smoke tests (run headless in CI with XVFB).
+
+- **Build gate:** `./gradlew build` must pass (compiles + `fabric.mod.json`
+  schema processing). This only proves it **compiles** — winding, culling,
+  depth/z-fighting, visibility, once-per-click cycling, and the swing animation
+  are runtime-only and must be checked with `./gradlew runClient`.
+- **Manual acceptance checklist:**
+  1. `runClient` launches with no errors in the log.
+  2. **HUD:** in a world, the box + label is visible at the chosen corner and
+     F1 (hide HUD) hides it.
+  3. **In-world:** holding a stick, a ring sits flat on the targeted block's top
+     face, tracks the crosshair, disappears when no block is targeted or no
+     stick is held, is visible from above and below (double-sided) without bad
+     z-fighting, and right-clicking advances the color exactly one step per
+     click (holding does not spam) while swinging the arm.
+  4. No errors on world load/unload or window resize.
+  5. The mod does nothing on a dedicated server.
 
 ## Key technical constraints
 
@@ -121,12 +190,81 @@ a system Gradle is installed.
   `OverlayManager`; in-world widgets implement `WorldOverlay` (an `extract` +
   an `emit` method) and register via `WorldOverlayManager`. Keep all Fabric-API
   and low-level rendering contact inside the managers so widgets stay decoupled.
-  See `PLAN.md` §4 and §11.
+  See **Implemented widgets & rendering gotchas** below.
+
+## Implemented widgets & rendering gotchas
+
+### HUD framework
+
+`Overlay` is a small interface (`id()`, `render(GuiGraphicsExtractor,
+DeltaTracker)`, `isVisible()`). `OverlayManager.bootstrap()` registers built-in
+widgets and attaches a **single** root HUD element via `HudElementRegistry`
+whose render iterates visible overlays. New HUD widgets implement `Overlay` and
+call `OverlayManager.register(...)` — one line, no Fabric-API contact.
+
+### In-world framework
+
+`WorldOverlay` has an `extract(...)` (snapshot game state) + `emit(...)` (append
+quads) split, mirroring Mojang's extract/draw phases, plus an `onUseItem(...)`
+hook. `WorldOverlayManager` owns everything Fabric/GPU-related: registers the
+`LevelRenderEvents` phases, owns **one** shared filled `RenderPipeline` +
+`BufferBuilder` so all visible overlays batch into a single draw call, translates
+the pose by `-cameraPos`, handles the `MeshData` → `MappableRingBuffer` → render
+pass GPU handoff, frees GPU resources on
+`ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
+mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on mid-session
+renderer reload), and dispatches `onUseItem` on the use-key rising edge.
+
+### `BlockTopAnnulusOverlay`
+
+- `extract`: read `Minecraft.getInstance().hitResult` (targeted `BlockPos` or
+  `null`) and whether the main hand holds a stick.
+- `isVisible`: true iff a block is targeted **and** a stick is held.
+- `onUseItem`: advance `colorIndex` through `PALETTE` and `player.swing(hand)`.
+- `emit`: build the ring as `SEGMENTS` (64) quads between inner/outer radius in
+  the horizontal plane at `blockTop + Y_OFFSET`, centered on the block.
+
+Gotchas (all the hard-won, non-obvious ones):
+
+- **Immediate-mode, not retained:** no persistent ring object — each frame is
+  rebuilt; the ring "moves"/"disappears" purely by what `extract` reads and
+  whether `emit` runs. The only persistent object is the reused GPU vertex
+  buffer (a scratchpad), not a scene object.
+- **Double-sided:** flat/zero-thickness shapes must emit **both** windings or
+  back-face culling hides them from one side (symptom: visible only from below).
+- **Input debounce:** per-click actions must edge-detect the use key, not use
+  `UseItemCallback` (which re-fires every tick while held — see constraints).
+- **`volatile` mutable state:** `target`, `holdingStick`, `colorIndex` are
+  written on the tick/extract path and read while drawing.
+- **Tuning knobs** (in `BlockTopAnnulusOverlay`): `INNER_RADIUS` /
+  `OUTER_RADIUS` (thickness), `SEGMENTS` (smoothness), `Y_OFFSET` (z-fighting),
+  `ALPHA`, `PALETTE`, and the `Items.STICK` trigger item. For a through-walls
+  variant, add `withDepthStencilState(Optional.empty())` to the pipeline builder
+  in `WorldOverlayManager`.
+- **Trigger scope:** the cycle fires on any right-click while holding a stick,
+  including when aimed at interactive blocks (chests, buttons). Narrow later if
+  undesired.
+
+## Future work / roadmap
+
+The frameworks above are designed to make these incremental:
+
+- **Configuration:** a JSON config (later a Cloth Config / ModMenu screen) to
+  toggle individual overlays and set position/scale.
+- **Keybinds:** `KeyBindingHelper` to toggle overlays.
+- **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
+  in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.
+- **Anchored layout system:** corner/anchor + offset model for consistent HUD
+  positioning across resolutions and GUI scales.
+- **Data sources:** a small polling/event layer so widgets can subscribe to
+  client tick events for values that change over time.
+- **Distribution:** `fabric.mod.json` metadata, license, and a Modrinth/
+  CurseForge publish pipeline.
 
 ## Conventions
 
 - Package base: `com.example.overlay` (mod id `overlay`). If the user provides a
-  real maven group / mod id / author, update `PLAN.md` and code consistently.
+  real maven group / mod id / author, update this file and code consistently.
 - Don't add code comments that merely narrate what the code does.
 - Don't introduce third-party rendering libraries. The rendering API churns
   every MC version, so a thin in-house abstraction (the managers) is more stable
