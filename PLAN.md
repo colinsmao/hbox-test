@@ -1,227 +1,205 @@
-# Plan: In-world collision surface rendering
+# Plan: stick trigger + standable-surface flood fill
 
 > Current short-term plan (for execution by another agent). Durable project
 > knowledge lives in [AGENTS.md](AGENTS.md); subsystem detail in
 > [docs/rendering.md](docs/rendering.md).
 
-Move the in-world overlay from a fixed placeholder (annulus) to the **horizontal
-collision surface** of blocks: the upward-facing faces of a block's collision
-shape that an entity can stand on. The rendering strategy is to emit the top
-face of every collision sub-box and rely on depth-testing to occlude the faces
-buried inside real geometry (a deliberately simple approach - no per-column
-height resolution; see "Rendering strategy" below).
+Replace the stick **brush** with a stick **trigger**: a right-click computes a
+connected standable-surface selection (the clicked block plus neighbors) in one
+shot, instead of painting the hovered block every frame. The rendering path
+(`StandableRect` -> `WorldOverlayManager` filled pipeline) is unchanged; only
+the interaction model and the way `SurfaceCache` is populated change.
 
-## Interaction (stick = brush)
+- **Today:** holding a stick brushes the hovered block into `SurfaceCache`
+  every frame; right-click clears.
+- **Goal:** the stick is a trigger. Right-click floods from the targeted block
+  to its connected neighbors; the per-frame brushing is removed.
 
-The stick becomes a **brush** for selecting blocks whose standable surface is
-drawn:
+## Decisions
 
-- While **holding a stick**, the block under the crosshair (resolved downward,
-  see Approach) is added to a persistent **selection set** each frame, so
-  sweeping the crosshair paints a trail of blocks.
-- **Every selected block's surface is drawn every frame** (not just the hovered
-  one).
-- **Right-clicking** with the stick **clears the selection** (reset).
-- No color cycling - surfaces use a single fixed color.
+- **Connectivity:** 4 horizontal face-neighbors (N/S/E/W).
+- **Order:** v1a (interaction refactor, single-block selection) -> v1b
+  (horiz-4 adjacency flood) -> v2 (surface reachability + height-diff). The
+  riskiest part is the interaction refactor, so it lands and is verified on its
+  own before any graph traversal. v1b is where the **BFS itself** is built - a
+  work queue, a visited set, and per-node depth tracking so the search
+  terminates and respects `radius`; this is real code, not a free knob. v2 then
+  reuses the exact same traversal and changes only the neighbor-acceptance
+  predicate. The `radius` constant is just one input to that BFS.
+- **v1 is a plumbing checkpoint, not a usable feature.** v1b's strict
+  "neighbor non-empty at the *same* Y" rule only floods perfectly flat,
+  single-elevation regions and will stop at the first slope on natural terrain.
+  v2 is the first version that behaves as intended; v1a/v1b exist to validate
+  the trigger, clear, render, and BFS plumbing in isolation.
+- **Trigger/clear semantics** (default, easy to flip): each right-click
+  **replaces** the selection by flooding from the targeted block; right-clicking
+  air / no block hit **clears** it. The existing level-identity reset and
+  `pruneStale` (place/break) stay. Surfaces still render only while holding the
+  stick (`isVisible` unchanged).
+- **Radius:** a constant (`SELECTION_RADIUS = 3`) for now; noted as future config.
 
-Assumption (easy to flip): surfaces are drawn while the stick is held; the
-selection persists in memory when you switch items and reappears when you
-re-equip the stick, and is only emptied by right-click or world unload. If you'd
-rather they stay visible regardless of the held item, that's a one-line change to
-the visibility gate.
-
-## Approach
-
-Data source is the block's **collision** `VoxelShape` (not the visual/outline
-shape):
-
-- `BlockState.getCollisionShape(level, pos, CollisionContext.empty())` - the
-  collision shape.
-- `VoxelShape.isEmpty()` - detects pass-through blocks (tall grass, flowers,
-  cobwebs). If empty, walk downward (`pos.below()`) until a non-empty shape is
-  found (capped, stop at world min-Y), so looking at tall grass resolves to the
-  dirt/grass block under it.
-- `VoxelShape.toAabbs()` -> `List<AABB>` of axis-aligned sub-boxes. Each
-  sub-box's top (`maxY`) over its `[minX,maxX] x [minZ,maxZ]` footprint is a
-  standable rectangle. This handles partial blocks automatically: a slab -> one
-  box (top y+0.5), a stair -> full lower box (top y+0.5) + half upper box (top
-  y+1.0), a fence -> tall post (top y+1.5) + bars.
-
-### Rendering strategy
-
-Why emitting every sub-box's top face is visually correct without extra math:
-the existing `FILLED` pipeline depth-tests against the world (the
-`WorldOverlayManager` comments note that removing depth-stencil is what would
-make it "through-walls"). So drawing the top of every sub-box and letting
-depth-testing hide the parts buried inside real geometry yields the correct
-visible standable surface (e.g. stairs render as an L: front at y+0.5, back at
-y+1.0). The alternative - computing a precise per-(x,z)-column max-height
-surface so only the true uppermost face is ever emitted - is more code and only
-matters for rare blocks with internal stacked boxes, so it is intentionally out
-of scope here.
-
-### Data model (doubles)
-
-Collision shapes are unions of axis-aligned cuboids, so every standable patch is
-an axis-aligned rectangle. Snapshot each top-face rectangle directly in
-**world-space doubles** - no discretization. (We deliberately skip an integer
-1/16-pixel model: the surfaces will later be expanded by entity dimensions like
-`1.95` that are not `1/16`-aligned, so quantizing buys nothing; rounding-error
-handling is deferred to that future math layer.)
-
-- `record StandableRect(double minX, double minZ, double maxX, double maxZ, double topY)`
-  in absolute world coordinates (resolved `BlockPos` already folded in).
-- Built straight from each `AABB`: `minX = pos.getX() + box.minX`, ...,
-  `topY = pos.getY() + box.maxY`.
-
-### Selection set / cache
-
-The selection set and the compute-cache are the **same structure** - a
-`SurfaceCache` mapping `BlockPos` -> `{BlockState, List<StandableRect>}`:
-
-- **Brushing = inserting:** while holding the stick, `extract` resolves the
-  hovered block and adds it (compute-once) to the map. Already-present blocks are
-  not recomputed, so a sweeping crosshair just accumulates entries cheaply.
-- **It is the draw set:** every entry's rectangles are rendered each frame, so
-  the map directly represents what is on screen.
-- **In-memory only; not persisted across save/load.** Cleared by right-click
-  (reset) and on world unload / dimension change / disconnect (hook
-  `ClientLifecycleEvents` / a level-identity check, mirroring the manager's
-  existing `CLIENT_STOPPING` cleanup).
-- **Staleness:** each entry stores its source `BlockState`; on `extract`, prune
-  or recompute entries whose `level.getBlockState(pos)` no longer matches (and
-  drop entries that became collision-empty), so the painting stays accurate
-  after place/break. (For large selections this is a per-entry block-state
-  lookup; fine for now, can be throttled later.)
-- **Scope/ownership:** the map is mutated only during the extraction phase
-  (single-threaded within the overlay dispatch). For the render thread, `extract`
-  publishes an immutable combined `List<StandableRect>` (all entries' rects
-  concatenated) into a `volatile` snapshot that `emit` reads - same handoff
-  pattern as today.
-- A size cap / eviction policy can be added later; clear-on-reset and
-  clear-on-world-change bound it for now.
+## Flow
 
 ```mermaid
-flowchart LR
-  hit["hitResult BlockPos (if holding stick)"] --> resolve["resolve downward<br/>until collision shape non-empty"]
-  resolve --> cache{"in SurfaceCache?"}
-  cache -->|"yes"| snap
-  cache -->|"no"| shape["getCollisionShape() -> toAabbs()<br/>build rects, insert"]
-  shape --> snap["publish combined rect snapshot<br/>(all selected blocks)"]
-  rightclick["right-click w/ stick"] --> clear["SurfaceCache.clear()"]
-  clear --> snap
-  snap --> emit["emit top-face quads for ALL<br/>(double-sided, +Y offset)"]
+flowchart TD
+  rc["right-click w/ stick (use-key rising edge)"] --> hit{"hit a block?"}
+  hit -->|"no"| clr["cache.clear()"]
+  hit -->|"yes"| res["resolveDownward(target) -> start"]
+  res --> flood["cache.select(level, start, radius):<br/>BFS over horiz-4 neighbors"]
+  flood --> store["per visited block: computeRects -> store"]
+  clr --> pub
+  store --> pub["extract publishes allRects() -> volatile snapshot"]
+  pub --> emit["emit top-face quads (double-sided, +Y offset)"]
 ```
 
-## Files
+## v1a - interaction refactor (trigger, single-block selection)
 
-- Replace
-  [src/client/java/com/example/overlay/client/widgets/BlockTopAnnulusOverlay.java](src/client/java/com/example/overlay/client/widgets/BlockTopAnnulusOverlay.java)
-  with a new `CollisionSurfaceOverlay.java` (same `WorldOverlay` contract):
-  - `extract`: while holding a stick, resolve the hovered block and add it to the
-    `SurfaceCache`; prune stale entries; publish the combined rect list to a
-    `volatile` snapshot.
-  - `emit`: draw every rect in the snapshot's top face with both windings and
-    `Y_OFFSET`, in a single fixed color (drop the palette).
-  - `isVisible`: holding a stick and snapshot non-empty (per the visibility
-    assumption above).
-  - `onUseItem`: **clear the `SurfaceCache`** (was color-cycle); keep the
-    `player.swing(hand)` feedback. Only acts while holding a stick.
-- Add a new `SurfaceCache.java` (in `com.example.overlay.client` or a
-  `client/collision` subpackage): a `BlockPos -> {BlockState, List<StandableRect>}`
-  in-memory map with insert/get-or-compute, a staleness prune against the current
-  `BlockState`, a `clear()`, and a way to read all rects. It is both the cache
-  and the brush selection set.
-- Update registration in
-  [src/client/java/com/example/overlay/client/WorldOverlayManager.java](src/client/java/com/example/overlay/client/WorldOverlayManager.java)
-  `bootstrap()` to register the new widget. No change to the GPU/pipeline
-  plumbing. Add a world-unload / disconnect hook (or level-identity check) that
-  calls `SurfaceCache.clear()`.
-- [src/client/java/com/example/overlay/client/WorldOverlay.java](src/client/java/com/example/overlay/client/WorldOverlay.java)
-  interface unchanged.
-- Docs: refresh [docs/rendering.md](docs/rendering.md) (new widget,
-  collision-shape approach, rectangles + double-precision rationale), bump
-  Current status / Future work in [AGENTS.md](AGENTS.md), and refresh this
-  `PLAN.md` (per the doc-upkeep-per-PR convention).
+Land and verify the new interaction model with **no graph traversal**, so the
+riskiest plumbing change is isolated from the flood algorithm.
+
+- [`widgets/CollisionSurfaceOverlay.java`](src/client/java/com/example/overlay/client/widgets/CollisionSurfaceOverlay.java):
+  - `onUseItem`: only while holding a stick; read
+    `Minecraft.getInstance().hitResult` + `level`, `resolveDownward(...)` the
+    targeted block; if resolved, **replace** the selection with just that block;
+    else `cache.clear()`. Keep `player.swing(hand)`. Mirrors the existing
+    clear-in-`onUseItem` pattern (same main-thread cache mutation as today).
+  - `extract`: drop the per-frame brush block (the `cache.add(...)` of the
+    hovered block). Keep the level-identity reset, `holdingStick` flag,
+    `pruneStale(level)`, and `snapshot = cache.allRects()`.
+  - `isVisible` unchanged (`holdingStick && !snapshot.isEmpty()`).
+- [`SurfaceCache.java`](src/client/java/com/example/overlay/client/SurfaceCache.java):
+  a `select`/replace entry point that clears and stores a single resolved block
+  (or extend in v1b). Keep `pruneStale`, `clear`, `isEmpty`, `allRects`,
+  `computeRects`, and the `Entry` record.
+- No
+  [`WorldOverlayManager.java`](src/client/java/com/example/overlay/client/WorldOverlayManager.java)
+  change: the use-key rising-edge dispatch (`onClientTick` -> `onUseItem`)
+  already exists.
+
+### Verify in-game (v1a)
+
+- [ ] `./gradlew build` passes.
+- [ ] Hold a stick, right-click a block: **only that block's** surface appears
+  (no neighbors).
+- [ ] Right-click a different block: the selection **moves** to it (replaces,
+  does not accumulate).
+- [ ] Right-click pointing at air / sky (no block in reach): selection
+  **clears**.
+- [ ] Sweep the crosshair over blocks while holding the stick **without
+  clicking**: nothing is painted (the brush is gone).
+- [ ] Right-click tall grass / a flower: the surface resolves to the solid block
+  **below** it.
+- [ ] Unequip the stick: surface hides; re-equip: it reappears (selection
+  persists in memory).
+- [ ] Hold the right mouse button down: it triggers **once**, the arm swings
+  once (no per-tick spam).
+- [ ] Break/replace the selected block: its surface updates or drops.
+- [ ] Leave / change world: selection clears; no errors in the log.
+
+## v1b - block-adjacency flood (4-horizontal, no height gating)
+
+- [`SurfaceCache.java`](src/client/java/com/example/overlay/client/SurfaceCache.java):
+  make `select(Level level, BlockPos start, int radius)` **clear**, then run a
+  BFS from `start`: a work queue seeded with `start`, a **visited set** so each
+  block is processed once, and **per-node depth** so the search stops at
+  `radius`. For each dequeued block, enqueue its 4 horizontal neighbors at the
+  **same Y** that have a non-empty collision shape and are not yet visited.
+  Reuse `computeRects(...)` to store each visited block's rects. (`radius=1`
+  yields direct neighbors only.)
+- `CollisionSurfaceOverlay`: switch `onUseItem` to call
+  `cache.select(level, start, SELECTION_RADIUS)`; add
+  `private static final int SELECTION_RADIUS = 3;`.
+
+### Verify in-game (v1b)
+
+- [ ] `./gradlew build` passes.
+- [ ] On flat ground, right-click: the clicked block **plus its 4-connected
+  same-Y neighbors out to radius 3** are drawn (a diamond ~7 blocks across).
+- [ ] No block beyond graph-distance 3 is selected (radius is respected).
+- [ ] A 1-block step up/down or a wall **stops** the flood at that edge (the
+  expected v1b limitation, fixed in v2).
+- [ ] A hole / air column in the floor is **not** crossed.
+- [ ] No duplicated/overlapping surfaces (visited set works) and no hang/freeze
+  on a large flat area (the BFS terminates).
+- [ ] Right-click air still clears; right-click a new block replaces the whole
+  region.
+
+## v2 - standable-surface reachability with max height difference
+
+Refine only the BFS neighbor-acceptance predicate inside `SurfaceCache.select`:
+
+- For a horizontal neighbor column, resolve its standable block (same Y, else
+  walk down like `resolveDownward`) and accept the edge iff the neighbor's
+  surface top height is within `MAX_STEP` (e.g. `1.0`) of the current block's
+  surface top. This turns the flood into a walkable region (lets it step up/down
+  one block, stops at cliffs/walls).
+- Use each block's representative top (max `topY` across its rects) for the
+  comparison; note the multi-sub-box simplification.
+- Add `private static final double MAX_STEP = 1.0;` (or pass it in). The BFS
+  graph nodes become resolved standable blocks rather than fixed-Y blocks.
+
+### Verify in-game (v2)
+
+- [ ] `./gradlew build` passes.
+- [ ] Flood **steps across** single-block height changes (a 1-block step, a slab
+  edge) continuously instead of stopping.
+- [ ] Flood **stops** at a 2+ block wall / cliff (height diff > `MAX_STEP`).
+- [ ] Stairs / slabs are treated as walkable continuations of adjacent ground.
+- [ ] On the **same sloped terrain**, v2 covers the slope where v1b stopped
+  (A/B the difference).
+- [ ] Right-click air clears; replace-on-retrigger still holds.
+
+## Docs (same PR)
+
+- [AGENTS.md](AGENTS.md): update Milestone 3 status (stick is now a flood-fill
+  **trigger**, not a brush) and acceptance checklist item 3 (replace the
+  "sweeping/brush" wording with "right-click floods connected surfaces;
+  right-click air clears").
+- [docs/rendering.md](docs/rendering.md): update the `CollisionSurfaceOverlay` +
+  `SurfaceCache` section (trigger + flood-fill, the `select` BFS, v2
+  reachability/height-diff, trigger/clear semantics).
+- This `PLAN.md`: refreshed per the doc-upkeep-per-PR convention.
 
 ## Risks / notes
 
-- `26.1.2` name verification: confirm `VoxelShape`, `CollisionContext`,
-  `toAabbs`, `getCollisionShape`, the world min-Y accessor, and
-  `BlockGetter`/`Level` against the resolved jars (names may differ as with
-  `Identifier`). Compiler is the oracle.
-- Extraction-thread reads: the current widget already reads `hitResult` in
-  `extract`; block-state reads there are read-only and consistent with that, but
-  keep them minimal and snapshot immutable.
-- Downward resolution must cap and stop at world min-Y to avoid scanning into the
-  void (e.g. tall grass over a hole).
-- Working in doubles (not a discretized grid) is intentional: the planned next
-  step expands these surfaces by entity dimensions (e.g. ravager `1.95`), which
-  are arbitrary `float`s positioned at continuous double coords - not
-  `1/16`-aligned - so quantizing blocks would be wasted work. Rounding/precision
-  handling is deferred to that future math layer.
-- Buffer size: brushing many blocks grows the combined vertex list; if a
-  selection can exceed `SMALL_BUFFER_SIZE`, size the `BufferBuilder`/ring buffer
-  to the snapshot (the manager already resizes the GPU buffer, but confirm the
-  CPU-side allocator headroom). A reasonable per-frame vertex budget / selection
-  cap is acceptable.
+- `26.1.2` names: confirm `BlockPos.relative(Direction)`,
+  `Direction.Plane.HORIZONTAL`, `getMinY`, and the collision-shape calls against
+  the resolved jars (the compiler is the oracle).
+- Large radius / flat areas grow the selection; the existing
+  `WorldOverlayManager` buffer resize covers vertices, but a node cap can bound
+  the BFS if needed.
+- Threading: flood runs in `onUseItem` (END_CLIENT_TICK) like the current
+  `clear`; all cache mutation stays on the main client thread, `emit` reads the
+  published `volatile` snapshot. A flood is a much heavier mutation than a
+  `clear`, so **confirm `END_EXTRACTION` is not off-thread** before trusting the
+  `volatile`-only handoff (if it is, move the flood into `extract` behind a
+  pending-trigger flag).
 
-## Acceptance (manual via runClient; build gate via `./gradlew build`)
+## Cross-cutting checks (verify at every stage, on top of the per-stage lists)
 
-Per-block shape correctness (brush one block, inspect):
-
-- Full block: 1x1 surface at top (y+1.0). Bottom slab: surface at y+0.5; top
-  slab: at y+1.0.
-- Stairs: L-shaped two-level surface matching orientation (y+0.5 front, y+1.0
-  back).
-- Fence: small post-top high (~y+1.5) plus bar tops.
-- Tall grass / flower: surface appears on the solid block below.
-- Carpet / pressure plate: thin surface near y+0.0625.
-
-Brush behavior:
-
-- Holding a stick and sweeping the crosshair paints a growing set of blocks;
-  all their surfaces stay drawn each frame (not just the hovered one).
-- Right-clicking with the stick clears all painted surfaces.
-- Breaking/replacing a painted block updates or drops its surface (staleness).
-- Selection clears on leaving the world; no color cycling remains.
+- [ ] No errors on world load / unload or window resize.
+- [ ] No per-frame brushing remains (selection only changes on right-click or
+  place/break).
+- [ ] The mod does nothing on a dedicated server (client-only).
 
 ## Todos
 
-Implemented in two stages: first single-block surface detection + rendering
-(recomputed every frame, no cache), then the cache and the brush/clear stick
-behavior. **Both stages are complete and the build gate passes.**
-
-### Stage 1 - core surface detection + rendering (hovered block, every frame)
-
-- [x] **extract**: In `CollisionSurfaceOverlay.extract`, while holding a stick
-  resolve the hovered block downward to the first non-empty collision shape
-  (capped, stop at world min-Y), build world-space-double rectangles from
-  `getCollisionShape(...).toAabbs()`, and publish them to a `volatile` snapshot.
-  Recompute **every frame** for the single hovered block (no cache yet).
-- [x] **emit**: In `CollisionSurfaceOverlay.emit`, draw every rectangle in the
-  snapshot as a top-face quad (world-space doubles + `Y_OFFSET`) with both
-  windings, in a single fixed color.
-- [x] **wire**: Replace `BlockTopAnnulusOverlay` with `CollisionSurfaceOverlay`,
-  register it in `WorldOverlayManager.bootstrap()`, gate `isVisible` on
-  holding-a-stick + non-empty snapshot, and drop the color cycle (`onUseItem` is
-  a no-op / arm-swing only for now).
-- [x] **verify**: Via `runClient`, confirm the per-block shape correctness cases
-  (full / slab / stairs / fence / tall grass / carpet) from Acceptance before
-  proceeding.
-
-### Stage 2 - cache + brush behavior (only after Stage 1 works)
-
-- [x] **cache**: Add `SurfaceCache` (`BlockPos -> {BlockState, List<StandableRect>}`,
-  in-memory, non-persistent) acting as both compute-cache and brush selection
-  set: insert/get-or-compute, prune stale entries by `BlockState`, `clear()`, and
-  read-all-rects.
-- [x] **brush**: Change `extract` to **add** the hovered block to the
-  `SurfaceCache` (accumulate the selection) instead of recomputing one block,
-  prune stale entries, and publish the combined rects of all entries to the
-  snapshot so every selected block is drawn each frame. Make `onUseItem` clear
-  the cache. (World-unload/disconnect reset is done via a self-contained
-  **level-identity check** in `extract` rather than a manager-side hook.)
-- [x] **docs**: Update `docs/rendering.md` (new widget, collision-shape +
-  brush/selection approach, rectangles + double-precision rationale), `AGENTS.md`
-  Current status / Future work, and this `PLAN.md`.
+- [x] **sync**: Checkout/pull main to `6234245` and branch
+  `cursor/surface-flood-fill-3c2f` off it.
+- [ ] **v1a-interaction**: Replace the brush with the trigger -
+  `CollisionSurfaceOverlay.onUseItem` selects only the resolved targeted block
+  (clear on air-hit), drop per-frame brushing in `extract`; keep `isVisible`,
+  `pruneStale`, snapshot publishing. No graph traversal yet.
+- [ ] **v1a-verify**: `runClient` - confirm trigger/replace/clear-on-air work
+  and the build gate passes, before adding the flood.
+- [ ] **v1b-flood**: `SurfaceCache.select(level,start,radius)` BFS over 4
+  horizontal same-Y neighbors (non-empty collision), depth-capped; wire
+  `SELECTION_RADIUS`. Radius is validated here.
+- [ ] **v1b-verify**: `runClient` - right-click floods flat ground out to
+  radius; behaves as a checkpoint (stops at slopes, expected).
+- [ ] **v2-reach**: `SurfaceCache.select` gates neighbor edges on
+  standable-surface reachability within `MAX_STEP` (1.0) height difference.
+- [ ] **v2-verify**: `runClient` - flood steps across <=1.0 height changes,
+  stops at walls/cliffs.
+- [ ] **docs**: Update `AGENTS.md` status + acceptance checklist,
+  `docs/rendering.md`, and this `PLAN.md`.
