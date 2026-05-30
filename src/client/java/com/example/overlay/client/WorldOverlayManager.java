@@ -6,7 +6,7 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 
 import com.example.overlay.OverlayMod;
-import com.example.overlay.client.widgets.BlockTopAnnulusOverlay;
+import com.example.overlay.client.widgets.CollisionSurfaceOverlay;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
@@ -72,7 +72,7 @@ public final class WorldOverlayManager {
 	}
 
 	public static void bootstrap() {
-		register(new BlockTopAnnulusOverlay());
+		register(new CollisionSurfaceOverlay());
 
 		LevelRenderEvents.END_EXTRACTION.register(WorldOverlayManager::extract);
 		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
