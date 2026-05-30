@@ -19,20 +19,20 @@ project knowledge there.
 
 ## Current status
 
-Milestones 1 and 2 building. The repo is a client-only Fabric Gradle project
+Milestones 1–3 building. The repo is a client-only Fabric Gradle project
 generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
 **Repository layout** below). `./gradlew build` passes (produces
-`build/libs/graphics-overlay-1.0.0.jar`).
+`build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
+[`docs/rendering.md`](docs/rendering.md).
 
-- **Milestone 1 (HUD):** `runClient` shows a demo HUD overlay (a box +
-  "Graphics Overlay" label, top-left, hidden by F1) via `Overlay` /
-  `OverlayManager` + `HudElementRegistry`.
-- **Milestone 2 (in-world):** an annulus is drawn flat on the top face of the
-  block under the crosshair, shown only while holding a stick, with right-click
-  cycling its color (one step per click, with an arm-swing). Built on
-  `WorldOverlay` / `WorldOverlayManager` + `LevelRenderEvents`, with a use-key
-  rising-edge dispatch for the color cycle. See
-  [`docs/rendering.md`](docs/rendering.md).
+- **Milestone 1 — minimal working mod (HUD):** a demo HUD overlay (box + label,
+  top-left, hidden by F1) via `Overlay` / `OverlayManager`.
+- **Milestone 2 — in-world rendering:** a `WorldOverlay` / `WorldOverlayManager`
+  framework that draws arbitrary geometry in the world (extract/draw split over
+  `LevelRenderEvents`, one shared filled pipeline, use-key edge dispatch).
+- **Milestone 3 — block-hitbox rendering:** draws blocks' horizontal collision
+  surfaces while holding a stick; the stick is a brush that paints a persistent
+  selection (`SurfaceCache`), and right-click resets it.
 
 ## Repository layout
 
@@ -55,9 +55,11 @@ it.
         ├── OverlayManager.java              # HUD registry + render dispatch
         ├── WorldOverlay.java                # in-world widget interface
         ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
+        ├── StandableRect.java               # world-space standable rectangle
+        ├── SurfaceCache.java                # brush selection set + compute-cache
         └── widgets/
             ├── HelloOverlay.java            # demo HUD box + label
-            └── BlockTopAnnulusOverlay.java  # red ring on targeted block top
+            └── CollisionSurfaceOverlay.java # collision surfaces on brushed blocks
 ```
 
 `fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`
@@ -139,12 +141,17 @@ for end-to-end render smoke tests (run headless in CI with XVFB).
   1. `runClient` launches with no errors in the log.
   2. **HUD:** in a world, the box + label is visible at the chosen corner and
      F1 (hide HUD) hides it.
-  3. **In-world:** holding a stick, a ring sits flat on the targeted block's top
-     face, tracks the crosshair, disappears when no block is targeted or no
-     stick is held, is visible from above and below (double-sided) without bad
-     z-fighting, and right-clicking advances the color exactly one step per
-     click (holding does not spam) while swinging the arm.
-  4. No errors on world load/unload or window resize.
+  3. **In-world:** holding a stick, the standable collision surface of the
+     targeted block is drawn flat on top, double-sided without bad z-fighting;
+     sweeping the crosshair paints a growing set whose surfaces all stay drawn;
+     per-block shapes are correct (full / slab / stairs-as-L / fence-post-tops /
+     carpet-thin) and tall grass/flowers resolve to the block below; the
+     selection hides when the stick is unequipped and returns on re-equip;
+     right-clicking resets it (exactly once per click — holding does not spam)
+     while swinging the arm; breaking/replacing a painted block updates or drops
+     its surface.
+  4. No errors on world load/unload or window resize; the selection clears on
+     leaving/changing the world.
   5. The mod does nothing on a dedicated server.
 
 ## Key constraints (all work)
@@ -222,10 +229,19 @@ incremental:
 
 ## Git / workflow
 
+- **Sole-agent assumption.** Unless told otherwise, assume you are the only
+  agent/person working in this repo. No need to defensively re-check remote or
+  branch state for concurrent changes before each action; a quick check when
+  something looks off is enough. (This also means amend/force-push on your own
+  feature branch is low-risk when it makes the history clearer.)
 - Branch naming for agent work: `cursor/<descriptive-name>-3c2f` (lowercase),
   branched off `main`.
 - Commit logical changes separately with clear messages; do not force-push or
   amend unless asked.
+- **Squash planning commits before dev.** When a task goes through a planning
+  phase (e.g. plan mode) that produces multiple `Plan:` commits, squash them
+  into a single plan commit before starting the implementation work, so the
+  history is one plan commit followed by the dev commits.
 - After pushing, open/update a PR against `main`.
 - Verify `./gradlew build` passes before considering a code change complete.
 - Before opening/updating the PR, update the relevant documentation in the same

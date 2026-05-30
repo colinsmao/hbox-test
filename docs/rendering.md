@@ -68,7 +68,47 @@ compiler and stale training data won't hand you.
   handoff, the use-key rising-edge dispatch, and GPU cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
-  mid-session renderer reload). `BlockTopAnnulusOverlay` is the demo widget.
+  mid-session renderer reload). `CollisionSurfaceOverlay` (Milestone 3, below)
+  is the widget that currently exercises this framework.
+
+## Block-hitbox rendering (Milestone 3): `CollisionSurfaceOverlay` + `SurfaceCache`
+
+Draws the **horizontal collision surface** of blocks — the upward-facing faces
+an entity can stand on — for blocks "painted" with a stick.
+
+- **Data source is the collision shape, not the visual shape:**
+  `BlockState.getCollisionShape(level, pos, CollisionContext.empty())`. Empty
+  shapes are pass-through (tall grass, flowers); `extract` walks **downward**
+  (`MutableBlockPos.move(0,-1,0)`, capped and floored at `level.getMinY()`)
+  until a non-empty shape is found, so looking at tall grass resolves to the
+  block beneath it.
+- **Rendering strategy (deliberately simple):** emit the top (`maxY`) face of
+  **every** `VoxelShape.toAabbs()` sub-box and let the `FILLED` pipeline's depth
+  test occlude the faces buried inside real geometry. No per-(x,z)-column
+  max-height resolution — stairs come out as an L for free; rare blocks with
+  internally stacked boxes are out of scope.
+- **World-space doubles, not a 1/16 grid:** each top face is a `StandableRect`
+  (`record StandableRect(double minX, minZ, maxX, maxZ, topY)`) in absolute
+  world coords (the resolved `BlockPos` folded in). Quantizing is skipped on
+  purpose — a planned later step expands these by entity dimensions (e.g. ravager
+  `1.95`) that are not `1/16`-aligned, so rounding/precision is deferred to that
+  future math layer.
+- **`SurfaceCache` is both the brush selection set and the compute-cache:** a
+  `BlockPos -> {BlockState, List<StandableRect>}` map. While holding the stick,
+  `extract` adds the resolved hovered block (compute-once; already-present
+  blocks with an unchanged `BlockState` are not recomputed), so sweeping
+  accumulates cheaply; every entry's rects are the draw set. It is **in-memory
+  only, not persisted.** Each `extract` prunes/recomputes entries whose stored
+  `BlockState` no longer matches the world (place/break staleness).
+- **Lifecycle / threading:** the cache is mutated only on the client/extraction
+  thread (`add`/`pruneStale`/`clear`); the render thread reads only the
+  immutable `allRects()` snapshot published into a `volatile` field (same handoff
+  as the other widgets). It is cleared by right-click (`onUseItem`) and by a
+  **level-identity check** in `extract` (a changed/`null` `Level` empties it) —
+  a self-contained alternative to a manager-side world-unload hook, so world
+  unload / dimension change / disconnect all reset it. Note: right-click resets
+  but, while the stick stays held, the next frame re-adds the hovered block, so
+  a reset leaves at most the block under the crosshair.
 
 ## `26.1.2` rendering API names (verified against the resolved jars)
 
@@ -81,9 +121,12 @@ compiler and stale training data won't hand you.
 
 ## Where the file-specific gotchas live (inline comments)
 
-- `widgets/BlockTopAnnulusOverlay.java`: immediate-mode rebuild, tuning knobs,
-  `volatile` render-state fields, the double-sided-winding requirement, and the
-  right-click trigger scope.
+- `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
+  brush-as-insert flow, the level-identity reset, `volatile` snapshot handoff,
+  the double-sided-winding requirement, and the right-click-reset trigger scope.
+- `SurfaceCache.java`: the get-or-compute insert, `BlockState`-based staleness
+  prune, the extraction-thread-only (non-thread-safe) contract, and the
+  collision-shape → `StandableRect` build.
 - `WorldOverlayManager.java`: the through-walls pipeline variant, the
   `CLIENT_STOPPING`-vs-mixin GPU-cleanup trade-off, the camera-relative
   translate, and the use-key-edge-vs-`UseItemCallback` debounce.
