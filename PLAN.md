@@ -188,40 +188,40 @@ Brush behavior:
 
 ## Todos
 
-Implement in two stages: first get single-block surface detection + rendering
-working and verified (recomputed every frame, no cache), then add the cache and
-the brush/clear stick behavior. This isolates the voxel->surface->overlay logic
-for debugging before any caching or multi-block complexity.
+Implemented in two stages: first single-block surface detection + rendering
+(recomputed every frame, no cache), then the cache and the brush/clear stick
+behavior. **Both stages are complete and the build gate passes.**
 
 ### Stage 1 - core surface detection + rendering (hovered block, every frame)
 
-- [ ] **extract**: In `CollisionSurfaceOverlay.extract`, while holding a stick
+- [x] **extract**: In `CollisionSurfaceOverlay.extract`, while holding a stick
   resolve the hovered block downward to the first non-empty collision shape
   (capped, stop at world min-Y), build world-space-double rectangles from
   `getCollisionShape(...).toAabbs()`, and publish them to a `volatile` snapshot.
   Recompute **every frame** for the single hovered block (no cache yet).
-- [ ] **emit**: In `CollisionSurfaceOverlay.emit`, draw every rectangle in the
+- [x] **emit**: In `CollisionSurfaceOverlay.emit`, draw every rectangle in the
   snapshot as a top-face quad (world-space doubles + `Y_OFFSET`) with both
   windings, in a single fixed color.
-- [ ] **wire**: Replace `BlockTopAnnulusOverlay` with `CollisionSurfaceOverlay`,
+- [x] **wire**: Replace `BlockTopAnnulusOverlay` with `CollisionSurfaceOverlay`,
   register it in `WorldOverlayManager.bootstrap()`, gate `isVisible` on
   holding-a-stick + non-empty snapshot, and drop the color cycle (`onUseItem` is
   a no-op / arm-swing only for now).
-- [ ] **verify**: Via `runClient`, confirm the per-block shape correctness cases
+- [x] **verify**: Via `runClient`, confirm the per-block shape correctness cases
   (full / slab / stairs / fence / tall grass / carpet) from Acceptance before
   proceeding.
 
 ### Stage 2 - cache + brush behavior (only after Stage 1 works)
 
-- [ ] **cache**: Add `SurfaceCache` (`BlockPos -> {BlockState, List<StandableRect>}`,
+- [x] **cache**: Add `SurfaceCache` (`BlockPos -> {BlockState, List<StandableRect>}`,
   in-memory, non-persistent) acting as both compute-cache and brush selection
   set: insert/get-or-compute, prune stale entries by `BlockState`, `clear()`, and
   read-all-rects.
-- [ ] **brush**: Change `extract` to **add** the hovered block to the
+- [x] **brush**: Change `extract` to **add** the hovered block to the
   `SurfaceCache` (accumulate the selection) instead of recomputing one block,
   prune stale entries, and publish the combined rects of all entries to the
   snapshot so every selected block is drawn each frame. Make `onUseItem` clear
-  the cache, and add a world-unload / disconnect hook that clears it.
-- [ ] **docs**: Update `docs/rendering.md` (new widget, collision-shape +
+  the cache. (World-unload/disconnect reset is done via a self-contained
+  **level-identity check** in `extract` rather than a manager-side hook.)
+- [x] **docs**: Update `docs/rendering.md` (new widget, collision-shape +
   brush/selection approach, rectangles + double-precision rationale), `AGENTS.md`
   Current status / Future work, and this `PLAN.md`.

@@ -1,9 +1,9 @@
 package com.example.overlay.client.widgets;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import com.example.overlay.client.StandableRect;
+import com.example.overlay.client.SurfaceCache;
 import com.example.overlay.client.WorldOverlay;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -15,27 +15,29 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
 /**
- * Draws the horizontal collision surface (upward-facing collision faces) of the
- * block under the crosshair, but only while holding a stick. The top face of
- * every collision sub-box is emitted; depth-testing against real geometry hides
- * the parts buried inside blocks, so the visible result is the standable surface
- * (e.g. stairs render as an L). See {@code PLAN.md} for the rationale.
+ * Draws the horizontal collision surface (upward-facing collision faces) of
+ * blocks the player paints with a stick. The top face of every collision
+ * sub-box is emitted; depth-testing against real geometry hides the parts
+ * buried inside blocks, so the visible result is the standable surface (e.g.
+ * stairs render as an L). See {@code PLAN.md} for the rationale.
  *
- * <p>Stage 1: single hovered block, recomputed every frame (no cache). The
- * stick-as-brush selection set and the surface cache arrive in Stage 2.
+ * <p>The stick is a <b>brush</b>: while held, the block under the crosshair
+ * (resolved downward to the first non-empty collision shape) is added to a
+ * persistent {@link SurfaceCache} each frame, so sweeping paints a trail. Every
+ * selected block's surface is drawn every frame; right-clicking clears the
+ * selection. The selection persists when you switch items and reappears on
+ * re-equip; it is emptied only by right-click or a level change.
  *
- * <p>Immediate-mode like the other world overlays: each frame rebuilds the
- * rectangle snapshot in {@link #extract} and re-emits it in {@link #emit}.
+ * <p>Immediate-mode like the other world overlays: each frame {@link #extract}
+ * publishes the cache's combined rectangles into a {@code volatile} snapshot
+ * that {@link #emit} re-emits.
  */
 public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
@@ -49,6 +51,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
+
+	// Brush selection set + compute-cache. Touched only on the extraction thread.
+	private final SurfaceCache cache = new SurfaceCache();
+
+	// Last level seen on the extraction thread. A change (world unload, dimension
+	// switch, disconnect/reconnect) empties the in-memory selection — a
+	// self-contained alternative to a manager-side world-unload hook.
+	private Level lastLevel;
 
 	// Written on the extraction path, read on the render thread, so volatile.
 	private volatile boolean holdingStick = false;
@@ -65,20 +75,33 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		Player player = client.player;
 		Level level = client.level;
 
+		if (level != lastLevel) {
+			cache.clear();
+			lastLevel = level;
+		}
+
 		holdingStick = player != null && player.getMainHandItem().is(Items.STICK);
-		if (!holdingStick || level == null) {
+		if (level == null) {
 			snapshot = List.of();
 			return;
 		}
 
-		HitResult hit = client.hitResult;
-		if (hit == null || hit.getType() != HitResult.Type.BLOCK || !(hit instanceof BlockHitResult blockHit)) {
-			snapshot = List.of();
-			return;
+		// Place/break can invalidate already-painted blocks; reconcile first.
+		cache.pruneStale(level);
+
+		// Brushing = inserting: while holding a stick, add the hovered block to the
+		// selection (compute-once). The selection itself persists when not holding.
+		if (holdingStick) {
+			HitResult hit = client.hitResult;
+			if (hit != null && hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit) {
+				BlockPos resolved = resolveDownward(level, blockHit.getBlockPos());
+				if (resolved != null) {
+					cache.add(level, resolved);
+				}
+			}
 		}
 
-		BlockPos resolved = resolveDownward(level, blockHit.getBlockPos());
-		snapshot = resolved == null ? List.of() : buildRects(level, resolved);
+		snapshot = cache.allRects();
 	}
 
 	// Walk down from the targeted block until a non-empty collision shape is
@@ -88,35 +111,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		BlockPos.MutableBlockPos cursor = start.mutable();
 		int minY = level.getMinY();
 		for (int step = 0; step < MAX_DOWNWARD_STEPS && cursor.getY() >= minY; step++) {
-			BlockState state = level.getBlockState(cursor);
-			if (!state.getCollisionShape(level, cursor, CollisionContext.empty()).isEmpty()) {
+			if (!level.getBlockState(cursor).getCollisionShape(level, cursor, CollisionContext.empty()).isEmpty()) {
 				return cursor.immutable();
 			}
 			cursor.move(0, -1, 0);
 		}
 		return null;
-	}
-
-	// Each collision sub-box's top (maxY) over its [minX,maxX] x [minZ,maxZ]
-	// footprint is one standable rectangle, in absolute world coords.
-	private static List<StandableRect> buildRects(Level level, BlockPos pos) {
-		BlockState state = level.getBlockState(pos);
-		VoxelShape shape = state.getCollisionShape(level, pos, CollisionContext.empty());
-		if (shape.isEmpty()) {
-			return List.of();
-		}
-
-		List<AABB> boxes = shape.toAabbs();
-		List<StandableRect> rects = new ArrayList<>(boxes.size());
-		for (AABB box : boxes) {
-			rects.add(new StandableRect(
-				pos.getX() + box.minX,
-				pos.getZ() + box.minZ,
-				pos.getX() + box.maxX,
-				pos.getZ() + box.maxZ,
-				pos.getY() + box.maxY));
-		}
-		return rects;
 	}
 
 	@Override
@@ -126,8 +126,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void onUseItem(Player player, InteractionHand hand) {
-		// Stage 1: no selection to clear yet; keep the arm-swing feedback only.
+		// Right-click with the stick resets the selection. (While still holding the
+		// stick, the next frame re-adds the hovered block, so a reset leaves at most
+		// the block currently under the crosshair.)
 		if (player.getItemInHand(hand).is(Items.STICK)) {
+			cache.clear();
 			player.swing(hand);
 		}
 	}
