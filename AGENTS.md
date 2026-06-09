@@ -137,6 +137,17 @@ for end-to-end render smoke tests (run headless in CI with XVFB).
   schema processing). This only proves it **compiles** — winding, culling,
   depth/z-fighting, visibility, once-per-click cycling, and the swing animation
   are runtime-only and must be checked with `./gradlew runClient`.
+- **Stage every plan with its own in-game checks.** Because behavior here is
+  almost entirely runtime/visual, the build gate is necessary but far from
+  sufficient. Break each plan (`PLAN.md`) into small stages, and give **every
+  stage its own checklist of concrete, verifiable in-game tests** — a specific
+  action plus the exact expected on-screen result (e.g. "right-click a slab → its
+  half-height top face is drawn, and only that block"), not a vague "looks
+  right". Each stage's checklist ends with the `./gradlew build` gate. Run (or
+  ask the user to run) a stage's checks **before** starting the next stage, so a
+  regression is caught at the stage that introduced it rather than at the end.
+  A handful of cross-cutting checks (server no-op, no errors on resize/world
+  change) apply to every stage.
 - **Manual acceptance checklist:**
   1. `runClient` launches with no errors in the log.
   2. **HUD:** in a world, the box + label is visible at the chosen corner and
@@ -238,6 +249,12 @@ incremental:
   branched off `main`.
 - Commit logical changes separately with clear messages; do not force-push or
   amend unless asked.
+- **Don't commit until confirmed in-game.** A green `./gradlew build` is not
+  sufficient to commit — behavior here is runtime/visual (see **Testing**). Make
+  the edits, run the build gate, then **wait until the stage's in-game checks
+  pass** (the user confirms them, or you run `runClient` and verify) before
+  committing. This applies to `PLAN.md` / doc updates too: don't commit a
+  stage's plan or doc change until that stage is actually confirmed working.
 - **Squash planning commits before dev.** When a task goes through a planning
   phase (e.g. plan mode) that produces multiple `Plan:` commits, squash them
   into a single plan commit before starting the implementation work, so the
