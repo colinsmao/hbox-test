@@ -14,14 +14,16 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * The brush selection set and the compute-cache in one structure: a
- * {@code BlockPos -> {BlockState, List<StandableRect>}} map. Brushing inserts;
- * every entry's rectangles are the draw set. In-memory only, not persisted.
+ * The selection set and the compute-cache in one structure: a
+ * {@code BlockPos -> {BlockState, List<StandableRect>}} map. {@link #select}
+ * (re)populates it from a right-click; every entry's rectangles are the draw
+ * set. In-memory only, not persisted.
  *
- * <p>Not thread-safe by design. It is mutated only on the client/extraction
- * thread ({@code add}/{@code pruneStale}/{@code clear}); the render thread never
- * touches it — the overlay publishes an immutable {@link #allRects()} snapshot
- * into a {@code volatile} field for {@code emit} to read.
+ * <p>Not thread-safe by design. It is mutated only on the client thread
+ * ({@code select}/{@code add}/{@code pruneStale}/{@code clear}); the render
+ * thread never touches it — the overlay publishes an immutable
+ * {@link #allRects()} snapshot into a {@code volatile} field for {@code emit}
+ * to read.
  */
 public final class SurfaceCache {
 	private record Entry(BlockState state, List<StandableRect> rects) {
@@ -31,10 +33,19 @@ public final class SurfaceCache {
 	private final Map<BlockPos, Entry> entries = new LinkedHashMap<>();
 
 	/**
+	 * Replace the selection with a single resolved block (compute-once). This is
+	 * the right-click trigger entry point; v1b will widen it into a neighbor
+	 * flood that keeps {@link #add}ing the connected blocks.
+	 */
+	public void select(Level level, BlockPos pos) {
+		clear();
+		add(level, pos);
+	}
+
+	/**
 	 * Add a resolved block to the selection, computing its rectangles once. A
-	 * block already present with the same {@link BlockState} is left untouched, so
-	 * a sweeping crosshair accumulates entries cheaply. Blocks whose collision
-	 * shape is empty are not stored.
+	 * block already present with the same {@link BlockState} is left untouched.
+	 * Blocks whose collision shape is empty are not stored.
 	 */
 	public void add(Level level, BlockPos pos) {
 		BlockPos key = pos.immutable();

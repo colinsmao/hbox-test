@@ -23,17 +23,18 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
 /**
  * Draws the horizontal collision surface (upward-facing collision faces) of
- * blocks the player paints with a stick. The top face of every collision
+ * blocks the player selects with a stick. The top face of every collision
  * sub-box is emitted; depth-testing against real geometry hides the parts
  * buried inside blocks, so the visible result is the standable surface (e.g.
  * stairs render as an L). See {@code PLAN.md} for the rationale.
  *
- * <p>The stick is a <b>brush</b>: while held, the block under the crosshair
- * (resolved downward to the first non-empty collision shape) is added to a
- * persistent {@link SurfaceCache} each frame, so sweeping paints a trail. Every
- * selected block's surface is drawn every frame; right-clicking clears the
- * selection. The selection persists when you switch items and reappears on
- * re-equip; it is emptied only by right-click or a level change.
+ * <p>The stick is a <b>trigger</b>: right-clicking selects the block under the
+ * crosshair (resolved downward to the first non-empty collision shape) into a
+ * persistent {@link SurfaceCache}, replacing any previous selection;
+ * right-clicking nothing clears it. (v1b will widen a right-click to the
+ * block's connected neighbors.) Every selected block's surface is drawn every
+ * frame; the selection persists when you switch items and reappears on
+ * re-equip, and is emptied by a clearing right-click or a level change.
  *
  * <p>Immediate-mode like the other world overlays: each frame {@link #extract}
  * publishes the cache's combined rectangles into a {@code volatile} snapshot
@@ -52,7 +53,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
 
-	// Brush selection set + compute-cache. Touched only on the extraction thread.
+	// Selection set + compute-cache. Mutated on the client thread: extract prunes
+	// it; the use-key trigger (onUseItem) (re)selects or clears it.
 	private final SurfaceCache cache = new SurfaceCache();
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
@@ -86,20 +88,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return;
 		}
 
-		// Place/break can invalidate already-painted blocks; reconcile first.
+		// Place/break can invalidate already-selected blocks; reconcile first. The
+		// selection itself only changes on the right-click trigger (onUseItem).
 		cache.pruneStale(level);
-
-		// Brushing = inserting: while holding a stick, add the hovered block to the
-		// selection (compute-once). The selection itself persists when not holding.
-		if (holdingStick) {
-			HitResult hit = client.hitResult;
-			if (hit != null && hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit) {
-				BlockPos resolved = resolveDownward(level, blockHit.getBlockPos());
-				if (resolved != null) {
-					cache.add(level, resolved);
-				}
-			}
-		}
 
 		snapshot = cache.allRects();
 	}
@@ -126,13 +117,29 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void onUseItem(Player player, InteractionHand hand) {
-		// Right-click with the stick resets the selection. (While still holding the
-		// stick, the next frame re-adds the hovered block, so a reset leaves at most
-		// the block currently under the crosshair.)
-		if (player.getItemInHand(hand).is(Items.STICK)) {
-			cache.clear();
-			player.swing(hand);
+		// Right-click with the stick (re)selects the targeted block, resolved
+		// downward to its standable surface, replacing the previous selection;
+		// right-clicking nothing clears it. v1b will widen the hit into a flood.
+		if (!player.getItemInHand(hand).is(Items.STICK)) {
+			return;
 		}
+
+		Minecraft client = Minecraft.getInstance();
+		Level level = client.level;
+		BlockPos start = null;
+		if (level != null) {
+			HitResult hit = client.hitResult;
+			if (hit != null && hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit) {
+				start = resolveDownward(level, blockHit.getBlockPos());
+			}
+		}
+
+		if (start != null) {
+			cache.select(level, start);
+		} else {
+			cache.clear();
+		}
+		player.swing(hand);
 	}
 
 	@Override
