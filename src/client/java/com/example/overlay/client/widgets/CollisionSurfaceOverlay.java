@@ -3,7 +3,7 @@ package com.example.overlay.client.widgets;
 import java.util.List;
 
 import com.example.overlay.client.StandableRect;
-import com.example.overlay.client.SurfaceCache;
+import com.example.overlay.client.SurfaceSelection;
 import com.example.overlay.client.WorldOverlay;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -24,7 +24,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 /**
  * Draws the standable surfaces (upward-facing collision faces an entity can
  * stand on) of a region the player selects with a stick. The surfaces are
- * occlusion-aware (computed in {@link SurfaceCache#select}): only tops not
+ * occlusion-aware (computed in {@link SurfaceSelection#select}): only tops not
  * covered by something directly above are emitted, so e.g. a stair renders as
  * its exposed L. For debugging this milestone the world-overlay pipeline draws
  * <b>through walls</b> (depth test disabled in {@code WorldOverlayManager}) so
@@ -35,7 +35,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * the block under the crosshair (resolved downward to the first non-empty
  * collision shape) outward across walkable, footprint-adjacent surfaces within a
  * one-block step, out to the current flood radius (block transitions) into a
- * persistent {@link SurfaceCache}, replacing any previous selection;
+ * persistent {@link SurfaceSelection}, replacing any previous selection;
  * right-clicking nothing clears it. The radius is adjustable at runtime via
  * shift+scroll while holding the stick ({@link #adjustRadius}). Each surface is
  * drawn as a translucent fill with an opaque outline. Every selected
@@ -76,7 +76,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Selection set + compute-cache. Mutated on the client thread: extract prunes
 	// it; the use-key trigger (onUseItem) (re)selects or clears it.
-	private final SurfaceCache cache = new SurfaceCache();
+	private final SurfaceSelection cache = new SurfaceSelection();
 
 	// Current flood radius and the last resolved seed block, so a radius change
 	// can re-flood from the same origin. Both touched only on the client thread
@@ -92,7 +92,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Written on the extraction path, read on the render thread, so volatile.
 	private volatile boolean holdingStick = false;
-	private volatile List<SurfaceCache.DistancedRect> snapshot = List.of();
+	private volatile List<SurfaceSelection.DistancedRect> snapshot = List.of();
 
 	@Override
 	public String id() {
@@ -198,12 +198,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void emit(Matrix4fc positionMatrix, BufferBuilder buffer) {
-		List<SurfaceCache.DistancedRect> rects = snapshot;
+		List<SurfaceSelection.DistancedRect> rects = snapshot;
 		if (rects.isEmpty()) {
 			return;
 		}
 
-		for (SurfaceCache.DistancedRect tagged : rects) {
+		for (SurfaceSelection.DistancedRect tagged : rects) {
 			StandableRect rect = tagged.rect();
 			float minX = (float) rect.minX();
 			float minZ = (float) rect.minZ();

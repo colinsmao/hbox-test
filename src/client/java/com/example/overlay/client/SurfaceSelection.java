@@ -46,7 +46,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * {@link #allRects()} snapshot into a {@code volatile} field for {@code emit}
  * to read.
  */
-public final class SurfaceCache {
+public final class SurfaceSelection {
 	// distance = flood block-transition distance from the seed (seed = 0). Carried
 	// so the overlay can tint surfaces by connectivity distance (v1.5 debug aid).
 	private record Entry(BlockState state, List<StandableRect> rects, int distance) {

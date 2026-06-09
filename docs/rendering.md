@@ -76,7 +76,7 @@ compiler and stale training data won't hand you.
   mid-session renderer reload). `CollisionSurfaceOverlay` (Milestone 3, below)
   is the widget that currently exercises this framework.
 
-## Block-hitbox rendering (Milestone 3): `CollisionSurfaceOverlay` + `SurfaceCache`
+## Block-hitbox rendering (Milestone 3): `CollisionSurfaceOverlay` + `SurfaceSelection`
 
 Draws the **standable surfaces** of blocks — the upward-facing collision faces
 an entity can stand on — for a region the player selects with a stick, where the
@@ -93,7 +93,7 @@ region follows **walkable terrain** outward from the clicked block.
   targeted block **downward** (`MutableBlockPos.move(0,-1,0)`, capped and floored
   at `level.getMinY()`) to the first non-empty shape, so looking at tall grass
   resolves to the block beneath it.
-- **Surface-indexed walkable flood (`SurfaceCache.select`).** The flood unit is a
+- **Surface-indexed walkable flood (`SurfaceSelection.select`).** The flood unit is a
   single standable **surface** (`StandableRect`), not a block, so a stair is two
   nodes (tread + top) and stacked surfaces (spiral staircases, overhangs) stay
   distinct. From a surface at top `T` the flood considers the exposed surfaces of
@@ -150,11 +150,10 @@ region follows **walkable terrain** outward from the clicked block.
   may re-enable depth and a fixed color.
 - **World-space doubles, not a 1/16 grid:** each surface is a `StandableRect`
   (`record StandableRect(double minX, minZ, maxX, maxZ, topY)`) in absolute
-  world coords (the resolved `BlockPos` folded in). Quantizing is skipped on
-  purpose — a planned later step expands these by entity dimensions (e.g. ravager
-  `1.95`) that are not `1/16`-aligned, so rounding/precision is deferred to that
-  future math layer. Edge/overlap compares are epsilon-tolerant (`EPS = 1e-6`).
-- **`SurfaceCache` is both the selection set and the compute-cache:** a
+  world coords (the resolved `BlockPos` folded in). Edge/overlap compares are
+  epsilon-tolerant (`EPS = 1e-6`). The representation and the rect-space (not
+  pixel-raster) decision behind it live in [`geometry.md`](geometry.md).
+- **`SurfaceSelection` is both the selection set and the compute-cache:** a
   `BlockPos -> {BlockState, List<StandableRect>, distance}` map. `select` floods
   and `add`s each reached block's exposed surfaces (compute-once; already-present
   blocks with an unchanged `BlockState` are not recomputed). Storage stays
@@ -198,7 +197,7 @@ region follows **walkable terrain** outward from the clicked block.
 - `OverlayClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the world overlay's radius and the HUD indicator.
-- `SurfaceCache.java`: the surface-indexed 0-1 BFS (sibling=free, neighbor=+1),
+- `SurfaceSelection.java`: the surface-indexed 0-1 BFS (sibling=free, neighbor=+1),
   the own-column vertical edge (partial-footprint block to the block below),
   occlusion-aware `exposedSurfaces` + guillotine `subtractRects`, the
   footprint-adjacency edge test + `MAX_STEP` height gate, the bounded
