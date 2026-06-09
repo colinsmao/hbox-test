@@ -137,17 +137,32 @@ for end-to-end render smoke tests (run headless in CI with XVFB).
   schema processing). This only proves it **compiles** — winding, culling,
   depth/z-fighting, visibility, once-per-click cycling, and the swing animation
   are runtime-only and must be checked with `./gradlew runClient`.
-- **Stage every plan with its own in-game checks.** Because behavior here is
-  almost entirely runtime/visual, the build gate is necessary but far from
-  sufficient. Break each plan (`PLAN.md`) into small stages, and give **every
-  stage its own checklist of concrete, verifiable in-game tests** — a specific
-  action plus the exact expected on-screen result (e.g. "right-click a slab → its
-  half-height top face is drawn, and only that block"), not a vague "looks
-  right". Each stage's checklist ends with the `./gradlew build` gate. Run (or
-  ask the user to run) a stage's checks **before** starting the next stage, so a
-  regression is caught at the stage that introduced it rather than at the end.
-  A handful of cross-cutting checks (server no-op, no errors on resize/world
-  change) apply to every stage.
+
+### Stage-gating is MANDATORY (the most-missed rule)
+
+> Behavior here is almost entirely runtime/visual, so a green `./gradlew build`
+> proves *almost nothing*. **Every plan stage MUST have its own in-game
+> checklist, and you MUST NOT proceed past a stage (or commit it) until that
+> checklist passes.** This rule gets skipped constantly — do not skip it.
+
+Concretely, for **every** stage of a plan:
+
+1. **Write the checklist into the plan.** Each stage in `PLAN.md` carries its own
+   list of concrete, verifiable in-game tests — a specific **action** plus the
+   exact expected **on-screen result** (e.g. "right-click a slab → its
+   half-height top face is drawn, and only that block"), never a vague "looks
+   right". Each stage's checklist ends with the `./gradlew build` gate.
+2. **Surface the checklist when the stage's code is done.** After the edits build,
+   present that stage's checklist verbatim and **run it yourself** (`runClient`)
+   or ask the user to run it. Do not silently move on.
+3. **Gate on it.** Only start the next stage — and only commit (see
+   **Git / workflow → Don't commit until confirmed in-game**) — once the
+   checklist passes, so a regression is caught at the stage that introduced it
+   rather than at the end.
+
+A handful of cross-cutting checks (server no-op, no errors on resize/world
+change) apply to every stage.
+
 - **Manual acceptance checklist:**
   1. `runClient` launches with no errors in the log.
   2. **HUD:** in a world, the box + label is visible at the chosen corner and
