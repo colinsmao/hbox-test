@@ -25,14 +25,16 @@ generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
 `build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
 [`docs/rendering.md`](docs/rendering.md).
 
-- **Milestone 1 — minimal working mod (HUD):** a demo HUD overlay (box + label,
-  top-left, hidden by F1) via `Overlay` / `OverlayManager`.
+- **Milestone 1 — minimal working mod (HUD):** a HUD overlay framework
+ (`Overlay` / `OverlayManager`); the current widget is `RadiusIndicatorOverlay`,
+ a transient flood-radius readout near the crosshair.
 - **Milestone 2 — in-world rendering:** a `WorldOverlay` / `WorldOverlayManager`
-  framework that draws arbitrary geometry in the world (extract/draw split over
-  `LevelRenderEvents`, one shared filled pipeline, use-key edge dispatch).
-- **Milestone 3 — block-hitbox rendering:** draws blocks' horizontal collision
-  surfaces while holding a stick; the stick is a brush that paints a persistent
-  selection (`SurfaceCache`), and right-click resets it.
+ framework that draws arbitrary geometry in the world (extract/draw split over
+ `LevelRenderEvents`, one shared filled pipeline, use-key edge dispatch).
+- **Milestone 3 — block-hitbox rendering:** right-clicking a block with a stick
+ selects the standable surfaces reachable by a walkable flood (`SurfaceCache`),
+ drawn as fill + outline; shift+scroll (while holding the stick) sets the flood
+ radius. Right-clicking nothing clears it.
 
 ## Repository layout
 
@@ -56,10 +58,10 @@ it.
         ├── WorldOverlay.java                # in-world widget interface
         ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
         ├── StandableRect.java               # world-space standable rectangle
-        ├── SurfaceCache.java                # brush selection set + compute-cache
+        ├── SurfaceCache.java                # surface selection + walkable flood + cache
         └── widgets/
-            ├── HelloOverlay.java            # demo HUD box + label
-            └── CollisionSurfaceOverlay.java # collision surfaces on brushed blocks
+            ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
+            └── CollisionSurfaceOverlay.java  # standable-surface selection + flood
 ```
 
 `fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`
