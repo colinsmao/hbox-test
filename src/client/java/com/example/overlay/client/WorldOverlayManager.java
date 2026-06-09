@@ -2,6 +2,7 @@ package com.example.overlay.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 
@@ -50,11 +51,14 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 public final class WorldOverlayManager {
 	private static final List<WorldOverlay> OVERLAYS = new ArrayList<>();
 
-	// Reuses vanilla's filled debug pipeline (QUADS + POSITION_COLOR). For a
-	// through-walls variant, add .withDepthStencilState(Optional.empty()) here.
+	// Reuses vanilla's filled debug pipeline (QUADS + POSITION_COLOR). Depth test
+	// is disabled (withDepthStencilState empty) so overlay surfaces draw THROUGH
+	// solid geometry — a v1.5 debug aid that reveals surfaces buried inside blocks
+	// (e.g. occlusion bugs). v2 keeps this; final rendering may re-enable depth.
 	private static final RenderPipeline FILLED = RenderPipelines.register(
 		RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
 			.withLocation(Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "pipeline/world_overlay_filled"))
+			.withDepthStencilState(Optional.empty())
 			.build()
 	);
 

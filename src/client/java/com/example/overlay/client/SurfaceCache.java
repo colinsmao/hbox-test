@@ -31,7 +31,13 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * to read.
  */
 public final class SurfaceCache {
-	private record Entry(BlockState state, List<StandableRect> rects) {
+	// distance = BFS ring distance from the selection seed (seed = 0). Carried so
+	// the overlay can tint surfaces by connectivity distance (v1.5 debug aid).
+	private record Entry(BlockState state, List<StandableRect> rects, int distance) {
+	}
+
+	/** A standable rectangle tagged with its BFS distance from the seed. */
+	public record DistancedRect(StandableRect rect, int distance) {
 	}
 
 	// LinkedHashMap for deterministic iteration (stable draw order).
@@ -58,7 +64,7 @@ public final class SurfaceCache {
 	public void select(Level level, BlockPos start, int radius) {
 		clear();
 		BlockPos origin = start.immutable();
-		add(level, origin);
+		add(level, origin, 0);
 
 		Set<BlockPos> visited = new HashSet<>();
 		visited.add(origin);
@@ -74,7 +80,7 @@ public final class SurfaceCache {
 						continue;
 					}
 					if (isStandable(level, next)) {
-						add(level, next);
+						add(level, next, depth + 1);
 						frontier.add(next);
 					}
 				}
@@ -89,11 +95,12 @@ public final class SurfaceCache {
 	}
 
 	/**
-	 * Add a resolved block to the selection, computing its rectangles once. A
-	 * block already present with the same {@link BlockState} is left untouched.
-	 * Blocks whose collision shape is empty are not stored.
+	 * Add a resolved block to the selection at the given BFS {@code distance},
+	 * computing its rectangles once. A block already present with the same
+	 * {@link BlockState} is left untouched (BFS reaches each block once, at its
+	 * shortest distance). Blocks whose collision shape is empty are not stored.
 	 */
-	public void add(Level level, BlockPos pos) {
+	public void add(Level level, BlockPos pos, int distance) {
 		BlockPos key = pos.immutable();
 		BlockState state = level.getBlockState(key);
 
@@ -106,7 +113,7 @@ public final class SurfaceCache {
 		if (rects.isEmpty()) {
 			entries.remove(key);
 		} else {
-			entries.put(key, new Entry(state, rects));
+			entries.put(key, new Entry(state, rects, distance));
 		}
 	}
 
@@ -129,7 +136,7 @@ public final class SurfaceCache {
 			if (rects.isEmpty()) {
 				it.remove();
 			} else {
-				mapEntry.setValue(new Entry(current, rects));
+				mapEntry.setValue(new Entry(current, rects, mapEntry.getValue().distance()));
 			}
 		}
 	}
@@ -142,15 +149,20 @@ public final class SurfaceCache {
 		return entries.isEmpty();
 	}
 
-	/** Immutable snapshot of every selected block's rectangles, concatenated. */
-	public List<StandableRect> allRects() {
+	/**
+	 * Immutable snapshot of every selected block's rectangles, concatenated, each
+	 * tagged with its owning block's BFS distance for distance-based coloring.
+	 */
+	public List<DistancedRect> allRects() {
 		if (entries.isEmpty()) {
 			return List.of();
 		}
 
-		List<StandableRect> all = new ArrayList<>();
+		List<DistancedRect> all = new ArrayList<>();
 		for (Entry entry : entries.values()) {
-			all.addAll(entry.rects());
+			for (StandableRect rect : entry.rects()) {
+				all.add(new DistancedRect(rect, entry.distance()));
+			}
 		}
 		return all;
 	}

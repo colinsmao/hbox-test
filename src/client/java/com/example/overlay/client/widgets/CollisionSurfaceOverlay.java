@@ -24,9 +24,11 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 /**
  * Draws the horizontal collision surface (upward-facing collision faces) of
  * blocks the player selects with a stick. The top face of every collision
- * sub-box is emitted; depth-testing against real geometry hides the parts
- * buried inside blocks, so the visible result is the standable surface (e.g.
- * stairs render as an L). See {@code PLAN.md} for the rationale.
+ * sub-box is emitted. For debugging this milestone the world-overlay pipeline
+ * draws <b>through walls</b> (depth test disabled in {@code WorldOverlayManager})
+ * so surfaces buried inside solid blocks are visible, and each surface is tinted
+ * by its BFS distance from the clicked block (an HSV hue ramp). See
+ * {@code PLAN.md} for the rationale.
  *
  * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
@@ -43,12 +45,16 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  */
 public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
-	// surface. The fixed surface color (no palette/cycle in this milestone).
+	// surface.
 	private static final double Y_OFFSET = 0.01;
-	private static final float RED = 0.2f;
-	private static final float GREEN = 0.8f;
-	private static final float BLUE = 1.0f;
 	private static final float ALPHA = 0.5f;
+
+	// Distance coloring (v1.5 debug): each BFS ring gets a distinct hue so the
+	// flood's connectivity is visible. HUE_STEP is the hue advance per ring;
+	// 0.15 keeps several rings distinguishable before the wheel wraps.
+	private static final float HUE_STEP = 0.15f;
+	private static final float SATURATION = 0.9f;
+	private static final float VALUE = 1.0f;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
@@ -69,7 +75,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Written on the extraction path, read on the render thread, so volatile.
 	private volatile boolean holdingStick = false;
-	private volatile List<StandableRect> snapshot = List.of();
+	private volatile List<SurfaceCache.DistancedRect> snapshot = List.of();
 
 	@Override
 	public String id() {
@@ -149,33 +155,62 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void emit(Matrix4fc positionMatrix, BufferBuilder buffer) {
-		List<StandableRect> rects = snapshot;
+		List<SurfaceCache.DistancedRect> rects = snapshot;
 		if (rects.isEmpty()) {
 			return;
 		}
 
-		for (StandableRect rect : rects) {
+		for (SurfaceCache.DistancedRect tagged : rects) {
+			StandableRect rect = tagged.rect();
 			float minX = (float) rect.minX();
 			float minZ = (float) rect.minZ();
 			float maxX = (float) rect.maxX();
 			float maxZ = (float) rect.maxZ();
 			float y = (float) (rect.topY() + Y_OFFSET);
 
+			float[] rgb = distanceColor(tagged.distance());
+			float r = rgb[0];
+			float g = rgb[1];
+			float b = rgb[2];
+
 			// A flat (zero-thickness) quad must be emitted with both windings, or
 			// back-face culling hides it from one side.
-			vertex(buffer, positionMatrix, minX, y, minZ);
-			vertex(buffer, positionMatrix, minX, y, maxZ);
-			vertex(buffer, positionMatrix, maxX, y, maxZ);
-			vertex(buffer, positionMatrix, maxX, y, minZ);
+			vertex(buffer, positionMatrix, minX, y, minZ, r, g, b);
+			vertex(buffer, positionMatrix, minX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, maxX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, maxX, y, minZ, r, g, b);
 
-			vertex(buffer, positionMatrix, maxX, y, minZ);
-			vertex(buffer, positionMatrix, maxX, y, maxZ);
-			vertex(buffer, positionMatrix, minX, y, maxZ);
-			vertex(buffer, positionMatrix, minX, y, minZ);
+			vertex(buffer, positionMatrix, maxX, y, minZ, r, g, b);
+			vertex(buffer, positionMatrix, maxX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, minX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, minX, y, minZ, r, g, b);
 		}
 	}
 
-	private static void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z) {
-		buffer.addVertex(matrix, x, y, z).setColor(RED, GREEN, BLUE, ALPHA);
+	private static void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z,
+			float r, float g, float b) {
+		buffer.addVertex(matrix, x, y, z).setColor(r, g, b, ALPHA);
+	}
+
+	// Map a BFS ring distance to an RGB color by stepping the hue per ring.
+	private static float[] distanceColor(int distance) {
+		float hue = (distance * HUE_STEP) % 1.0f;
+		return hsvToRgb(hue, SATURATION, VALUE);
+	}
+
+	private static float[] hsvToRgb(float h, float s, float v) {
+		int sector = (int) (h * 6.0f) % 6;
+		float f = h * 6.0f - (float) Math.floor(h * 6.0f);
+		float p = v * (1.0f - s);
+		float q = v * (1.0f - f * s);
+		float t = v * (1.0f - (1.0f - f) * s);
+		return switch (sector) {
+			case 0 -> new float[] {v, t, p};
+			case 1 -> new float[] {q, v, p};
+			case 2 -> new float[] {p, v, t};
+			case 3 -> new float[] {p, q, v};
+			case 4 -> new float[] {t, p, v};
+			default -> new float[] {v, p, q};
+		};
 	}
 }
