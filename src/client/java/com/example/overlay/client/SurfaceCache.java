@@ -1,12 +1,17 @@
 package com.example.overlay.client;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -32,14 +37,55 @@ public final class SurfaceCache {
 	// LinkedHashMap for deterministic iteration (stable draw order).
 	private final Map<BlockPos, Entry> entries = new LinkedHashMap<>();
 
+	// The 4 horizontal directions the flood expands over (same Y). v2 keeps this
+	// set but tightens the per-edge acceptance test (see select / isStandable).
+	private static final Direction[] HORIZONTAL_NEIGHBORS = {
+		Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST
+	};
+
 	/**
-	 * Replace the selection with a single resolved block (compute-once). This is
-	 * the right-click trigger entry point; v1b will widen it into a neighbor
-	 * flood that keeps {@link #add}ing the connected blocks.
+	 * Replace the selection with a breadth-first flood from {@code start} over
+	 * horizontally-adjacent blocks (4-connected, same Y) that have a non-empty
+	 * collision shape, out to a graph distance of {@code radius}. The seed is
+	 * distance 0, so {@code radius <= 0} selects only the seed.
+	 *
+	 * <p>Standard BFS: a work queue, a {@code visited} set so each block is
+	 * processed at most once, and ring-by-ring depth tracking so the search
+	 * terminates at {@code radius}. v2 will keep this traversal unchanged and
+	 * only replace the neighbor-acceptance test ({@link #isStandable}) with a
+	 * standable-surface reachability check (max height difference).
 	 */
-	public void select(Level level, BlockPos pos) {
+	public void select(Level level, BlockPos start, int radius) {
 		clear();
-		add(level, pos);
+		BlockPos origin = start.immutable();
+		add(level, origin);
+
+		Set<BlockPos> visited = new HashSet<>();
+		visited.add(origin);
+		Deque<BlockPos> frontier = new ArrayDeque<>();
+		frontier.add(origin);
+
+		for (int depth = 0; depth < radius && !frontier.isEmpty(); depth++) {
+			for (int ring = frontier.size(); ring > 0; ring--) {
+				BlockPos current = frontier.poll();
+				for (Direction dir : HORIZONTAL_NEIGHBORS) {
+					BlockPos next = current.relative(dir);
+					if (!visited.add(next)) {
+						continue;
+					}
+					if (isStandable(level, next)) {
+						add(level, next);
+						frontier.add(next);
+					}
+				}
+			}
+		}
+	}
+
+	// v1b acceptance test: any block with a non-empty collision shape at this
+	// exact Y. v2 widens this to a reachability check across standable surfaces.
+	private static boolean isStandable(Level level, BlockPos pos) {
+		return !level.getBlockState(pos).getCollisionShape(level, pos, CollisionContext.empty()).isEmpty();
 	}
 
 	/**

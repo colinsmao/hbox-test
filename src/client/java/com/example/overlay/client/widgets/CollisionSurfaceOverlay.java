@@ -28,13 +28,14 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * buried inside blocks, so the visible result is the standable surface (e.g.
  * stairs render as an L). See {@code PLAN.md} for the rationale.
  *
- * <p>The stick is a <b>trigger</b>: right-clicking selects the block under the
- * crosshair (resolved downward to the first non-empty collision shape) into a
- * persistent {@link SurfaceCache}, replacing any previous selection;
- * right-clicking nothing clears it. (v1b will widen a right-click to the
- * block's connected neighbors.) Every selected block's surface is drawn every
- * frame; the selection persists when you switch items and reappears on
- * re-equip, and is emptied by a clearing right-click or a level change.
+ * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
+ * the block under the crosshair (resolved downward to the first non-empty
+ * collision shape) outward across horizontally-connected blocks, out to
+ * {@code SELECTION_RADIUS}, into a persistent {@link SurfaceCache}, replacing
+ * any previous selection; right-clicking nothing clears it. Every selected
+ * block's surface is drawn every frame; the selection persists when you switch
+ * items and reappears on re-equip, and is emptied by a clearing right-click or
+ * a level change.
  *
  * <p>Immediate-mode like the other world overlays: each frame {@link #extract}
  * publishes the cache's combined rectangles into a {@code volatile} snapshot
@@ -52,6 +53,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
+
+	// Graph distance the right-click flood expands from the targeted block.
+	// A constant for now; a future config could expose it.
+	private static final int SELECTION_RADIUS = 3;
 
 	// Selection set + compute-cache. Mutated on the client thread: extract prunes
 	// it; the use-key trigger (onUseItem) (re)selects or clears it.
@@ -117,9 +122,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void onUseItem(Player player, InteractionHand hand) {
-		// Right-click with the stick (re)selects the targeted block, resolved
-		// downward to its standable surface, replacing the previous selection;
-		// right-clicking nothing clears it. v1b will widen the hit into a flood.
+		// Right-click with the stick floods the selection from the targeted block
+		// (resolved downward to its standable surface) across connected neighbors,
+		// replacing the previous selection; right-clicking nothing clears it.
 		if (!player.getItemInHand(hand).is(Items.STICK)) {
 			return;
 		}
@@ -135,7 +140,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start);
+			cache.select(level, start, SELECTION_RADIUS);
 		} else {
 			cache.clear();
 		}
