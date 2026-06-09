@@ -128,6 +128,33 @@ already injected — no manual install needed for testing.
 4. Drop both the Fabric API jar and the `graphics-overlay` jar into the `mods/`
    folder of the relevant `.minecraft` profile, then launch that Fabric profile.
 
+## Shell environment (check it first)
+
+The shell differs by host: the local dev machine runs **PowerShell on Windows**,
+but a cloud agent runs **Linux/bash**. **Detect the shell before composing
+commands** (e.g. `$PSVersionTable.PSVersion` succeeds only in PowerShell; `uname`
+only in a POSIX shell) instead of assuming bash — most syntax slips below come
+from writing bash on PowerShell.
+
+PowerShell gotchas that bite repeatedly (use the wrapper, not bash habits):
+
+- **No heredocs.** `<<'EOF'` and `$(cat <<EOF …)` fail — `<<`/`<`/`>` are
+  redirection operators, not text. For a multi-line commit message use repeated
+  `-m` flags (one per paragraph) or `git commit -F <file>`; for a PR body use
+  `gh pr create --body-file <file>`. Write the file with the editor tools, not a
+  shell heredoc.
+- **`&&` / `||` chaining is unreliable.** It only works in PowerShell 7+, not
+  Windows PowerShell 5.1. Prefer separate tool calls; use `;` only when you don't
+  care whether an earlier command failed (it does **not** short-circuit on error
+  like `&&`).
+- **Quoting.** Double-quote paths with spaces; `<`, `>`, `|`, `&`, `@`, `$` are
+  special outside quotes. Avoid embedding `<email>`-style angle brackets in
+  unquoted arguments.
+
+Still prefer the specialized file tools over shell for reading/searching/editing
+(per **Conventions** and the agent harness) — that sidesteps most quoting issues
+entirely; reserve the shell for real commands (`git`, `gh`, `./gradlew`).
+
 ## Testing
 
 Rendering is visual, so testing combines an automated build gate with a manual
