@@ -137,6 +137,32 @@ for end-to-end render smoke tests (run headless in CI with XVFB).
   schema processing). This only proves it **compiles** — winding, culling,
   depth/z-fighting, visibility, once-per-click cycling, and the swing animation
   are runtime-only and must be checked with `./gradlew runClient`.
+
+### Stage-gating is MANDATORY (the most-missed rule)
+
+> Behavior here is almost entirely runtime/visual, so a green `./gradlew build`
+> proves *almost nothing*. **Every plan stage MUST have its own in-game
+> checklist, and you MUST NOT proceed past a stage (or commit it) until that
+> checklist passes.** This rule gets skipped constantly — do not skip it.
+
+Concretely, for **every** stage of a plan:
+
+1. **Write the checklist into the plan.** Each stage in `PLAN.md` carries its own
+   list of concrete, verifiable in-game tests — a specific **action** plus the
+   exact expected **on-screen result** (e.g. "right-click a slab → its
+   half-height top face is drawn, and only that block"), never a vague "looks
+   right". Each stage's checklist ends with the `./gradlew build` gate.
+2. **Surface the checklist when the stage's code is done.** After the edits build,
+   present that stage's checklist verbatim and **run it yourself** (`runClient`)
+   or ask the user to run it. Do not silently move on.
+3. **Gate on it.** Only start the next stage — and only commit (see
+   **Git / workflow → Don't commit until confirmed in-game**) — once the
+   checklist passes, so a regression is caught at the stage that introduced it
+   rather than at the end.
+
+A handful of cross-cutting checks (server no-op, no errors on resize/world
+change) apply to every stage.
+
 - **Manual acceptance checklist:**
   1. `runClient` launches with no errors in the log.
   2. **HUD:** in a world, the box + label is visible at the chosen corner and
@@ -238,6 +264,12 @@ incremental:
   branched off `main`.
 - Commit logical changes separately with clear messages; do not force-push or
   amend unless asked.
+- **Don't commit until confirmed in-game.** A green `./gradlew build` is not
+  sufficient to commit — behavior here is runtime/visual (see **Testing**). Make
+  the edits, run the build gate, then **wait until the stage's in-game checks
+  pass** (the user confirms them, or you run `runClient` and verify) before
+  committing. This applies to `PLAN.md` / doc updates too: don't commit a
+  stage's plan or doc change until that stage is actually confirmed working.
 - **Squash planning commits before dev.** When a task goes through a planning
   phase (e.g. plan mode) that produces multiple `Plan:` commits, squash them
   into a single plan commit before starting the implementation work, so the

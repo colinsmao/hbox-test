@@ -23,17 +23,21 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
 /**
  * Draws the horizontal collision surface (upward-facing collision faces) of
- * blocks the player paints with a stick. The top face of every collision
- * sub-box is emitted; depth-testing against real geometry hides the parts
- * buried inside blocks, so the visible result is the standable surface (e.g.
- * stairs render as an L). See {@code PLAN.md} for the rationale.
+ * blocks the player selects with a stick. The top face of every collision
+ * sub-box is emitted. For debugging this milestone the world-overlay pipeline
+ * draws <b>through walls</b> (depth test disabled in {@code WorldOverlayManager})
+ * so surfaces buried inside solid blocks are visible, and each surface is tinted
+ * by its BFS distance from the clicked block (an HSV hue ramp). See
+ * {@code PLAN.md} for the rationale.
  *
- * <p>The stick is a <b>brush</b>: while held, the block under the crosshair
- * (resolved downward to the first non-empty collision shape) is added to a
- * persistent {@link SurfaceCache} each frame, so sweeping paints a trail. Every
- * selected block's surface is drawn every frame; right-clicking clears the
- * selection. The selection persists when you switch items and reappears on
- * re-equip; it is emptied only by right-click or a level change.
+ * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
+ * the block under the crosshair (resolved downward to the first non-empty
+ * collision shape) outward across horizontally-connected blocks, out to
+ * {@code SELECTION_RADIUS}, into a persistent {@link SurfaceCache}, replacing
+ * any previous selection; right-clicking nothing clears it. Every selected
+ * block's surface is drawn every frame; the selection persists when you switch
+ * items and reappears on re-equip, and is emptied by a clearing right-click or
+ * a level change.
  *
  * <p>Immediate-mode like the other world overlays: each frame {@link #extract}
  * publishes the cache's combined rectangles into a {@code volatile} snapshot
@@ -41,18 +45,27 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  */
 public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
-	// surface. The fixed surface color (no palette/cycle in this milestone).
+	// surface.
 	private static final double Y_OFFSET = 0.01;
-	private static final float RED = 0.2f;
-	private static final float GREEN = 0.8f;
-	private static final float BLUE = 1.0f;
 	private static final float ALPHA = 0.5f;
+
+	// Distance coloring (v1.5 debug): each BFS ring gets a distinct hue so the
+	// flood's connectivity is visible. HUE_STEP is the hue advance per ring;
+	// 0.15 keeps several rings distinguishable before the wheel wraps.
+	private static final float HUE_STEP = 0.15f;
+	private static final float SATURATION = 0.9f;
+	private static final float VALUE = 1.0f;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
 
-	// Brush selection set + compute-cache. Touched only on the extraction thread.
+	// Graph distance the right-click flood expands from the targeted block.
+	// A constant for now; a future config could expose it.
+	private static final int SELECTION_RADIUS = 3;
+
+	// Selection set + compute-cache. Mutated on the client thread: extract prunes
+	// it; the use-key trigger (onUseItem) (re)selects or clears it.
 	private final SurfaceCache cache = new SurfaceCache();
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
@@ -62,7 +75,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Written on the extraction path, read on the render thread, so volatile.
 	private volatile boolean holdingStick = false;
-	private volatile List<StandableRect> snapshot = List.of();
+	private volatile List<SurfaceCache.DistancedRect> snapshot = List.of();
 
 	@Override
 	public String id() {
@@ -86,20 +99,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return;
 		}
 
-		// Place/break can invalidate already-painted blocks; reconcile first.
+		// Place/break can invalidate already-selected blocks; reconcile first. The
+		// selection itself only changes on the right-click trigger (onUseItem).
 		cache.pruneStale(level);
-
-		// Brushing = inserting: while holding a stick, add the hovered block to the
-		// selection (compute-once). The selection itself persists when not holding.
-		if (holdingStick) {
-			HitResult hit = client.hitResult;
-			if (hit != null && hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit) {
-				BlockPos resolved = resolveDownward(level, blockHit.getBlockPos());
-				if (resolved != null) {
-					cache.add(level, resolved);
-				}
-			}
-		}
 
 		snapshot = cache.allRects();
 	}
@@ -126,44 +128,89 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void onUseItem(Player player, InteractionHand hand) {
-		// Right-click with the stick resets the selection. (While still holding the
-		// stick, the next frame re-adds the hovered block, so a reset leaves at most
-		// the block currently under the crosshair.)
-		if (player.getItemInHand(hand).is(Items.STICK)) {
-			cache.clear();
-			player.swing(hand);
+		// Right-click with the stick floods the selection from the targeted block
+		// (resolved downward to its standable surface) across connected neighbors,
+		// replacing the previous selection; right-clicking nothing clears it.
+		if (!player.getItemInHand(hand).is(Items.STICK)) {
+			return;
 		}
+
+		Minecraft client = Minecraft.getInstance();
+		Level level = client.level;
+		BlockPos start = null;
+		if (level != null) {
+			HitResult hit = client.hitResult;
+			if (hit != null && hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit) {
+				start = resolveDownward(level, blockHit.getBlockPos());
+			}
+		}
+
+		if (start != null) {
+			cache.select(level, start, SELECTION_RADIUS);
+		} else {
+			cache.clear();
+		}
+		player.swing(hand);
 	}
 
 	@Override
 	public void emit(Matrix4fc positionMatrix, BufferBuilder buffer) {
-		List<StandableRect> rects = snapshot;
+		List<SurfaceCache.DistancedRect> rects = snapshot;
 		if (rects.isEmpty()) {
 			return;
 		}
 
-		for (StandableRect rect : rects) {
+		for (SurfaceCache.DistancedRect tagged : rects) {
+			StandableRect rect = tagged.rect();
 			float minX = (float) rect.minX();
 			float minZ = (float) rect.minZ();
 			float maxX = (float) rect.maxX();
 			float maxZ = (float) rect.maxZ();
 			float y = (float) (rect.topY() + Y_OFFSET);
 
+			float[] rgb = distanceColor(tagged.distance());
+			float r = rgb[0];
+			float g = rgb[1];
+			float b = rgb[2];
+
 			// A flat (zero-thickness) quad must be emitted with both windings, or
 			// back-face culling hides it from one side.
-			vertex(buffer, positionMatrix, minX, y, minZ);
-			vertex(buffer, positionMatrix, minX, y, maxZ);
-			vertex(buffer, positionMatrix, maxX, y, maxZ);
-			vertex(buffer, positionMatrix, maxX, y, minZ);
+			vertex(buffer, positionMatrix, minX, y, minZ, r, g, b);
+			vertex(buffer, positionMatrix, minX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, maxX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, maxX, y, minZ, r, g, b);
 
-			vertex(buffer, positionMatrix, maxX, y, minZ);
-			vertex(buffer, positionMatrix, maxX, y, maxZ);
-			vertex(buffer, positionMatrix, minX, y, maxZ);
-			vertex(buffer, positionMatrix, minX, y, minZ);
+			vertex(buffer, positionMatrix, maxX, y, minZ, r, g, b);
+			vertex(buffer, positionMatrix, maxX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, minX, y, maxZ, r, g, b);
+			vertex(buffer, positionMatrix, minX, y, minZ, r, g, b);
 		}
 	}
 
-	private static void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z) {
-		buffer.addVertex(matrix, x, y, z).setColor(RED, GREEN, BLUE, ALPHA);
+	private static void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z,
+			float r, float g, float b) {
+		buffer.addVertex(matrix, x, y, z).setColor(r, g, b, ALPHA);
+	}
+
+	// Map a BFS ring distance to an RGB color by stepping the hue per ring.
+	private static float[] distanceColor(int distance) {
+		float hue = (distance * HUE_STEP) % 1.0f;
+		return hsvToRgb(hue, SATURATION, VALUE);
+	}
+
+	private static float[] hsvToRgb(float h, float s, float v) {
+		int sector = (int) (h * 6.0f) % 6;
+		float f = h * 6.0f - (float) Math.floor(h * 6.0f);
+		float p = v * (1.0f - s);
+		float q = v * (1.0f - f * s);
+		float t = v * (1.0f - (1.0f - f) * s);
+		return switch (sector) {
+			case 0 -> new float[] {v, t, p};
+			case 1 -> new float[] {q, v, p};
+			case 2 -> new float[] {p, v, t};
+			case 3 -> new float[] {p, q, v};
+			case 4 -> new float[] {t, p, v};
+			default -> new float[] {v, p, q};
+		};
 	}
 }
