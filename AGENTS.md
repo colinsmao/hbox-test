@@ -32,7 +32,7 @@ generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
  framework that draws arbitrary geometry in the world (extract/draw split over
  `LevelRenderEvents`, one shared filled pipeline, use-key edge dispatch).
 - **Milestone 3 — block-hitbox rendering:** right-clicking a block with a stick
- selects the standable surfaces reachable by a walkable flood (`SurfaceCache`),
+ selects the standable surfaces reachable by a walkable flood (`SurfaceSelection`),
  drawn as fill + outline; shift+scroll (while holding the stick) sets the flood
  radius. Right-clicking nothing clears it.
 
@@ -58,7 +58,7 @@ it.
         ├── WorldOverlay.java                # in-world widget interface
         ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
         ├── StandableRect.java               # world-space standable rectangle
-        ├── SurfaceCache.java                # surface selection + walkable flood + cache
+        ├── SurfaceSelection.java            # surface selection + walkable flood + cache
         └── widgets/
             ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
             └── CollisionSurfaceOverlay.java  # standable-surface selection + flood
@@ -199,6 +199,8 @@ guide.
 - **No third-party rendering libraries** — a thin in-house abstraction is more
   stable than a dependency that must also chase the API churn (see
   `docs/rendering.md`).
+- **Surface/collision geometry stays in rect/double space, not a pixel raster**
+  (a raster rewrite was prototyped and rejected — see `docs/geometry.md`).
 
 ## Subsystem guides
 
@@ -210,6 +212,9 @@ area; add a new guide here as the project grows.
 - **Rendering (HUD + in-world):** [`docs/rendering.md`](docs/rendering.md) — the
   HUD/world render APIs, the `Overlay` / `WorldOverlay` frameworks, `26.1.2`
   rendering class names, and pointers to the file-specific gotchas in the code.
+- **Surface / collision geometry:** [`docs/geometry.md`](docs/geometry.md) — the
+  `StandableRect` representation, the rect/double-space (not pixel-raster)
+  decision, and the entity-width dilation model.
 
 ## Future work / roadmap
 
