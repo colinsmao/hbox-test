@@ -22,19 +22,23 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
 /**
- * Draws the horizontal collision surface (upward-facing collision faces) of
- * blocks the player selects with a stick. The top face of every collision
- * sub-box is emitted. For debugging this milestone the world-overlay pipeline
- * draws <b>through walls</b> (depth test disabled in {@code WorldOverlayManager})
- * so surfaces buried inside solid blocks are visible, and each surface is tinted
- * by its BFS distance from the clicked block (an HSV hue ramp). See
- * {@code PLAN.md} for the rationale.
+ * Draws the standable surfaces (upward-facing collision faces an entity can
+ * stand on) of a region the player selects with a stick. The surfaces are
+ * occlusion-aware (computed in {@link SurfaceCache#select}): only tops not
+ * covered by something directly above are emitted, so e.g. a stair renders as
+ * its exposed L. For debugging this milestone the world-overlay pipeline draws
+ * <b>through walls</b> (depth test disabled in {@code WorldOverlayManager}) so
+ * any remaining buried surface is visible, and each surface is tinted by its
+ * flood distance from the clicked block (an HSV hue ramp). See {@code PLAN.md}.
  *
  * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
- * collision shape) outward across horizontally-connected blocks, out to
- * {@code SELECTION_RADIUS}, into a persistent {@link SurfaceCache}, replacing
- * any previous selection; right-clicking nothing clears it. Every selected
+ * collision shape) outward across walkable, footprint-adjacent surfaces within a
+ * one-block step, out to the current flood radius (block transitions) into a
+ * persistent {@link SurfaceCache}, replacing any previous selection;
+ * right-clicking nothing clears it. The radius is adjustable at runtime via
+ * shift+scroll while holding the stick ({@link #adjustRadius}). Each surface is
+ * drawn as a translucent fill with an opaque outline. Every selected
  * block's surface is drawn every frame; the selection persists when you switch
  * items and reappears on re-equip, and is emptied by a clearing right-click or
  * a level change.
@@ -47,7 +51,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
 	// surface.
 	private static final double Y_OFFSET = 0.01;
-	private static final float ALPHA = 0.5f;
+	private static final float FILL_ALPHA = 0.5f;
+	// An opaque outline drawn around each rect so adjacent surfaces (and the
+	// sub-rects of a single block) stay visually separable through the fill.
+	private static final float BORDER_ALPHA = 1.0f;
+	private static final float BORDER_THICKNESS = 0.045f;
 
 	// Distance coloring (v1.5 debug): each BFS ring gets a distinct hue so the
 	// flood's connectivity is visible. HUE_STEP is the hue advance per ring;
@@ -60,13 +68,22 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
 
-	// Graph distance the right-click flood expands from the targeted block.
-	// A constant for now; a future config could expose it.
-	private static final int SELECTION_RADIUS = 3;
+	// Flood radius (block transitions from the seed). Adjustable at runtime via
+	// shift+scroll while holding the stick (see adjustRadius), clamped to range.
+	private static final int MIN_RADIUS = 0;
+	private static final int MAX_RADIUS = 10;
+	private static final int DEFAULT_RADIUS = 3;
 
 	// Selection set + compute-cache. Mutated on the client thread: extract prunes
 	// it; the use-key trigger (onUseItem) (re)selects or clears it.
 	private final SurfaceCache cache = new SurfaceCache();
+
+	// Current flood radius and the last resolved seed block, so a radius change
+	// can re-flood from the same origin. Both touched only on the client thread
+	// (onUseItem and the scroll handler). lastSeed is null when nothing is
+	// selected.
+	private int selectionRadius = DEFAULT_RADIUS;
+	private BlockPos lastSeed;
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
 	// switch, disconnect/reconnect) empties the in-memory selection — a
@@ -90,6 +107,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 		if (level != lastLevel) {
 			cache.clear();
+			lastSeed = null;
 			lastLevel = level;
 		}
 
@@ -146,11 +164,36 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, SELECTION_RADIUS);
+			cache.select(level, start, selectionRadius);
+			lastSeed = start;
 		} else {
 			cache.clear();
+			lastSeed = null;
 		}
 		player.swing(hand);
+	}
+
+	// True when shift+scroll should retarget the flood radius instead of switching
+	// the hotbar: only while holding the stick (the tool) and sneaking, so plain
+	// scroll still changes the hotbar normally.
+	public boolean wantsRadiusScroll() {
+		Player player = Minecraft.getInstance().player;
+		return player != null && player.getMainHandItem().is(Items.STICK) && player.isShiftKeyDown();
+	}
+
+	// Change the flood radius by delta (clamped) and, if a selection is active,
+	// re-flood from its seed so the change shows immediately. Returns the new
+	// radius (for the on-screen indicator), even when clamping left it unchanged.
+	public int adjustRadius(int delta) {
+		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, selectionRadius + delta));
+		if (updated != selectionRadius) {
+			selectionRadius = updated;
+			Level level = Minecraft.getInstance().level;
+			if (level != null && lastSeed != null) {
+				cache.select(level, lastSeed, selectionRadius);
+			}
+		}
+		return selectionRadius;
 	}
 
 	@Override
@@ -173,23 +216,40 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float g = rgb[1];
 			float b = rgb[2];
 
-			// A flat (zero-thickness) quad must be emitted with both windings, or
-			// back-face culling hides it from one side.
-			vertex(buffer, positionMatrix, minX, y, minZ, r, g, b);
-			vertex(buffer, positionMatrix, minX, y, maxZ, r, g, b);
-			vertex(buffer, positionMatrix, maxX, y, maxZ, r, g, b);
-			vertex(buffer, positionMatrix, maxX, y, minZ, r, g, b);
+			// Translucent fill, then an opaque outline so neighboring rects stay
+			// distinguishable. Border strips are clamped to half the rect so tiny
+			// rects don't invert.
+			quad(buffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
 
-			vertex(buffer, positionMatrix, maxX, y, minZ, r, g, b);
-			vertex(buffer, positionMatrix, maxX, y, maxZ, r, g, b);
-			vertex(buffer, positionMatrix, minX, y, maxZ, r, g, b);
-			vertex(buffer, positionMatrix, minX, y, minZ, r, g, b);
+			float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
+			float bz = Math.min(BORDER_THICKNESS, (maxZ - minZ) * 0.5f);
+			quad(buffer, positionMatrix, minX, maxX, minZ, minZ + bz, y, r, g, b, BORDER_ALPHA);
+			quad(buffer, positionMatrix, minX, maxX, maxZ - bz, maxZ, y, r, g, b, BORDER_ALPHA);
+			quad(buffer, positionMatrix, minX, minX + bx, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
+			quad(buffer, positionMatrix, maxX - bx, maxX, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
 		}
 	}
 
+	// One flat axis-aligned quad over [x0,x1] x [z0,z1] at height y, emitted with
+	// both windings (a zero-thickness quad would otherwise be culled from one
+	// side).
+	private static void quad(BufferBuilder buffer, Matrix4fc matrix,
+			float x0, float x1, float z0, float z1, float y,
+			float r, float g, float b, float a) {
+		vertex(buffer, matrix, x0, y, z0, r, g, b, a);
+		vertex(buffer, matrix, x0, y, z1, r, g, b, a);
+		vertex(buffer, matrix, x1, y, z1, r, g, b, a);
+		vertex(buffer, matrix, x1, y, z0, r, g, b, a);
+
+		vertex(buffer, matrix, x1, y, z0, r, g, b, a);
+		vertex(buffer, matrix, x1, y, z1, r, g, b, a);
+		vertex(buffer, matrix, x0, y, z1, r, g, b, a);
+		vertex(buffer, matrix, x0, y, z0, r, g, b, a);
+	}
+
 	private static void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z,
-			float r, float g, float b) {
-		buffer.addVertex(matrix, x, y, z).setColor(r, g, b, ALPHA);
+			float r, float g, float b, float a) {
+		buffer.addVertex(matrix, x, y, z).setColor(r, g, b, a);
 	}
 
 	// Map a BFS ring distance to an RGB color by stepping the hue per ring.

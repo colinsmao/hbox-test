@@ -72,11 +72,16 @@ public final class WorldOverlayManager {
 
 	private static boolean usePressedLastTick = false;
 
+	// The collision-surface widget instance, exposed so OverlayClient's scroll
+	// handler can adjust its flood radius.
+	private static CollisionSurfaceOverlay collisionSurface;
+
 	private WorldOverlayManager() {
 	}
 
 	public static void bootstrap() {
-		register(new CollisionSurfaceOverlay());
+		collisionSurface = new CollisionSurfaceOverlay();
+		register(collisionSurface);
 
 		LevelRenderEvents.END_EXTRACTION.register(WorldOverlayManager::extract);
 		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
@@ -102,6 +107,10 @@ public final class WorldOverlayManager {
 
 	public static void register(WorldOverlay overlay) {
 		OVERLAYS.add(overlay);
+	}
+
+	public static CollisionSurfaceOverlay collisionSurface() {
+		return collisionSurface;
 	}
 
 	private static void extract(LevelExtractionContext context) {
