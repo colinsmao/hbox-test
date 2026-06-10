@@ -3,12 +3,17 @@ package com.example.overlay.client;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+
+import com.example.overlay.OverlayMod;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -24,10 +29,11 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * adjacency).</b> {@link #select} works in three phases:
  * <ol>
  * <li><b>Dilated arrangement</b> ({@link #exposeBox}): gather every collision box
- *     in a window of half-extent {@code radius} blocks (plus a {@code ceil(W)}
+ *     in a window of half-extent {@code radius} blocks (plus a {@code floor(W)+1}
  *     occluder margin so every box that can trim an edge candidate is captured —
- *     candidate and occluder each grow by {@code W/2}, so a box up to {@code W}
- *     blocks past the window still eats in), grow each box's
+ *     candidate and occluder each grow by {@code W/2}, so two cells up to
+ *     {@code floor(W)+1} apart still interact; this is the one reach the lazy
+ *     neighbour search also uses), grow each box's
  *     footprint by the entity half-width {@code W/2} (Minkowski sum with the
  *     {@code WxW} square is just the rect grown on every side), and keep a box-top
  *     at height {@code T} over the footprint where <b>no dilated box spans
@@ -78,8 +84,17 @@ public final class SurfaceSelection {
 
 	// One collision sub-box in absolute world coords: its (undilated) XZ footprint
 	// plus its vertical extent. The arrangement dilates the footprint by W/2 on
-	// demand; yMin/yMax drive the spans-above occlusion test.
-	private record WorldBox(double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
+	// demand; yMin/yMax drive the spans-above occlusion test. bx/by/bz are the
+	// source block (the window/cube membership test runs on these, exactly like
+	// the eager pass, so lazy and eager agree on which boxes are nodes vs occluders).
+	private record WorldBox(int bx, int by, int bz,
+			double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
+	}
+
+	// A dilated standable surface tagged with its source cell, the lazy flood's
+	// node. The cell bounds the column-local neighbour search; equality is by value
+	// (StandableRect is a record) so the visited set dedupes naturally.
+	private record CellSurface(StandableRect rect, int cx, int cz) {
 	}
 
 	// Column index key (block X/Z) for the per-column box lookup used to bound the
@@ -97,6 +112,16 @@ public final class SurfaceSelection {
 	// 1/16). Used to drop subtraction slivers and to test edge adjacency/overlap.
 	private static final double EPS = 1.0e-6;
 
+	// Flood path selection (Stage 4.5). LAZY picks the production path: the lazy,
+	// output-sensitive flood (exposes columns on demand) vs the eager window scan.
+	// PROFILE_FLOOD runs BOTH every select, asserts they cover the same area (the
+	// correctness oracle — logs a warning on mismatch), and logs timing + column
+	// counts so the two can be A/B'd. Both are compile-time debug switches.
+	private static final boolean LAZY = true;
+	// Flip on locally to A/B the lazy path against the eager oracle (logs per-select
+	// parity + timing/row counts); kept off in committed builds.
+	private static final boolean PROFILE_FLOOD = false;
+
 	// The reached, merged surfaces from the last select (the draw set). Replaced
 	// wholesale each select; an immutable snapshot is published by the overlay.
 	private List<StandableRect> result = List.of();
@@ -106,17 +131,63 @@ public final class SurfaceSelection {
 	 * surfaces of {@code start}, within a spatial window of half-extent
 	 * {@code radius} blocks, for the entity's width/reach, across
 	 * footprint-adjacent height-gated steps.
+	 *
+	 * <p>Dispatches to {@link #selectEager} (window scan) or {@link #selectLazy}
+	 * (output-sensitive, on-demand column exposure) per {@link #LAZY}. With
+	 * {@link #PROFILE_FLOOD} on, both run and are compared (coverage oracle) and
+	 * timed; see the field docs.
 	 */
 	public void select(Level level, BlockPos start, int radius, EntityProfile profile) {
+		if (!PROFILE_FLOOD) {
+			result = LAZY ? selectLazy(level, start, radius, profile)
+					: selectEager(level, start, radius, profile);
+			return;
+		}
+
+		long t0 = System.nanoTime();
+		List<StandableRect> eager = selectEager(level, start, radius, profile);
+		long t1 = System.nanoTime();
+		LazyFlood lazy = new LazyFlood(level, start, radius, profile);
+		List<StandableRect> lazyRects = lazy.run();
+		long t2 = System.nanoTime();
+
+		int eagerMargin = (int) Math.floor(profile.width()) + 1;
+		int eagerSide = 2 * (radius + eagerMargin) + 1;
+		boolean match = coverageMatches(eager, lazyRects);
+		// Eager scans the whole window x full vertical band, every column; lazy's
+		// rowsScanned is the apples-to-apples vertical-work comparison.
+		int bandLo = Math.max(start.getY() - radius - 1, level.getMinY());
+		int bandHi = Math.min(start.getY() + radius + 1, level.getMaxY());
+		int eagerRows = eagerSide * eagerSide * (bandHi - bandLo + 1);
+		OverlayMod.LOGGER.info(
+			"[flood] profile={} radius={} | eager {}us scan~{}cols ~{}rows {}rects | lazy {}us {}cols {}rows {}rects | match={}",
+			profile.name(), radius,
+			(t1 - t0) / 1000, eagerSide * eagerSide, eagerRows, eager.size(),
+			(t2 - t1) / 1000, lazy.columnsExposed(), lazy.rowsScanned(), lazyRects.size(), match);
+		if (!match) {
+			OverlayMod.LOGGER.warn("[flood] COVERAGE MISMATCH lazy != eager (profile={} radius={})",
+				profile.name(), radius);
+		}
+		result = LAZY ? lazyRects : eager;
+	}
+
+	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
+	// path's correctness oracle). Enumerates every collision box in the
+	// window+margin cube, dilates all, merges, then floods the merged graph.
+	private List<StandableRect> selectEager(Level level, BlockPos start, int radius, EntityProfile profile) {
 		double reach = profile.reach();
 		double halfW = profile.width() / 2.0;
 		// Occluder margin: gather boxes this many blocks BEYOND the window so an
 		// outer-ring candidate is trimmed by every box that can eat its dilated top.
-		// Both the candidate top and an occluder grow by W/2, so their footprints
-		// overlap whenever the undilated gap is < W — i.e. a box up to ceil(W) blocks
-		// past the window still trims. ceil(W/2) misses the far half for wide
-		// entities (a Ravager wall 2 columns out is never gathered), so use ceil(W).
-		int margin = (int) Math.ceil(profile.width());
+		// Both the candidate top and an occluder grow by W/2, so two cells influence
+		// each other while the undilated gap (Δ-1 blocks) is within W — i.e. up to
+		// floor(W)+1 blocks apart. This is the SAME reach the lazy neighbour search
+		// uses (one formula everywhere). It is a safe superset of the tight
+		// positive-overlap occluder reach ceil(W) — equal for non-integer widths
+		// (Player 1, Ravager 2); at W=0 (Point) it gathers one extra ring that only
+		// touches (zero-area), trimming nothing, so the result is unchanged. (NB the
+		// reach is W, not W/2: an early ceil(W/2) under-trimmed wide entities.)
+		int margin = (int) Math.floor(profile.width()) + 1;
 		BlockPos origin = start.immutable();
 		int ox = origin.getX();
 		int oy = origin.getY();
@@ -145,7 +216,7 @@ public final class SurfaceSelection {
 					}
 					boolean yInWindow = y >= oy - radius && y <= oy + radius;
 					for (AABB box : shape.toAabbs()) {
-						WorldBox wb = new WorldBox(
+						WorldBox wb = new WorldBox(x, y, z,
 							x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
 							y + box.minY, y + box.maxY);
 						if (column == null) {
@@ -171,8 +242,7 @@ public final class SurfaceSelection {
 			exposeBox(seed, index, halfW, seedSurfaces);
 		}
 		if (seedSurfaces.isEmpty()) {
-			result = List.of();
-			return;
+			return List.of();
 		}
 
 		// Phase 2: build the dilated arrangement, then merge coplanar adjacent rects.
@@ -183,7 +253,12 @@ public final class SurfaceSelection {
 		List<StandableRect> merged = mergeCoplanar(arrangement);
 
 		// Phase 3: flood the merged graph from the rect(s) covering a seed surface.
-		result = flood(merged, seedSurfaces, reach);
+		return flood(merged, seedSurfaces, reach);
+	}
+
+	// The lazy, output-sensitive flood (Stage 4.5 production path). See LazyFlood.
+	private List<StandableRect> selectLazy(Level level, BlockPos start, int radius, EntityProfile profile) {
+		return new LazyFlood(level, start, radius, profile).run();
 	}
 
 	public void clear() {
@@ -428,12 +503,9 @@ public final class SurfaceSelection {
 			target.maxX() + halfW, target.maxZ() + halfW);
 
 		List<Rect> occluders = new ArrayList<>();
-		int cxLo = (int) Math.floor(base.minX()) - 1;
-		int cxHi = (int) Math.floor(base.maxX()) + 1;
-		int czLo = (int) Math.floor(base.minZ()) - 1;
-		int czHi = (int) Math.floor(base.maxZ()) + 1;
-		for (int cx = cxLo; cx <= cxHi; cx++) {
-			for (int cz = czLo; cz <= czHi; cz++) {
+		int[] win = occluderColumns(target, halfW);
+		for (int cx = win[0]; cx <= win[1]; cx++) {
+			for (int cz = win[2]; cz <= win[3]; cz++) {
 				List<WorldBox> column = index.get(new ColKey(cx, cz));
 				if (column == null) {
 					continue;
@@ -454,6 +526,25 @@ public final class SurfaceSelection {
 		for (Rect exposed : subtractRects(base, occluders)) {
 			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(), topY));
 		}
+	}
+
+	// {cxLo, cxHi, czLo, czHi}: the columns an occluder box must lie in to possibly
+	// overlap {@code target}'s dilated footprint. A box in column (cx,*) spans
+	// [cx,cx+1], dilated to [cx-halfW, cx+1+halfW], which overlaps the dilated base
+	// [minX-halfW, maxX+halfW] iff floor(min - W) <= cx <= ceil(max + W) - 1, with
+	// W = 2*halfW. Tight (Point's W=0 -> the box's own column only) yet conservative
+	// (full-block span); the per-box spans-above + subtraction still does the real
+	// geometry, so shrinking the window is purely efficiency and result-preserving.
+	// Shared by exposeBox (used by both flood paths) and LazyFlood.ensureOccluders
+	// so the occluder index and the scan stay in lock-step.
+	private static int[] occluderColumns(WorldBox box, double halfW) {
+		double w = 2.0 * halfW;
+		return new int[] {
+			(int) Math.floor(box.minX() - w),
+			(int) Math.ceil(box.maxX() + w) - 1,
+			(int) Math.floor(box.minZ() - w),
+			(int) Math.ceil(box.maxZ() + w) - 1,
+		};
 	}
 
 	// Subtract every occluder from base, returning the remaining 0..N rectangles
@@ -497,5 +588,309 @@ public final class SurfaceSelection {
 		if (piece.maxZ() - izMax > EPS) {
 			out.add(new Rect(ixMin, izMax, ixMax, piece.maxZ()));
 		}
+	}
+
+	/**
+	 * The lazy, output-sensitive flood. Instead of enumerating the whole
+	 * window+margin cube up front, it does a surface BFS that exposes geometry
+	 * <b>on demand</b> as it reaches it, so the cost tracks the reachable set
+	 * (and its immediate occluder shells) rather than the window volume — a big
+	 * win in narrow caves / against walls at high radius.
+	 *
+	 * <p><b>Lazy in Y too.</b> Columns are scanned only over the narrow block-row
+	 * windows the flood needs near its current height (tops within one {@code
+	 * reach} step, plus each box's occluder shell at the rows around its own top),
+	 * never the full {@code [yLo,yHi]} band. {@link #ensureRows} tracks scanned
+	 * rows per column (a {@link BitSet}) so each {@code (column,row)} is queried at
+	 * most once. Only the origin column exposes its full band (to seed every
+	 * standable top there). This drops the per-column vertical factor from
+	 * {@code O(radius)} to {@code O(heights the flood actually traverses there)},
+	 * so open ground goes from {@code ~radius^3} toward {@code ~radius^2}. It is
+	 * orthogonal to (and composes with) the horizontal {@code occluderColumns}
+	 * tightening: total cost ~ columns x rows-per-column, and the two trim those
+	 * factors independently.
+	 *
+	 * <p>Nodes are <b>raw</b> dilated surfaces ({@link #exposeBox} output,
+	 * pre-merge), each tagged with its source cell. From a popped surface in cell
+	 * {@code c}, neighbours are sought in cells within Chebyshev {@code R} of
+	 * {@code c} ({@code R = floor(W)+1}: a bridged/abutting pair sits
+	 * {@code floor(W)+1} cells apart — {@code 1} for Point/Player, {@code 2} for
+	 * Ravager; <b>not</b> {@code ceil(W)}, which is {@code 0} for Point and would
+	 * never connect adjacent floor tiles). A neighbour cell's surfaces are computed
+	 * on demand (with each box's occluder shell — the columns {@link #exposeBox}
+	 * scans — exposed first, so the spans-above test matches eager) and a surface is
+	 * enqueued iff it is unvisited,
+	 * {@link #footprintAdjacent}, and within {@code reach}.
+	 *
+	 * <p>Bounded by the same 3-D cube as eager: a box is a node iff its source
+	 * block is within Chebyshev {@code radius} in X/Z <b>and</b> {@code |by-oy| <=
+	 * radius}. The merge/union runs <b>after</b> the flood on the reached set only
+	 * (area-preserving, so connectivity is unchanged — {@code footprintAdjacent}
+	 * already treats overlap as connected). Result is set-equal to eager.
+	 */
+	private static final class LazyFlood {
+		private final Level level;
+		private final int ox;
+		private final int oy;
+		private final int oz;
+		private final int radius;
+		private final double halfW;
+		private final double reach;
+		// Chebyshev neighbour-search radius in cells = floor(W)+1 (see class doc).
+		private final int neighbour;
+		private final int yLo;
+		private final int yHi;
+		// Per-column collision boxes found so far (the occluder index), and which
+		// block rows of each column have already been queried (bit i == row yLo+i).
+		// Lazy in Y: a column is scanned only over the narrow row windows the flood
+		// actually needs near its current height, never the full [yLo,yHi] band.
+		private final Map<ColKey, List<WorldBox>> index = new HashMap<>();
+		private final Map<ColKey, BitSet> scanned = new HashMap<>();
+		// exposeBox memoized per source box (its occluder shell is fixed once the
+		// rows around its top are exposed), so a box's top is computed exactly once
+		// even though a cell is revisited from many neighbours / at many heights.
+		private final Map<WorldBox, List<StandableRect>> boxSurfaces = new HashMap<>();
+		private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+		private int columnsExposed = 0;
+		private int rowsScanned = 0;
+
+		LazyFlood(Level level, BlockPos start, int radius, EntityProfile profile) {
+			this.level = level;
+			BlockPos origin = start.immutable();
+			this.ox = origin.getX();
+			this.oy = origin.getY();
+			this.oz = origin.getZ();
+			this.radius = radius;
+			this.halfW = profile.width() / 2.0;
+			this.reach = profile.reach();
+			this.neighbour = (int) Math.floor(profile.width()) + 1;
+			this.yLo = Math.max(oy - radius - 1, level.getMinY());
+			this.yHi = Math.min(oy + radius + 1, level.getMaxY());
+		}
+
+		int columnsExposed() {
+			return columnsExposed;
+		}
+
+		int rowsScanned() {
+			return rowsScanned;
+		}
+
+		List<StandableRect> run() {
+			// Seeds: every standable top in the origin column within the node cube
+			// (matches eager's origin-column candidates) — the only place the full
+			// vertical band is exposed, and it is a single column.
+			List<CellSurface> seeds = collect(ox, oz, oy - radius, oy + radius + 1);
+			if (seeds.isEmpty()) {
+				return List.of();
+			}
+			Set<CellSurface> visited = new HashSet<>(seeds);
+			Deque<CellSurface> queue = new ArrayDeque<>(seeds);
+			List<StandableRect> reached = new ArrayList<>();
+			while (!queue.isEmpty()) {
+				CellSurface s = queue.pollFirst();
+				reached.add(s.rect());
+				double h = s.rect().topY();
+				for (int cx = s.cx() - neighbour; cx <= s.cx() + neighbour; cx++) {
+					if (Math.abs(cx - ox) > radius) {
+						continue;
+					}
+					for (int cz = s.cz() - neighbour; cz <= s.cz() + neighbour; cz++) {
+						if (Math.abs(cz - oz) > radius) {
+							continue;
+						}
+						// Only tops within a single step of h can connect, so scan
+						// just that height window of the neighbour column.
+						for (CellSurface t : collect(cx, cz, h - reach, h + reach)) {
+							if (visited.contains(t)) {
+								continue;
+							}
+							if (footprintAdjacent(s.rect(), t.rect())) {
+								visited.add(t);
+								queue.addLast(t);
+							}
+						}
+					}
+				}
+			}
+			// Merge/union the reached set for rendering (post-flood; area-preserving).
+			return mergeCoplanar(reached);
+		}
+
+		// Node surfaces of cell (cx,cz) whose top lies in [topLo,topHi] and whose
+		// source block is within the node cube. Exposes only the rows that can hold
+		// such tops (plus each box's occluder shell), so vertical work tracks the
+		// flood front, not the band. exposeBox is memoized per box.
+		private List<CellSurface> collect(int cx, int cz, double topLo, double topHi) {
+			ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
+			List<WorldBox> column = index.get(new ColKey(cx, cz));
+			if (column == null) {
+				return List.of();
+			}
+			List<CellSurface> surfaces = new ArrayList<>();
+			// Index over an explicit count: tops() may append to this same column
+			// (occluder rows in the box's own cell), and we must not revisit those.
+			int count = column.size();
+			for (int i = 0; i < count; i++) {
+				WorldBox box = column.get(i);
+				// Outside the cube's vertical band -> occluder only, never a node
+				// (matches eager's yInWindow candidate test).
+				if (Math.abs(box.by() - oy) > radius) {
+					continue;
+				}
+				if (box.yMax() < topLo - EPS || box.yMax() > topHi + EPS) {
+					continue;
+				}
+				for (StandableRect r : tops(box)) {
+					surfaces.add(new CellSurface(r, cx, cz));
+				}
+			}
+			return surfaces;
+		}
+
+		// Dilated, occluder-trimmed tops of a single box (memoized). Exposes the
+		// box's occluder shell — the columns exposeBox scans, over the rows that can
+		// hold a box spanning above this top — before computing, so the spans-above
+		// test sees the same occluders eager would.
+		private List<StandableRect> tops(WorldBox box) {
+			List<StandableRect> cached = boxSurfaces.get(box);
+			if (cached != null) {
+				return cached;
+			}
+			int[] win = occluderColumns(box, halfW);
+			int row = (int) Math.floor(box.yMax());
+			for (int cx = win[0]; cx <= win[1]; cx++) {
+				for (int cz = win[2]; cz <= win[3]; cz++) {
+					ensureRows(cx, cz, row - 1, row + 1);
+				}
+			}
+			List<StandableRect> out = new ArrayList<>();
+			exposeBox(box, index, halfW, out);
+			boxSurfaces.put(box, out);
+			return out;
+		}
+
+		// Query (and memoize) the collision boxes in column (cx,cz) for every block
+		// row in [a,b] not yet scanned, clamped to the band [yLo,yHi]. Idempotent:
+		// each (column,row) is queried at most once, so no duplicate boxes.
+		private void ensureRows(int cx, int cz, int a, int b) {
+			a = Math.max(a, yLo);
+			b = Math.min(b, yHi);
+			if (a > b) {
+				return;
+			}
+			ColKey key = new ColKey(cx, cz);
+			BitSet bits = scanned.get(key);
+			if (bits == null) {
+				bits = new BitSet(yHi - yLo + 1);
+				scanned.put(key, bits);
+				index.put(key, new ArrayList<>());
+				columnsExposed++;
+			}
+			List<WorldBox> column = index.get(key);
+			for (int y = a; y <= b; y++) {
+				int bit = y - yLo;
+				if (bits.get(bit)) {
+					continue;
+				}
+				bits.set(bit);
+				rowsScanned++;
+				cursor.set(cx, y, cz);
+				VoxelShape shape = level.getBlockState(cursor).getCollisionShape(level, cursor, CollisionContext.empty());
+				if (shape.isEmpty()) {
+					continue;
+				}
+				for (AABB box : shape.toAabbs()) {
+					column.add(new WorldBox(cx, y, cz,
+						cx + box.minX, cz + box.minZ, cx + box.maxX, cz + box.maxZ,
+						y + box.minY, y + box.maxY));
+				}
+			}
+		}
+	}
+
+	// Coverage oracle for PROFILE_FLOOD: true iff the two surface sets cover the
+	// same area at every height, independent of how each is decomposed into rects
+	// (greedy merge is not canonical, so an exact rect-list compare would false-
+	// alarm). Group by topY, then per height compare per-x-slab Z-coverage.
+	private static boolean coverageMatches(List<StandableRect> a, List<StandableRect> b) {
+		Map<Long, List<StandableRect>> ga = groupByTop(a);
+		Map<Long, List<StandableRect>> gb = groupByTop(b);
+		Set<Long> heights = new HashSet<>(ga.keySet());
+		heights.addAll(gb.keySet());
+		for (Long h : heights) {
+			if (!levelCoversSame(ga.getOrDefault(h, List.of()), gb.getOrDefault(h, List.of()))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static Map<Long, List<StandableRect>> groupByTop(List<StandableRect> rects) {
+		Map<Long, List<StandableRect>> groups = new HashMap<>();
+		for (StandableRect r : rects) {
+			groups.computeIfAbsent(Math.round(r.topY() * 1024.0), k -> new ArrayList<>()).add(r);
+		}
+		return groups;
+	}
+
+	// Two coplanar rect sets cover the same area iff, over every x-slab between
+	// their combined x-breakpoints, they yield identical merged Z-intervals.
+	private static boolean levelCoversSame(List<StandableRect> a, List<StandableRect> b) {
+		double[] xs = new double[(a.size() + b.size()) * 2];
+		int i = 0;
+		for (StandableRect r : a) {
+			xs[i++] = r.minX();
+			xs[i++] = r.maxX();
+		}
+		for (StandableRect r : b) {
+			xs[i++] = r.minX();
+			xs[i++] = r.maxX();
+		}
+		Arrays.sort(xs);
+		for (int s = 0; s + 1 < xs.length; s++) {
+			double x0 = xs[s];
+			double x1 = xs[s + 1];
+			if (x1 - x0 <= EPS) {
+				continue;
+			}
+			if (!intervalsEqual(zSpan(a, x0, x1), zSpan(b, x0, x1))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// Merged Z-intervals of the rects covering the slab [x0,x1].
+	private static List<double[]> zSpan(List<StandableRect> rects, double x0, double x1) {
+		List<double[]> iv = new ArrayList<>();
+		for (StandableRect r : rects) {
+			if (r.minX() <= x0 + EPS && r.maxX() >= x1 - EPS) {
+				iv.add(new double[] {r.minZ(), r.maxZ()});
+			}
+		}
+		iv.sort(Comparator.comparingDouble(z -> z[0]));
+		List<double[]> merged = new ArrayList<>();
+		for (double[] z : iv) {
+			if (!merged.isEmpty() && z[0] <= merged.get(merged.size() - 1)[1] + EPS) {
+				double[] last = merged.get(merged.size() - 1);
+				last[1] = Math.max(last[1], z[1]);
+			} else {
+				merged.add(new double[] {z[0], z[1]});
+			}
+		}
+		return merged;
+	}
+
+	private static boolean intervalsEqual(List<double[]> a, List<double[]> b) {
+		if (a.size() != b.size()) {
+			return false;
+		}
+		for (int i = 0; i < a.size(); i++) {
+			if (Math.abs(a.get(i)[0] - b.get(i)[0]) > EPS || Math.abs(a.get(i)[1] - b.get(i)[1]) > EPS) {
+				return false;
+			}
+		}
+		return true;
 	}
 }

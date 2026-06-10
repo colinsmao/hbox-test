@@ -105,8 +105,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// hop-count — merge would make hops meaningless on open ground). Adjustable at
 	// runtime via shift+scroll while holding the stick (see adjustRadius), clamped.
 	private static final int MIN_RADIUS = 0;
-	private static final int MAX_RADIUS = 10;
+	private static final int MAX_RADIUS = 20;
 	private static final int DEFAULT_RADIUS = 3;
+	// Past this the scroll steps by 2 (the window grows quadratically, so coarse
+	// steps keep the high end usable without a huge tick count): 0..10 by 1, then
+	// 12, 14, ..., 20.
+	private static final int COARSE_RADIUS = 10;
 
 	// The computed surfaces, recomputed from scratch on each stick action
 	// (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
@@ -261,7 +265,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// re-flood from its seed so the change shows immediately. Returns the new
 	// radius (for the on-screen indicator), even when clamping left it unchanged.
 	public int adjustRadius(int delta) {
-		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, selectionRadius + delta));
+		// delta is a scroll direction (+/-1). Step by 2 in the coarse range so the
+		// sequence is 0..10 by 1 then 12,14,..,20 (up: coarse once we reach the
+		// threshold; down: coarse only while strictly above it, so 12->10->9).
+		int dir = Integer.signum(delta);
+		int step = (dir > 0 ? selectionRadius >= COARSE_RADIUS : selectionRadius > COARSE_RADIUS) ? 2 : 1;
+		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, selectionRadius + dir * step));
 		if (updated != selectionRadius) {
 			selectionRadius = updated;
 			Level level = Minecraft.getInstance().level;

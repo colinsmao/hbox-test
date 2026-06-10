@@ -11,8 +11,8 @@ detector consumes.
 - [x] **rendering** (Stage 2) - Replaced distance/HSV coloring with a height-based gradient; added **depth-tested** vertical skirts (a second pipeline) at depth `reach + margin` (~2), drawn on the **current unmerged** point-model rects. Skirt every edge; depth-testing hides solid-backed/buried skirts. Skirts fade to transparent over their bottom half; each rect is **dilated outward by `SKIRT_OFFSET` for drawing only** so tops meet their skirts and neighbors overlap (no seams). Dropped the distance plumbing. **Done.**
 - [x] **merge + adjacency** (Stage 3) - `select` reworked to **enumerate → merge → flood**: enumerate `exposedSurfaces` over a spatial window of `radius` blocks, merge coplanar footprint-adjacent rects into maximal rects (greedy strip-merge X then Z), then flood the merged graph by one **geometric adjacency** rule (`footprintAdjacent && |dTopY| <= reach`). Dropped `collectColumn`/own-column/4-neighbor + the 0-1 BFS/block-keyed cache; the glass-pane link folds into geometric adjacency. **Radius is now a spatial block budget** (not merged-hop-count). Skirts ride on merged rects. **Done.**
 - [x] **rendering polish** (Stage 2.5, after Stage 3) - Reverted the Stage 2 draw-time dilation: tops/borders draw at **true bounds** (overlapping translucent tops double-blend into seams); only **square skirts** are nudged out by a tiny `SKIRT_OFFSET` (0.002) purely to dodge z-fighting the terrain face. Added a **grey cutoff ring** (surfaces in the last block before the radius cutoff blend toward grey, `sqrt`-eased; `fadedTop` splits each top at the ring lines so a long rect doesn't smear the fade). **Crouch-gated the debug aids**: through-walls tops + the opaque borders only render while sneaking; otherwise the top is depth-tested. **Done.**
-- [ ] **dilation** (Stage 4, WIP — builds, not yet in-game-verified) - One unified pass: dilate every box footprint by `W/2`, gathering occluders over a **`ceil(W)`** margin beyond the window (not `ceil(W/2)` — both candidate and occluder grow `W/2`, so a wall up to `W` blocks out still trims; fixes outer-ring/`radius=0` under-trim); a box-top survives where no dilated box spans immediately above it (spans-above/buried test), non-burying overlaps stay distinct levels (not max-topY). **Reuses Stage 3 region adjacency** (no per-cell-clip hack). Added since the parked WIP: (a) a **re-cut to non-overlapping union** (`SurfaceSelection.union`, vertical-slab sweep) per coplanar level *before* the greedy merge — dilated neighbor tops overlap and would double-blend / leave the merge ill-defined; (b) renderer **skirt-diff** (`CollisionSurfaceOverlay.openSpans`/`subtractSpans`) so a merged level the partition split into slivers doesn't draw skirts on its *internal* equal-height edges (false interior walls). Verify gap-bridging, pillar/stair clearance, multi-level, Point == today, no double-blend, no false interior skirts.
-- [ ] **tricky-blocks** (Stage 5) - Verify tricky blocks + connectivity for both profiles: slab / stairs / fence / glass-pane / wall / carpet / snow, downward resolve, sweep growth.
+- [x] **dilation** (Stage 4) - One unified pass: dilate every box footprint by `W/2`, gathering occluders over a **`floor(W)+1`** margin beyond the window (a `W`-based reach, not `ceil(W/2)` — both candidate and occluder grow `W/2`, so two cells up to `floor(W)+1` apart interact; fixes outer-ring/`radius=0` under-trim); a box-top survives where no dilated box spans immediately above it (spans-above/buried test), non-burying overlaps stay distinct levels (not max-topY). **Reuses Stage 3 region adjacency** (no per-cell-clip hack). Also: (a) a **re-cut to non-overlapping union** (`SurfaceSelection.union`, vertical-slab sweep) per coplanar level *before* the greedy merge — dilated neighbor tops overlap and would double-blend / leave the merge ill-defined; (b) renderer **skirt-diff** (`CollisionSurfaceOverlay.openSpans`/`subtractSpans`) so a merged level the partition split into slivers doesn't draw skirts on its *internal* equal-height edges (false interior walls). **Done** (gap-bridging, pillar/stair clearance, multi-level, Point == today, no double-blend, no false interior skirts all verified in-game).
+- [x] **lazy flood** (Stage 5) - Made `select` output-sensitive: a surface BFS exposes geometry **on demand** (columns *and* block rows) as it reaches it, instead of enumerating the whole `radius+margin` cube up front; merge/union runs **after** the flood on the reached set only. Kept the eager path behind a flag as the correctness oracle, with a `PROFILE_FLOOD` compare-and-time harness. Three wins, all verified set-equal to eager (Point/Player/Ravager, radii 0..20): (a) **lazy columns** — output-sensitive in XZ; (b) **tight `occluderColumns`** — horizontal occluder shell shrunk to the exact reach (Point → own column); (c) **lazy-Y (`ensureRows`)** — per-column vertical work drops `O(radius)` → `O(heights traversed)`, so open ground goes `~R³ → ~R²`. Measured `r=20` open ground ~90ms→~29ms, partial scenes ~175×. See **Stage 5** below. **Done.** (The old "tricky-blocks" stage is dropped — that block zoo was already verified in-game as part of Stage 4.)
 - [ ] **polish-docs** (Stage 6) - update `docs/geometry.md` + `docs/rendering.md`, `AGENTS.md` status (Milestone 4), clear `PLAN.md`.
 
 ## Why this, why now
@@ -101,7 +101,7 @@ flood strictly reversible is what makes "unreturnable" well-defined.
 Growth is `< 1` block even for the ravager (0.975), so influence is bounded:
 - Building one cell's region needs the **3x3** column neighborhood (diagonals bleed in by `1 - 0.975`).
 - With the **Stage 3 region adjacency** (surfaces are rects in space, abutment is a geometric edge test — not the rigid 4-column scan), dilation no longer needs to clip each result back to its own cell to "keep 4-neighbor adjacency valid." Dilated rects (including a perch over the void that straddles cells) flood directly. Cross-surface influence still spans up to **5x5**, bounded by `ceil(W/2)`.
-- Occluder margin (boxes gathered **beyond** the window so the outer ring trims correctly) is **`ceil(W)`**, never hardcoded, so a larger future profile stays correct. NB: it is `ceil(W)`, **not** `ceil(W/2)` — both a candidate top and an occluder grow by `W/2`, so a box up to `W` blocks past the window still eats into an outer candidate (the early `ceil(W/2)` under-trimmed wide entities like the Ravager). `select`/radius-change cost only (not per frame); negligible.
+- Occluder margin (boxes gathered **beyond** the window so the outer ring trims correctly) is **`floor(W)+1`** — the single reach used everywhere (also the lazy neighbour search), never hardcoded, so a larger future profile stays correct. NB it is a `W`-based reach, **not** `ceil(W/2)` — both a candidate top and an occluder grow by `W/2`, so two cells up to `floor(W)+1` apart still interact (the early `ceil(W/2)` under-trimmed wide entities like the Ravager). `floor(W)+1` is a safe superset of the tight positive-overlap reach `ceil(W)` (equal for the non-integer widths; at `W=0`/integer it gathers one extra touch-only ring that trims nothing, so the result is unchanged). `select`/radius-change cost only (not per frame); negligible.
 
 ## Profiles
 New `EntityProfile(name, width, reach)` (height reserved for later headroom). Ship
@@ -254,7 +254,7 @@ Support-growth and occlusion are the **same** pass (see **Core idea**), so this 
 one stage, not two. Built on Stage 3's region adjacency.
 
 Work:
-- In `exposedSurfaces(level, pos, profile)`, gather all collision boxes in the window plus a **`ceil(W)`** occluder margin (horizontal) + the vertical window, dilate **every** footprint by `W/2`, and build the arrangement. (Margin is `ceil(W)`, not `ceil(W/2)`: candidate top and occluder each grow `W/2`, so a box up to `W` blocks past the window can still trim an outer candidate — `ceil(W/2)` left walls just outside the window un-dilated for wide entities, most visible at `radius = 0`.) A dilated box-top at height `T` survives at a sub-area iff **no dilated box spans immediately above it** there (`minY <= T < maxY`) -- the same spans-above/buried test as today, now on dilated footprints. This both removes a lower top where a higher box covers it (cut back `W/2`) and keeps the higher top as the surface to stand on. Non-burying overlaps stay as **distinct levels** (not `max topY`), preserving multi-level and `Point == today`.
+- In `exposedSurfaces(level, pos, profile)`, gather all collision boxes in the window plus a **`floor(W)+1`** occluder margin (horizontal) + the vertical window, dilate **every** footprint by `W/2`, and build the arrangement. (Margin is a `W`-based reach, not `ceil(W/2)`: candidate top and occluder each grow `W/2`, so two cells up to `floor(W)+1` apart still interact — `ceil(W/2)` left walls just outside the window un-dilated for wide entities, most visible at `radius = 0`. `floor(W)+1` is the one reach used everywhere; a safe superset of the tight `ceil(W)`.) A dilated box-top at height `T` survives at a sub-area iff **no dilated box spans immediately above it** there (`minY <= T < maxY`) -- the same spans-above/buried test as today, now on dilated footprints. This both removes a lower top where a higher box covers it (cut back `W/2`) and keeps the higher top as the surface to stand on. Non-burying overlaps stay as **distinct levels** (not `max topY`), preserving multi-level and `Point == today`.
 - **Reuse Stage 3 merge + adjacency unchanged (no dilation-specific variant):** the dilated arrangement is just a *new, more fragmented* rect source. Run the **same** coplanar merge over it (a flat dilated plateau cut into per-cell pieces -- with non-integer edges like `0.3`/`0.975` -- collapses back to maximal rects), then flood the merged set via the **same** geometric region adjacency. Because abutment is geometric (not a 4-column scan), dilated rects -- including a perch over the void that straddles cells -- flood **directly**; there is **no per-cell-clip-to-preserve-4-neighbor** step. Gap cells receive bled-in support from neighbors.
 - **Re-cut to a non-overlapping union before merge (`union`).** Dilated neighbor tops *overlap* (a flat floor row grows into itself by `W` between cells), but the greedy strip-merge assumes non-overlapping input and only combines rects sharing an exact perpendicular span -- so overlaps with mismatched spans (L-corners, the ring around a hole) survive and, drawn translucent, **double-blend into darker seams**. Fix: per coplanar level, decompose to a non-overlapping set covering the same area via a **vertical-slab sweep** (split at every X edge, union the Z-intervals of the rects spanning each slab), then run the existing merge. Area-preserving (reachability unchanged); `Point` (W=0) tops only abut, so it's a no-op there.
 - **Skirt-diff in the renderer (`openSpans`/`subtractSpans`).** Any rectangle partition of a holed / L-shaped level has *internal* edges between equal-height pieces; a skirt there is a **false interior wall** (and depth-testing can't hide it where it overhangs air near a hole). So each edge is skirted only over the sub-spans **not** covered by an equal-height neighbour abutting across it (a per-edge 1-D interval subtraction). Handles *partial* sharing (a big rect's edge shared with a sliver over only part of its length). True drops / hole outlines / unshared remainders keep their skirts. O(n) per edge over the reached set; the same diff is reusable for the future hole/surface overlay. (Renderer-only; lives with the Stage 2.5 rendering code.)
@@ -277,22 +277,155 @@ Confirm in-game (all required):
 - [ ] Flat open ground: same as Point aside from the edge overhang.
 - [ ] **No double-blend (re-cut/`union`):** a dilated level with overlap-prone shape (L-corner, the overhang ring around a small hole) is a single flat translucent color -- no darker seams where dilated tops overlapped.
 - [ ] **No false interior skirts (skirt-diff):** where the merge splits a continuous level into several rects (e.g. the Ravager 2x2-hole case = 2 big rects + 2 slivers), the *internal* edges drop **no** skirt -- only the real hole outline and the outer boundary do. A big rect's edge that is shared with a sliver over only part of its length skirts just the unshared remainder.
-- [ ] **Outer-ring trim (`ceil(W)` margin):** a wall just *outside* the window still eats into the outer-ring standable area. **Ravager, `radius = 0`**, click a floor block with a wall **2 columns away**: the seed's dilated top is cut back ~`W/2` toward the wall (not left as a full untrimmed square). Same at higher radius for the painted edge ring (incl. the grey ring — it stays accurately trimmed, not "blank/invalid").
+- [ ] **Outer-ring trim (`floor(W)+1` margin):** a wall just *outside* the window still eats into the outer-ring standable area. **Ravager, `radius = 0`**, click a floor block with a wall **2 columns away**: the seed's dilated top is cut back ~`W/2` toward the wall (not left as a full untrimmed square). Same at higher radius for the painted edge ring (incl. the grey ring — it stays accurately trimmed, not "blank/invalid").
 - [ ] **Point** reproduces today's exact result (no overhang; occlusion + multi-level identical to current; `union` a no-op, skirt-diff only removes genuine shared edges).
 
-### Stage 5 - Tricky-block + connectivity verification (both profiles)
-Work:
-- Verify per-block correctness and that the re-cut + geometric region adjacency (Stage 3) holds across the standard block zoo, now with dilation active.
+### Stage 5 - Lazy flood + eager/lazy profiling
+A performance rework of `select` (geometry/result unchanged), plus an A/B harness.
+Landed after Stage 4 so it can be validated for **set-equality** against the
+already-verified eager path. **Done** — parity (`match=true`) and the row/column
+wins confirmed in-game for Point/Player/Ravager at radii 0..20; `PROFILE_FLOOD`
+left off in the committed build (flip on locally to re-A/B).
 
-Confirm in-game (all required; check each for **Player** and **Ravager**):
-- [ ] Full block, top slab, bottom slab: top surfaces at the correct heights.
-- [ ] Stairs: exposed L (Point/Player); Ravager = full top `1.0` over the block + the exposed tread strip translated outward into a front `0.5` perch lip (per Stage 4).
-- [ ] Fence / wall: post-top and arm tops correct and connected through the flood.
-- [ ] Glass pane sitting on a block: the pane top connects to the exposed ring of the block below (via geometric adjacency) - the flood crosses between them.
-- [ ] Carpet (thin) and snow layers: standable at the correct low height.
-- [ ] Looking at tall grass / flowers resolves downward to the block beneath.
-- [ ] Sweeping the crosshair / raising the radius grows a single connected set; all reached surfaces stay drawn.
-- [ ] Right-click clears; selection persists across an item switch and reappears on re-equip; clears on world/dimension change.
+**Why.** Today's `select` is *window-driven*: it enumerates collision shapes for
+the **entire** `(2(radius+margin)+1)² x (2·radius+3)` cube, dilates every
+candidate, merges the whole arrangement, then floods. Cost scales with **window
+volume**, not the reachable set — a high radius in a narrow cave (or against a
+wall) pays for thousands of solid/unreachable columns it never paints. Lazy flood
+makes cost **output-sensitive**: expose columns on demand as the BFS reaches them,
+touching ~the reached surfaces plus their immediate occluder shells, not the whole
+cube.
+
+**Design (surface BFS over lazily-exposed columns).**
+- **Lazy column exposure.** `exposeColumn(x,z)` queries collision shapes for a
+  column once and caches its `WorldBox`es in the `index`. Computing a column's
+  *dilated tops* (`exposeBox`) needs its occluder shell (columns within the reach
+  `R`, below; the occluder shell is the columns `exposeBox` scans for this box)
+  exposed first, so exposing a column triggers exposing its shell. Everything is
+  memoized — each column's shapes are queried at most once.
+- **BFS unit = a raw dilated surface rect** (per-box `exposeBox` output,
+  *pre-merge*), tagged with its **source cell**. From a popped surface in cell
+  `c`, candidate neighbours live in cells within Chebyshev `R` of `c`; expose
+  those columns' surfaces and enqueue any unvisited one that is
+  `footprintAdjacent` **and** `|dTopY| <= reach`. Neighbour search is
+  **column-local** (not the eager flood's O(n²) all-pairs scan) — that locality is
+  what keeps it output-sensitive.
+- **The neighbour-search reach is `R = floor(W) + 1` cells.** Two cells `Δ` apart
+  have raw footprint gap `Δ - 1`; an abutting/bridged pair (touch counts for
+  `footprintAdjacent`) needs `Δ - 1 <= W`, i.e. `Δ <= floor(W) + 1`. That is **`1`
+  (Point), `1` (Player), `2` (Ravager)**. Note `R` is **not** `ceil(W)`: `ceil(W)`
+  matches for the non-integer pair but is `0` for **Point** (`W = 0`), which would
+  stop the search inside one cell and never connect adjacent floor tiles — Point
+  must be `1`. (The integer-`W` *bridging* boundary — a width-`W` box in a gap of
+  exactly `W` just fits / falls in — is moot here: it only affects whether the
+  outermost ring bridges, and the shipped widths besides Point are non-integer.)
+  `floor(W)+1` is now the **one reach used everywhere**, including the eager
+  occluder margin (a safe superset of the tight `ceil(W)`; the extra touch-only
+  ring at `W=0`/integer trims nothing). Pitfall this avoids: expressing the reach
+  in `halfW` (`ceil(halfW)+1`) is the `W/2`-vs-`W` bug fixed in Stage 4.
+- **Spatial cube cutoff (unchanged, restated).** A surface is enqueued iff it is
+  **connected** to the seed **and** within the 3-D cube from the seed:
+  `|x-ox| <= radius` ∧ `|z-oz| <= radius` ∧ `|y-oy| <= radius`. The flood is bounded
+  by *physical distance*, not hop-count or steps-taken: a spiral staircase is
+  traversed only while it stays inside the cube (it does **not** wind
+  indefinitely), and a narrow cave is followed only as far as the cube reaches.
+  This matches Stage 3/4's window exactly, so the **reached set is identical to
+  eager** — lazy changes *how* we find it, not *what* we find.
+- **Merge/union moves to *after* the flood.** Eager unions+merges the whole
+  arrangement before flooding; lazy floods the **raw** (possibly overlapping)
+  dilated surfaces and runs `mergeCoplanar` (union + greedy strip-merge) on **only
+  the reached set**, purely for rendering/quad-count. Correct because
+  `footprintAdjacent` already treats positive-area overlap as connected, so flood
+  connectivity is identical with or without the pre-merge, and union is
+  area-preserving (never changes reachability). (Answers "union is still fine since
+  we don't union till after flooding": yes.)
+
+**Keep both methods + profile (the ask).** Retain the eager path; add the lazy
+path; a dispatch flag selects one. The trade-off being measured:
+- *Eager merges early* → the flood runs over a **small merged graph** (cheap O(n²)
+  flood) but always pays **full window enumeration + full-arrangement merge**.
+- *Lazy* → touches **only reached columns** (output-sensitive enumeration) and
+  merges only the reached set, but floods **per-box raw** surfaces with
+  column-local adjacency.
+Expectation: lazy dominates in caves / wall-bounded spots (small reached set, huge
+window); eager may win on wide-open ground at low radius (the whole window is
+reached anyway, and early merge shrinks the flood graph).
+
+*Proposed harness (confirm before building):* a debug flag `PROFILE_FLOOD` that,
+when on, runs **both** paths on each `select`, asserts the reached sets are equal
+(logs a warning on mismatch — the correctness oracle), and logs both `nanoTime`
+timings + column-exposure counts with the scenario; a separate `LAZY` flag picks
+the production path, **defaulting to lazy** (eager kept behind the flag for A/B —
+revisit only if the numbers say otherwise). Profiling scenarios: (a) open flat
+field, radius 8;
+(b) narrow 1-wide cave, radius 16; (c) against a wall / `radius = 0`; each for
+Point / Player / Ravager.
+
+**Decisions (resolved in conversation).**
+- Use the lazy version (output-sensitive) — yes.
+- Cutoff = today's 3-D cube (connected ∧ XZ-Chebyshev ≤ radius ∧ |ΔY| ≤ radius);
+  **not** hop/step count.
+- Union/merge runs **after** the flood, on the reached set only.
+- Flood unit = raw per-box dilated surfaces (no pre-merge).
+- Keep eager too, behind a flag, for A/B + profiling.
+- **Tight occluder-column window (`occluderColumns`, post-profiling opt).** The
+  occluder shell `exposeBox` scans (and `ensureOccluders` pre-exposes) is now the
+  exact range a box's dilated footprint can reach — `floor(min - W) .. ceil(max +
+  W) - 1` per axis (full-block-conservative) — replacing the old W-independent
+  `floor(base)±1` pad. Shared by both via one helper so the index/scan stay in
+  lock-step. **Result-preserving** (the dropped columns abut with zero overlap and
+  trimmed nothing) and parity-preserving (the helper feeds the eager path too). It
+  shrinks the *horizontal* column fan-out — biggest win for **Point** (`W=0` → the
+  box's own column only; profiling showed Point lazy over-exposing ~530 vs eager
+  ~441/529 while Player/Ravager were already ≤ eager).
+- **Lazy in Y (`ensureRows`, implemented).** Columns are no longer scanned over
+  the full `[yLo,yHi]` band; `ensureRows(cx,cz,a,b)` queries only the block rows a
+  visit needs and records them per-column in a `BitSet` (each `(column,row)` hit
+  at most once). A neighbour cell is scanned only for tops within one `reach` step
+  of the popped surface's height (`collect(cx,cz, h-reach, h+reach)`); each
+  candidate box's occluder shell is scanned only at the rows around *that box's*
+  top (`floor(yMax)±1`); `exposeBox` is memoized per box. Only the **origin
+  column** exposes its full band (to seed every standable top there, matching
+  eager). This drops the per-column vertical factor from `O(radius)` to `O(heights
+  the flood actually traverses that column)`, so open ground goes `~R³ → ~R²`.
+  **Orthogonal to** the horizontal `occluderColumns` tightening: total lazy cost ≈
+  columns × rows-per-column, and the two trim those factors independently, so they
+  compose. The harness now logs `rows` for both paths (eager = window×band, the
+  apples-to-apples vertical-work metric).
+
+**Risks / things to get right.**
+- **Neighbour-search reach** is `R = floor(W) + 1` cells (cell-to-cell): `1`
+  Point, `1` Player, `2` Ravager — the one reach used everywhere (incl. the eager
+  occluder margin). **Not** `ceil(W)` (that is `0` for Point and would shatter a
+  flat floor) and **not** a `halfW`-based constant (`ceil(halfW)+1` is the Stage 4
+  `W/2`-vs-`W` bug). The occluder shell is the columns `exposeBox` scans per box.
+  Too small under-paints (drops a connection at a dilated overhang); the
+  eager-parity check is the guard.
+- **No duplicate surfaces:** memoize per-column dilated tops so a column reached
+  from two neighbours isn't exposed/enqueued twice.
+- **Occluder shell vs. enqueue set:** shell columns are exposed only to *trim* a
+  candidate; their own in-cube tops are still enqueueable (mirrors eager's margin
+  ring, which produces no painted tops unless in-window).
+- **EPS / float compares** identical to eager (`1e-6`) so adjacency matches; lazy
+  must not introduce a different tolerance.
+- Lazy must reproduce eager **exactly** (set equality) for all three profiles —
+  the acceptance gate, enforced by the compare harness.
+
+Confirm in-game / profiling (all required):
+- [ ] **Parity:** for Point, Player, Ravager the painted set is **identical** to the
+  eager path (compare harness logs zero mismatches) across flat ground, stairs,
+  multi-level, holes, and the tricky-block zoo.
+- [ ] **Output-sensitive cost:** in a narrow cave at high radius, lazy logs **far
+  fewer** column exposures / lower time than eager; on open ground both are
+  comparable.
+- [ ] **Spiral staircase** within the cube floods the whole spiral and **stops at
+  the cube** (not indefinitely); outside the cube it stops.
+- [ ] **Radius = 0 / against a wall:** lazy still trims the seed's dilated top
+  correctly (occluder shell exposed even though no neighbour is enqueued).
+- [ ] Profiling numbers logged for scenarios (a)/(b)/(c) × profiles; pick the
+  production default from the numbers (keep the loser behind the flag).
+- [ ] Cross-cutting: no errors on resize/world change; server no-op; `./gradlew
+  build` passes.
 
 ### Stage 6 - Polish + docs
 Work:
@@ -325,14 +458,15 @@ Confirm in-game (all required):
   - Stage 1 (done): `select` takes a profile; `profile.reach()` replaces `MAX_STEP`; `pruneStale` removed.
   - Stage 2: drop `distance`/`DistancedRect` plumbing.
   - Stage 3 (done): `select` reworked to enumerate→merge→flood; `collectColumn`/own-column/4-neighbor + 0-1 BFS + block-keyed cache removed; coplanar **merge** (`mergeCoplanar`/`mergeAlong`) into maximal rects feeds the flood; **geometric region adjacency** (`footprintAdjacent && |dTopY|<=reach`); radius = spatial window.
-  - Stage 4 (WIP): `select` builds a dilated arrangement — `exposeBox` dilates every footprint by `W/2` and applies the spans-above/buried test, gathering occluders over a **`ceil(W)`** margin beyond the window (via a per-column `WorldBox`/`ColKey` index; `ceil(W)` not `ceil(W/2)`, so outer-ring/`radius=0` candidates are trimmed by walls just outside); `footprintAdjacent` broadened to treat positive-area overlap as connected; **`union`** (vertical-slab sweep) re-cuts each coplanar level to a non-overlapping set before `mergeCoplanar` (no double-blend / well-defined merge).
+  - Stage 4: `select` builds a dilated arrangement — `exposeBox` dilates every footprint by `W/2` and applies the spans-above/buried test, gathering occluders over a **`floor(W)+1`** margin beyond the window (via a per-column `WorldBox`/`ColKey` index; a `W`-based reach not `ceil(W/2)`, so outer-ring/`radius=0` candidates are trimmed by walls just outside); `footprintAdjacent` broadened to treat positive-area overlap as connected; **`union`** (vertical-slab sweep) re-cuts each coplanar level to a non-overlapping set before `mergeCoplanar` (no double-blend / well-defined merge).
+  - Stage 4.5: split `select` into `selectEager` (today's window-driven enumerate→merge→flood, kept) and `selectLazy` (column-on-demand surface BFS with a memoized column/surface cache, column-local adjacency, and `mergeCoplanar` run on the **reached set after** the flood); a `LAZY` dispatch flag + a `PROFILE_FLOOD` compare-and-time harness (run both, assert set-equal, log `nanoTime` + column-exposure counts). Geometry helpers (`exposeBox`/`union`/`mergeCoplanar`/`footprintAdjacent`) are shared unchanged.
 - `src/client/java/com/example/overlay/client/WorldOverlayManager.java` (Stage 2): add a **second, depth-tested skirt pipeline** + buffer; two-buffer draw.
 - `src/client/java/com/example/overlay/client/WorldOverlay.java` (Stage 2): `emit` gains the second (skirt) buffer.
 - `src/client/java/com/example/overlay/client/widgets/CollisionSurfaceOverlay.java`:
   - Stage 1 (done): active profile, sneak+clear cycle in `onUseItem` + HUD ping, `pruneStale` call dropped, publish-on-action.
   - Stage 2 (done): height-gradient color; emit double-winding, bottom-fading skirts at `reach + SKIRT_MARGIN` into the skirt buffer; make `profile` volatile (read in `emit`).
   - Stage 2.5 (done): reverted draw-time dilation (tops/borders at true bounds; only square skirts nudged by tiny `SKIRT_OFFSET`); grey cutoff ring (`RING_COLOR`, `ringStart`/`ringEnd`, `fadedTop` ring-split, `sqrt`-eased `vertex` blend); crouch-gated through-walls top + borders (`crouching`).
-  - Stage 4 (WIP): **skirt-diff** (`openSpans`/`subtractSpans`, `EDGE_*`, `SKIRT_EPS`) — skirt each edge only over the sub-spans not shared with an equal-height neighbour, so internal edges of a merge-split level don't draw false interior walls.
+  - Stage 4: **skirt-diff** (`openSpans`/`subtractSpans`, `EDGE_*`, `SKIRT_EPS`) — skirt each edge only over the sub-spans not shared with an equal-height neighbour, so internal edges of a merge-split level don't draw false interior walls.
 - `src/client/java/com/example/overlay/client/widgets/RadiusIndicatorOverlay.java` (Stage 1, done: shows profile name).
 - `src/client/java/com/example/overlay/client/OverlayClient.java` -- likely **no change**.
 - Docs: `docs/geometry.md`, `docs/rendering.md`, `AGENTS.md`, `PLAN.md`
