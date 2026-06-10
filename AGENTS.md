@@ -272,6 +272,16 @@ incremental:
   **Future work** here, refresh the affected **`docs/<subsystem>.md`** guide, add
   **code comments** for file-level gotchas, and clear/refresh **`PLAN.md`**.
   Reviewing the docs for staleness should be a normal step before opening a PR.
+- **Log mid-task design changes into `PLAN.md` as they land (the running scratch
+  for durable docs).** When a decision or logical change emerges *in conversation*
+  during a task — a new approach, an algorithm/rendering change, a reversed choice
+  — write it into `PLAN.md` immediately, **including its stage's in-game test
+  checklist**, rather than only at the end. `PLAN.md` is transient (and not yet
+  cleared until the docs stage), so it is the accumulating record that the
+  end-of-task durable-doc update (`docs/<subsystem>.md`, `AGENTS.md`, code
+  comments) is distilled from. This keeps knowledge from being lost if a session
+  is interrupted and means the final docs pass is a consolidation, not a
+  recollection.
 - **Where knowledge goes (keep `AGENTS.md` lean):** when you learn something
   non-obvious, place it by scope —
   - specific to one file/widget → a **code comment** next to the code;

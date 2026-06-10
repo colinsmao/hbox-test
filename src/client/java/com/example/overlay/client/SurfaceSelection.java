@@ -2,8 +2,10 @@ package com.example.overlay.client;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,26 +20,44 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * Computes and holds the set of standable surfaces ({@link StandableRect}) drawn
  * by the overlay. In-memory only, not persisted.
  *
- * <p><b>v3 model: enumerate &rarr; merge &rarr; flood (geometric adjacency).</b>
- * {@link #select} works in three phases:
+ * <p><b>v4 model: dilated arrangement &rarr; merge &rarr; flood (geometric
+ * adjacency).</b> {@link #select} works in three phases:
  * <ol>
- * <li><b>Enumerate</b> the occlusion-aware exposed surfaces
- *     ({@link #exposedSurfaces}) of every block in a spatial window of half-extent
- *     {@code radius} blocks around the seed. A sub-box top counts only over the
- *     footprint where nothing solid sits directly above it (clipped by the same
- *     block's higher boxes and the block above), so e.g. a stair contributes its
- *     exposed L, not its buried back half.
- * <li><b>Merge</b> coplanar ({@code |dTopY| < EPS}) footprint-adjacent rects into
- *     maximal rectangles (greedy strip merge along X then Z), so a flat floor
- *     becomes one rect instead of a grid of unit cells (clean skirts, fewer quads).
+ * <li><b>Dilated arrangement</b> ({@link #exposeBox}): gather every collision box
+ *     in a window of half-extent {@code radius} blocks (plus a {@code ceil(W)}
+ *     occluder margin so every box that can trim an edge candidate is captured —
+ *     candidate and occluder each grow by {@code W/2}, so a box up to {@code W}
+ *     blocks past the window still eats in), grow each box's
+ *     footprint by the entity half-width {@code W/2} (Minkowski sum with the
+ *     {@code WxW} square is just the rect grown on every side), and keep a box-top
+ *     at height {@code T} over the footprint where <b>no dilated box spans
+ *     immediately above it</b> ({@code minY <= T < maxY}). That single
+ *     spans-above/buried test is the occlusion: it both cuts a lower top back by
+ *     {@code W/2} near a taller box and supplies that taller box's own (dilated)
+ *     top as the surface to stand on. Non-burying overlaps (an air gap between two
+ *     tops) stay as <b>distinct levels</b> (not {@code max topY}), so multi-level
+ *     is preserved. {@code W = 0} (Point) makes dilation a no-op — neighbor
+ *     footprints only abut (zero overlap), so it reproduces the per-block result.
+ * <li><b>Merge</b> coplanar ({@code |dTopY| < EPS}) rects into maximal rectangles.
+ *     Dilated neighbor tops grow into each other, so each level is first
+ *     <b>re-cut to a non-overlapping union</b> (vertical-slab sweep) — otherwise
+ *     overlapping translucent quads double-blend into darker seams — then a greedy
+ *     strip merge along X then Z collapses the grid back, so a flat floor becomes
+ *     one rect instead of many cells (clean skirts, fewer quads).
  * <li><b>Flood</b> the merged-rect graph from the seed rect(s) by <b>geometric
  *     adjacency</b>: two rects are connected iff their footprints share an edge
  *     with positive overlap ({@link #footprintAdjacent}) and their heights are
  *     within the active {@link EntityProfile}'s symmetric {@code reach}. This one
  *     test subsumes the old same-block / own-column / 4-neighbor-column cases: a
  *     glass pane on a block connects to that block's exposed ring because their
- *     footprints abut at the hole edges, no special case needed.
+ *     footprints abut at the hole edges, no special case needed. A dilated perch
+ *     over the void floods directly because adjacency is geometric (no column).
  * </ol>
+ *
+ * <p>For a gap of width {@code g} flanked by support, each side grows {@code W/2},
+ * leaving {@code g - W} uncovered: {@code g <= W} bridges, {@code g > W} leaves a
+ * hole — "can't fall into a hole smaller than yourself". (This stage shows only
+ * the <em>geometry</em>; fall/unreturnable semantics are a later milestone.)
  *
  * <p><b>Radius is a spatial budget</b> (the window half-extent in blocks), not a
  * graph hop-count: with merge an open floor is a single rect, so hop-count would
@@ -51,9 +71,20 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * {@link #allRects()} snapshot the overlay publishes into a {@code volatile} field.
  */
 public final class SurfaceSelection {
-	// An axis-aligned XZ rectangle (world coords), used for the per-box footprint
-	// clip in exposedSurfaces and as the mutable merge accumulator.
+	// An axis-aligned XZ rectangle (world coords), the per-box footprint clip in
+	// exposeBox and the mutable merge accumulator.
 	private record Rect(double minX, double minZ, double maxX, double maxZ) {
+	}
+
+	// One collision sub-box in absolute world coords: its (undilated) XZ footprint
+	// plus its vertical extent. The arrangement dilates the footprint by W/2 on
+	// demand; yMin/yMax drive the spans-above occlusion test.
+	private record WorldBox(double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
+	}
+
+	// Column index key (block X/Z) for the per-column box lookup used to bound the
+	// occluder search to the candidate's immediate neighborhood.
+	private record ColKey(int x, int z) {
 	}
 
 	// Grouping key for the merge: two doubles quantized to 1/1024 of a block
@@ -73,38 +104,83 @@ public final class SurfaceSelection {
 	/**
 	 * Replace the selection with the merged standable surfaces reachable from the
 	 * surfaces of {@code start}, within a spatial window of half-extent
-	 * {@code radius} blocks, across footprint-adjacent height-gated steps.
+	 * {@code radius} blocks, for the entity's width/reach, across
+	 * footprint-adjacent height-gated steps.
 	 */
 	public void select(Level level, BlockPos start, int radius, EntityProfile profile) {
 		double reach = profile.reach();
+		double halfW = profile.width() / 2.0;
+		// Occluder margin: gather boxes this many blocks BEYOND the window so an
+		// outer-ring candidate is trimmed by every box that can eat its dilated top.
+		// Both the candidate top and an occluder grow by W/2, so their footprints
+		// overlap whenever the undilated gap is < W — i.e. a box up to ceil(W) blocks
+		// past the window still trims. ceil(W/2) misses the far half for wide
+		// entities (a Ravager wall 2 columns out is never gathered), so use ceil(W).
+		int margin = (int) Math.ceil(profile.width());
 		BlockPos origin = start.immutable();
+		int ox = origin.getX();
+		int oy = origin.getY();
+		int oz = origin.getZ();
 
-		// The seed's own exposed surfaces decide where the flood starts; if the
-		// targeted block has no standable top, there is nothing to select.
-		List<StandableRect> seedSurfaces = exposedSurfaces(level, origin);
+		// Phase 1: gather every collision sub-box in the window+margin, indexed by
+		// column, and split off the candidate tops (boxes inside the radius window)
+		// and the seed-column boxes. The margin ring supplies dilated occluders for
+		// edge candidates without itself producing painted tops.
+		int yLo = Math.max(oy - radius - 1, level.getMinY());
+		int yHi = Math.min(oy + radius + 1, level.getMaxY());
+		Map<ColKey, List<WorldBox>> index = new HashMap<>();
+		List<WorldBox> candidates = new ArrayList<>();
+		List<WorldBox> seedBoxes = new ArrayList<>();
+		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+		for (int x = ox - radius - margin; x <= ox + radius + margin; x++) {
+			for (int z = oz - radius - margin; z <= oz + radius + margin; z++) {
+				boolean colInWindow = Math.abs(x - ox) <= radius && Math.abs(z - oz) <= radius;
+				boolean originCol = x == ox && z == oz;
+				List<WorldBox> column = null;
+				for (int y = yLo; y <= yHi; y++) {
+					cursor.set(x, y, z);
+					VoxelShape shape = level.getBlockState(cursor).getCollisionShape(level, cursor, CollisionContext.empty());
+					if (shape.isEmpty()) {
+						continue;
+					}
+					boolean yInWindow = y >= oy - radius && y <= oy + radius;
+					for (AABB box : shape.toAabbs()) {
+						WorldBox wb = new WorldBox(
+							x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
+							y + box.minY, y + box.maxY);
+						if (column == null) {
+							column = index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>());
+						}
+						column.add(wb);
+						if (colInWindow && yInWindow) {
+							candidates.add(wb);
+						}
+						if (originCol && yInWindow) {
+							seedBoxes.add(wb);
+						}
+					}
+				}
+			}
+		}
+
+		// The seed's own dilated tops decide where the flood starts; if the targeted
+		// column has no standable top (e.g. a wide entity buried beside a wall),
+		// there is nothing to select.
+		List<StandableRect> seedSurfaces = new ArrayList<>();
+		for (WorldBox seed : seedBoxes) {
+			exposeBox(seed, index, halfW, seedSurfaces);
+		}
 		if (seedSurfaces.isEmpty()) {
 			result = List.of();
 			return;
 		}
 
-		// Phase 1: enumerate every exposed surface in the radius-block window.
-		int minY = level.getMinY();
-		int maxY = level.getMaxY();
-		int y0 = Math.max(origin.getY() - radius, minY);
-		int y1 = Math.min(origin.getY() + radius, maxY);
-		List<StandableRect> all = new ArrayList<>();
-		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-		for (int x = origin.getX() - radius; x <= origin.getX() + radius; x++) {
-			for (int z = origin.getZ() - radius; z <= origin.getZ() + radius; z++) {
-				for (int y = y0; y <= y1; y++) {
-					cursor.set(x, y, z);
-					all.addAll(exposedSurfaces(level, cursor));
-				}
-			}
+		// Phase 2: build the dilated arrangement, then merge coplanar adjacent rects.
+		List<StandableRect> arrangement = new ArrayList<>();
+		for (WorldBox candidate : candidates) {
+			exposeBox(candidate, index, halfW, arrangement);
 		}
-
-		// Phase 2: merge coplanar adjacent rects into maximal rectangles.
-		List<StandableRect> merged = mergeCoplanar(all);
+		List<StandableRect> merged = mergeCoplanar(arrangement);
 
 		// Phase 3: flood the merged graph from the rect(s) covering a seed surface.
 		result = flood(merged, seedSurfaces, reach);
@@ -166,26 +242,35 @@ public final class SurfaceSelection {
 		return false;
 	}
 
-	// Two surfaces connect only if their rects share an edge with positive
-	// overlap: they abut along X (one's maxX == the other's minX) with Z-overlap,
-	// or along Z with X-overlap. This stops a partial-footprint surface (e.g. a
-	// stair tread) from connecting on a side it does not physically touch.
+	// Two surfaces are footprint-connected if their rects either overlap with
+	// positive area (the same walkable patch — happens once dilated neighbor tops
+	// grow into each other) or share an edge with positive overlap: abut along X
+	// (one's maxX == the other's minX) with Z-overlap, or along Z with X-overlap.
+	// The edge test stops a partial-footprint surface (e.g. a stair tread) from
+	// connecting on a side it does not physically touch; the overlap test keeps
+	// dilated patches connected even when their spans are offset (no clean edge).
+	// For Point, tops never overlap, so only the edge test fires (as before).
 	private static boolean footprintAdjacent(StandableRect a, StandableRect b) {
+		double xOverlap = Math.min(a.maxX(), b.maxX()) - Math.max(a.minX(), b.minX());
 		double zOverlap = Math.min(a.maxZ(), b.maxZ()) - Math.max(a.minZ(), b.minZ());
+		if (xOverlap > EPS && zOverlap > EPS) {
+			return true;
+		}
 		if (zOverlap > EPS
 				&& (Math.abs(a.maxX() - b.minX()) < EPS || Math.abs(b.maxX() - a.minX()) < EPS)) {
 			return true;
 		}
-		double xOverlap = Math.min(a.maxX(), b.maxX()) - Math.max(a.minX(), b.minX());
 		return xOverlap > EPS
 				&& (Math.abs(a.maxZ() - b.minZ()) < EPS || Math.abs(b.maxZ() - a.minZ()) < EPS);
 	}
 
-	// Merge coplanar (same topY) footprint-adjacent rects into maximal rects.
-	// Group by topY, then within each group greedily merge abutting equal-span
-	// strips along X then Z (repeated until stable), which collapses a grid of
-	// unit cells back to whole rectangles. Greedy is not a minimal partition, but
-	// any miss only costs an extra interior skirt, never reachability.
+	// Merge coplanar (same topY) rects into maximal rects. Group by topY, then
+	// within each group first re-cut to a NON-OVERLAPPING union (union, below) —
+	// dilated neighbor tops grow into each other, and overlapping translucent quads
+	// double-blend into darker seams — then greedily merge abutting equal-span
+	// strips along X then Z (repeated until stable), collapsing the grid back to
+	// whole rectangles. Greedy is not a minimal partition, but any miss only costs
+	// an extra interior skirt, never reachability.
 	private static List<StandableRect> mergeCoplanar(List<StandableRect> input) {
 		if (input.size() < 2) {
 			return input;
@@ -206,6 +291,7 @@ public final class SurfaceSelection {
 			for (StandableRect r : sorted.subList(i, j)) {
 				rects.add(new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ()));
 			}
+			rects = union(rects);
 			int before;
 			do {
 				before = rects.size();
@@ -217,6 +303,63 @@ public final class SurfaceSelection {
 				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY));
 			}
 			i = j;
+		}
+		return out;
+	}
+
+	// Re-cut a set of (possibly overlapping) coplanar rects into a non-overlapping
+	// set covering exactly their union, so translucent tops never double-blend and
+	// the greedy strip-merge (which assumes non-overlapping input) is well-defined.
+	// Vertical-slab sweep: split at every X edge, and within each slab union the
+	// Z-intervals of the rects that span it. Because every rect edge is a slab
+	// boundary, a rect either fully covers a slab or not at all (no partial cells).
+	// halfW == 0 (Point) yields only abutting tops, so the union is a no-op on area.
+	private static List<Rect> union(List<Rect> rects) {
+		if (rects.size() < 2) {
+			return rects;
+		}
+		int n = rects.size();
+		double[] xs = new double[n * 2];
+		for (int i = 0; i < n; i++) {
+			xs[2 * i] = rects.get(i).minX();
+			xs[2 * i + 1] = rects.get(i).maxX();
+		}
+		Arrays.sort(xs);
+
+		List<Rect> out = new ArrayList<>();
+		List<double[]> intervals = new ArrayList<>();
+		for (int s = 0; s + 1 < xs.length; s++) {
+			double x0 = xs[s];
+			double x1 = xs[s + 1];
+			if (x1 - x0 <= EPS) {
+				continue;
+			}
+			intervals.clear();
+			for (int k = 0; k < n; k++) {
+				Rect r = rects.get(k);
+				if (r.minX() <= x0 + EPS && r.maxX() >= x1 - EPS) {
+					intervals.add(new double[] {r.minZ(), r.maxZ()});
+				}
+			}
+			if (intervals.isEmpty()) {
+				continue;
+			}
+			intervals.sort(Comparator.comparingDouble(iv -> iv[0]));
+			double zlo = intervals.get(0)[0];
+			double zhi = intervals.get(0)[1];
+			for (int k = 1; k < intervals.size(); k++) {
+				double[] iv = intervals.get(k);
+				if (iv[0] <= zhi + EPS) {
+					if (iv[1] > zhi) {
+						zhi = iv[1];
+					}
+				} else {
+					out.add(new Rect(x0, zlo, x1, zhi));
+					zlo = iv[0];
+					zhi = iv[1];
+				}
+			}
+			out.add(new Rect(x0, zlo, x1, zhi));
 		}
 		return out;
 	}
@@ -263,65 +406,54 @@ public final class SurfaceSelection {
 	}
 
 	/**
-	 * Occlusion-aware standable surfaces of a block, in absolute world coords.
-	 * Each collision sub-box's top is a candidate surface over its footprint; the
-	 * footprint is clipped to where nothing solid sits <em>directly above</em> it,
-	 * so only genuinely standable area remains (and only that area is drawn).
+	 * The standable area contributed by one collision box's top, dilated by the
+	 * entity half-width and clipped to where it is not buried, appended to
+	 * {@code out}.
 	 *
-	 * <p>Occluders for a box top at height {@code h} are: same-block boxes that
-	 * span {@code h} (sitting on or rising through it), and boxes of the block
-	 * above shifted up by 1 (only relevant when {@code h == 1.0}). Headroom beyond
-	 * the immediately-above cell is intentionally ignored (entity-height headroom
-	 * is deferred).
+	 * <p>The candidate footprint is {@code target} grown by {@code halfW} on every
+	 * side. It is then cut by every dilated box that <em>spans immediately above</em>
+	 * the top ({@code yMin <= T < yMax}, {@code T = target.maxY}) — the one
+	 * occlusion rule that both buries a lower top under a taller neighbor and (via
+	 * that neighbor's own call) supplies the higher surface. Occluder search is
+	 * bounded to the columns the dilated footprint can reach (dilation is
+	 * {@code < 1} block), via the per-column {@code index}. {@code halfW == 0}
+	 * leaves neighbor footprints merely abutting (zero overlap), so Point matches
+	 * the undilated per-block result.
 	 */
-	private static List<StandableRect> exposedSurfaces(Level level, BlockPos pos) {
-		VoxelShape shape = level.getBlockState(pos).getCollisionShape(level, pos, CollisionContext.empty());
-		if (shape.isEmpty()) {
-			return List.of();
-		}
-		List<AABB> boxes = shape.toAabbs();
+	private static void exposeBox(WorldBox target, Map<ColKey, List<WorldBox>> index, double halfW,
+			List<StandableRect> out) {
+		double topY = target.yMax();
+		Rect base = new Rect(
+			target.minX() - halfW, target.minZ() - halfW,
+			target.maxX() + halfW, target.maxZ() + halfW);
 
-		BlockPos above = pos.above();
-		VoxelShape aboveShape = level.getBlockState(above).getCollisionShape(level, above, CollisionContext.empty());
-		List<AABB> aboveBoxes = aboveShape.isEmpty() ? List.of() : aboveShape.toAabbs();
-
-		double ox = pos.getX();
-		double oz = pos.getZ();
-		int py = pos.getY();
-
-		List<StandableRect> out = new ArrayList<>();
-		for (AABB box : boxes) {
-			double h = box.maxY;
-			Rect footprint = new Rect(box.minX, box.minZ, box.maxX, box.maxZ);
-
-			List<Rect> occluders = new ArrayList<>();
-			for (AABB other : boxes) {
-				if (other == box) {
+		List<Rect> occluders = new ArrayList<>();
+		int cxLo = (int) Math.floor(base.minX()) - 1;
+		int cxHi = (int) Math.floor(base.maxX()) + 1;
+		int czLo = (int) Math.floor(base.minZ()) - 1;
+		int czHi = (int) Math.floor(base.maxZ()) + 1;
+		for (int cx = cxLo; cx <= cxHi; cx++) {
+			for (int cz = czLo; cz <= czHi; cz++) {
+				List<WorldBox> column = index.get(new ColKey(cx, cz));
+				if (column == null) {
 					continue;
 				}
-				// A box that occupies the slab just above h (sits on it or rises
-				// through it) hides that part of the top.
-				if (other.minY <= h + EPS && h < other.maxY - EPS) {
-					occluders.add(new Rect(other.minX, other.minZ, other.maxX, other.maxZ));
+				for (WorldBox other : column) {
+					if (other == target) {
+						continue;
+					}
+					if (other.yMin() <= topY + EPS && topY < other.yMax() - EPS) {
+						occluders.add(new Rect(
+							other.minX() - halfW, other.minZ() - halfW,
+							other.maxX() + halfW, other.maxZ() + halfW));
+					}
 				}
-			}
-			for (AABB a : aboveBoxes) {
-				if (a.minY + 1.0 <= h + EPS && h < a.maxY + 1.0 - EPS) {
-					occluders.add(new Rect(a.minX, a.minZ, a.maxX, a.maxZ));
-				}
-			}
-
-			double topY = py + h;
-			for (Rect exposed : subtractRects(footprint, occluders)) {
-				out.add(new StandableRect(
-					ox + exposed.minX(),
-					oz + exposed.minZ(),
-					ox + exposed.maxX(),
-					oz + exposed.maxZ(),
-					topY));
 			}
 		}
-		return out;
+
+		for (Rect exposed : subtractRects(base, occluders)) {
+			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(), topY));
+		}
 	}
 
 	// Subtract every occluder from base, returning the remaining 0..N rectangles

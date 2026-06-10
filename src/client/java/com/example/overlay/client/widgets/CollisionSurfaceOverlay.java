@@ -1,5 +1,7 @@
 package com.example.overlay.client.widgets;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import com.example.overlay.client.EntityProfile;
@@ -35,9 +37,11 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * before the flood-radius cutoff blend toward <b>grey</b> to signal "increase the
  * radius or re-center" — a selection bounded by a real drop stops short of the
  * radius and stays height-colored, so a radius cutoff reads differently from a
- * true boundary. Every edge drops a <b>depth-tested vertical skirt</b> so the
- * selection reads as a 3D mesh and a real drop reads as an open wall. See
- * {@code PLAN.md}.
+ * true boundary. Each edge drops a <b>depth-tested vertical skirt</b> so the
+ * selection reads as a 3D mesh and a real drop reads as an open wall, but
+ * <b>skirt-diffed</b>: the parts of an edge shared with an equal-height neighbour
+ * (an internal edge of a continuous level the greedy merge split) are skipped, so
+ * they don't read as false interior walls. See {@code PLAN.md}.
  *
  * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
@@ -88,6 +92,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// z-fight. Kept tiny so the gap from the top edge stays invisible and skirts
 	// don't visibly overlap neighbours.
 	private static final double SKIRT_OFFSET = 0.002;
+	// Edge-coincidence tolerance for the skirt-diff (which edge sub-spans abut an
+	// equal-height neighbour). Merged rects share exact slab-boundary coords, so a
+	// small epsilon is ample.
+	private static final double SKIRT_EPS = 1.0e-6;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
@@ -323,9 +331,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 			// Vertical (square) skirts into the depth-tested layer, pushed out by a
 			// tiny SKIRT_OFFSET so they clear the coplanar terrain side face without
-			// z-fighting. Buried skirts (solid-backed edges) are depth-occluded;
-			// drop-edge skirts stay visible. Window-boundary edges keep their skirts
-			// too — the grey cutoff ring alone signals an incomplete selection.
+			// z-fighting. Skirt-diff: each edge is skirted only over the sub-spans
+			// NOT shared with an equal-height neighbour — the greedy merge splits a
+			// holed/L-shaped level into several rects, and a skirt on such an internal
+			// (partly-shared) edge reads as a false interior wall (depth can't hide it
+			// where it overhangs air near a hole). True drop/boundary edges keep their
+			// skirts; the window-boundary edge does too (grey ring signals the cutoff).
 			float sMinX = minX - o;
 			float sMinZ = minZ - o;
 			float sMaxX = maxX + o;
@@ -334,11 +345,93 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float sg = g * SKIRT_SHADE;
 			float sb = b * SKIRT_SHADE;
 			float yBot = y - skirtDepth;
-			fadedSkirt(skirtBuffer, positionMatrix, sMinX, sMinZ, sMaxX, sMinZ, y, yBot, sr, sg, sb);
-			fadedSkirt(skirtBuffer, positionMatrix, sMinX, sMaxZ, sMaxX, sMaxZ, y, yBot, sr, sg, sb);
-			fadedSkirt(skirtBuffer, positionMatrix, sMinX, sMinZ, sMinX, sMaxZ, y, yBot, sr, sg, sb);
-			fadedSkirt(skirtBuffer, positionMatrix, sMaxX, sMinZ, sMaxX, sMaxZ, y, yBot, sr, sg, sb);
+			for (float[] sp : openSpans(rects, rect, EDGE_MIN_Z)) {
+				fadedSkirt(skirtBuffer, positionMatrix, sp[0] - o, sMinZ, sp[1] + o, sMinZ, y, yBot, sr, sg, sb);
+			}
+			for (float[] sp : openSpans(rects, rect, EDGE_MAX_Z)) {
+				fadedSkirt(skirtBuffer, positionMatrix, sp[0] - o, sMaxZ, sp[1] + o, sMaxZ, y, yBot, sr, sg, sb);
+			}
+			for (float[] sp : openSpans(rects, rect, EDGE_MIN_X)) {
+				fadedSkirt(skirtBuffer, positionMatrix, sMinX, sp[0] - o, sMinX, sp[1] + o, y, yBot, sr, sg, sb);
+			}
+			for (float[] sp : openSpans(rects, rect, EDGE_MAX_X)) {
+				fadedSkirt(skirtBuffer, positionMatrix, sMaxX, sp[0] - o, sMaxX, sp[1] + o, y, yBot, sr, sg, sb);
+			}
 		}
+	}
+
+	// Edge selectors for openSpans: the four sides of a rect.
+	private static final int EDGE_MIN_Z = 0;
+	private static final int EDGE_MAX_Z = 1;
+	private static final int EDGE_MIN_X = 2;
+	private static final int EDGE_MAX_X = 3;
+
+	// The sub-spans of one rect edge that should drop a skirt: the edge's full
+	// extent minus the parts covered by an equal-height neighbour abutting across
+	// it (an internal edge of a continuous level the greedy merge happened to split
+	// — not a real drop). Returns [lo,hi] pairs along the edge's varying axis (X for
+	// the Z edges, Z for the X edges) in true world coords. O(n) over the reached
+	// set per edge; n is the merged-rect count, so cheap enough per frame, and the
+	// same diff feeds the future hole/surface overlay.
+	private static List<float[]> openSpans(List<StandableRect> rects, StandableRect r, int edge) {
+		double lo = edge < EDGE_MIN_X ? r.minX() : r.minZ();
+		double hi = edge < EDGE_MIN_X ? r.maxX() : r.maxZ();
+		List<double[]> covered = new ArrayList<>();
+		for (StandableRect nb : rects) {
+			if (nb == r || Math.abs(nb.topY() - r.topY()) > SKIRT_EPS) {
+				continue;
+			}
+			boolean abuts = false;
+			double clo = 0.0;
+			double chi = 0.0;
+			switch (edge) {
+				case EDGE_MIN_Z -> {
+					abuts = Math.abs(nb.maxZ() - r.minZ()) < SKIRT_EPS;
+					clo = Math.max(nb.minX(), r.minX());
+					chi = Math.min(nb.maxX(), r.maxX());
+				}
+				case EDGE_MAX_Z -> {
+					abuts = Math.abs(nb.minZ() - r.maxZ()) < SKIRT_EPS;
+					clo = Math.max(nb.minX(), r.minX());
+					chi = Math.min(nb.maxX(), r.maxX());
+				}
+				case EDGE_MIN_X -> {
+					abuts = Math.abs(nb.maxX() - r.minX()) < SKIRT_EPS;
+					clo = Math.max(nb.minZ(), r.minZ());
+					chi = Math.min(nb.maxZ(), r.maxZ());
+				}
+				default -> {
+					abuts = Math.abs(nb.minX() - r.maxX()) < SKIRT_EPS;
+					clo = Math.max(nb.minZ(), r.minZ());
+					chi = Math.min(nb.maxZ(), r.maxZ());
+				}
+			}
+			if (abuts && chi - clo > SKIRT_EPS) {
+				covered.add(new double[] {clo, chi});
+			}
+		}
+		return subtractSpans(lo, hi, covered);
+	}
+
+	// [lo,hi] minus the union of the covered intervals, as the remaining open
+	// sub-spans (sweep left to right over the sorted intervals).
+	private static List<float[]> subtractSpans(double lo, double hi, List<double[]> covered) {
+		covered.sort(Comparator.comparingDouble(c -> c[0]));
+		List<float[]> out = new ArrayList<>();
+		double cur = lo;
+		for (double[] c : covered) {
+			if (c[0] > cur + SKIRT_EPS) {
+				out.add(new float[] {(float) cur, (float) Math.min(c[0], hi)});
+			}
+			cur = Math.max(cur, c[1]);
+			if (cur >= hi - SKIRT_EPS) {
+				break;
+			}
+		}
+		if (hi - cur > SKIRT_EPS) {
+			out.add(new float[] {(float) cur, (float) hi});
+		}
+		return out;
 	}
 
 	// One flat axis-aligned quad over [x0,x1] x [z0,z1] at height y, emitted with
