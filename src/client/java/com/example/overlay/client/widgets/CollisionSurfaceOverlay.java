@@ -2,6 +2,8 @@ package com.example.overlay.client.widgets;
 
 import java.util.List;
 
+import com.example.overlay.client.EntityProfile;
+import com.example.overlay.client.OverlayManager;
 import com.example.overlay.client.StandableRect;
 import com.example.overlay.client.SurfaceSelection;
 import com.example.overlay.client.WorldOverlay;
@@ -43,9 +45,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * items and reappears on re-equip, and is emptied by a clearing right-click or
  * a level change.
  *
- * <p>Immediate-mode like the other world overlays: each frame {@link #extract}
- * publishes the cache's combined rectangles into a {@code volatile} snapshot
- * that {@link #emit} re-emits.
+ * <p>The selection is published into a {@code volatile} snapshot on every stick
+ * action ({@link #publish}); {@link #extract} does no per-frame geometry work
+ * (it only tracks the held item and resets on a level change), and {@link #emit}
+ * re-emits the snapshot each frame.
  */
 public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
@@ -85,6 +88,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private int selectionRadius = DEFAULT_RADIUS;
 	private BlockPos lastSeed;
 
+	// Active entity profile, cycled by sneak+right-click at nothing (see
+	// onUseItem). Point is a no-op for dilation, so it reproduces today's
+	// point-particle behavior. Touched only on the client thread.
+	private EntityProfile profile = EntityProfile.POINT;
+
 	// Last level seen on the extraction thread. A change (world unload, dimension
 	// switch, disconnect/reconnect) empties the in-memory selection — a
 	// self-contained alternative to a manager-side world-unload hook.
@@ -105,22 +113,23 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		Player player = client.player;
 		Level level = client.level;
 
+		// The selection is published on every stick action (publish()), so extract
+		// does no per-frame geometry work. It only tracks the held item and resets
+		// on a level-identity change (world unload, dimension switch, reconnect).
 		if (level != lastLevel) {
 			cache.clear();
 			lastSeed = null;
 			lastLevel = level;
+			snapshot = List.of();
 		}
 
 		holdingStick = player != null && player.getMainHandItem().is(Items.STICK);
-		if (level == null) {
-			snapshot = List.of();
-			return;
-		}
+	}
 
-		// Place/break can invalidate already-selected blocks; reconcile first. The
-		// selection itself only changes on the right-click trigger (onUseItem).
-		cache.pruneStale(level);
-
+	// Publish the current selection into the volatile snapshot emit() reads. Called
+	// after every mutation (select/clear/radius/profile) so per-frame work is nil;
+	// editing painted terrain therefore needs a re-click to refresh (intended).
+	private void publish() {
 		snapshot = cache.allRects();
 	}
 
@@ -164,12 +173,20 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, selectionRadius);
+			cache.select(level, start, selectionRadius, profile);
 			lastSeed = start;
 		} else {
+			// Right-click at nothing clears. Sneaking also advances the profile and
+			// pings the HUD; lastSeed stays null so there is no re-flood — the new
+			// profile takes effect on the next select.
 			cache.clear();
 			lastSeed = null;
+			if (player.isShiftKeyDown()) {
+				profile = profile.next();
+				OverlayManager.radiusIndicator().showProfile(profile.name());
+			}
 		}
+		publish();
 		player.swing(hand);
 	}
 
@@ -190,7 +207,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			selectionRadius = updated;
 			Level level = Minecraft.getInstance().level;
 			if (level != null && lastSeed != null) {
-				cache.select(level, lastSeed, selectionRadius);
+				cache.select(level, lastSeed, selectionRadius, profile);
+				publish();
 			}
 		}
 		return selectionRadius;

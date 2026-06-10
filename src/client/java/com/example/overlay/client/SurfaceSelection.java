@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,8 +31,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * <em>occlusion-aware</em> ({@link #exposedSurfaces}): a sub-box top counts only
  * over the footprint where nothing solid sits directly above it, clipped by the
  * same block's higher boxes and by the block above. Edges are
- * <em>footprint-aware</em> ({@link #footprintAdjacent}) and height-gated by a
- * single {@link #MAX_STEP}, which together kill the stair-back "ghost step".
+ * <em>footprint-aware</em> ({@link #footprintAdjacent}) and height-gated by the
+ * active {@link EntityProfile}'s symmetric {@code reach}, which together kill the
+ * stair-back "ghost step".
  * Candidates come from the same block (siblings, free), the 4 horizontal
  * neighbor columns, and the surface's <em>own</em> column (so a partial-footprint
  * block like a glass pane connects to the block it sits on, whose top has a
@@ -41,10 +41,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * whole block's exposed rects (its draw set).
  *
  * <p>Not thread-safe by design. It is mutated only on the client thread
- * ({@code select}/{@code add}/{@code pruneStale}/{@code clear}); the render
- * thread never touches it — the overlay publishes an immutable
- * {@link #allRects()} snapshot into a {@code volatile} field for {@code emit}
- * to read.
+ * ({@code select}/{@code add}/{@code clear}); the render thread never touches it
+ * — the overlay publishes an immutable {@link #allRects()} snapshot into a
+ * {@code volatile} field for {@code emit} to read.
  */
 public final class SurfaceSelection {
 	// distance = flood block-transition distance from the seed (seed = 0). Carried
@@ -79,11 +78,6 @@ public final class SurfaceSelection {
 		Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST
 	};
 
-	// Max walkable height difference between two connected surfaces (a step). One
-	// symmetric value for now; an asymmetric up/down split is deferred (it only
-	// matters for the future directed hole pass).
-	private static final double MAX_STEP = 1.0;
-
 	// Tolerance for the double coordinate compares (box edges are multiples of
 	// 1/16). Used to drop subtraction slivers and to test edge adjacency/overlap.
 	private static final double EPS = 1.0e-6;
@@ -101,9 +95,10 @@ public final class SurfaceSelection {
 	 * {@code depth < radius}) and the stored per-block distance both use the
 	 * shortest path.
 	 */
-	public void select(Level level, BlockPos start, int radius) {
+	public void select(Level level, BlockPos start, int radius, EntityProfile profile) {
 		clear();
 		BlockPos origin = start.immutable();
+		double reach = profile.reach();
 
 		// Per-select memo so each block's exposed surfaces are computed once; the
 		// rect instances are shared, so reference and value identity agree.
@@ -134,7 +129,7 @@ public final class SurfaceSelection {
 				if (sib == node.rect() || done.contains(sib)) {
 					continue;
 				}
-				if (Math.abs(sib.topY() - t) <= MAX_STEP + EPS && footprintAdjacent(node.rect(), sib)) {
+				if (Math.abs(sib.topY() - t) <= reach + EPS && footprintAdjacent(node.rect(), sib)) {
 					deque.addFirst(new Node(node.pos(), sib, node.depth()));
 				}
 			}
@@ -147,7 +142,7 @@ public final class SurfaceSelection {
 				// sits on, so that block's floor abuts the partial block's footprint at
 				// the hole edges and the two should connect (vertically, same column).
 				// Same-block surfaces are siblings, handled (free) above.
-				for (Surface cand : collectColumn(level, node.pos(), t, memo)) {
+				for (Surface cand : collectColumn(level, node.pos(), t, reach, memo)) {
 					if (cand.pos().equals(node.pos()) || done.contains(cand.rect())) {
 						continue;
 					}
@@ -158,7 +153,7 @@ public final class SurfaceSelection {
 				// The 4 horizontal neighbor columns.
 				for (Direction dir : HORIZONTAL_NEIGHBORS) {
 					BlockPos column = node.pos().relative(dir);
-					for (Surface cand : collectColumn(level, column, t, memo)) {
+					for (Surface cand : collectColumn(level, column, t, reach, memo)) {
 						if (done.contains(cand.rect())) {
 							continue;
 						}
@@ -171,17 +166,17 @@ public final class SurfaceSelection {
 		}
 	}
 
-	// Exposed surfaces of one column block whose top is within MAX_STEP of T,
+	// Exposed surfaces of one column block whose top is within reach of T,
 	// scanned over a bounded vertical window (clamped at world min-Y).
-	private static List<Surface> collectColumn(Level level, BlockPos column, double t,
+	private static List<Surface> collectColumn(Level level, BlockPos column, double t, double reach,
 			Map<BlockPos, List<StandableRect>> memo) {
 		List<Surface> out = new ArrayList<>();
-		int from = Math.max((int) Math.floor(t - MAX_STEP) - 1, level.getMinY());
-		int to = (int) Math.floor(t + MAX_STEP);
+		int from = Math.max((int) Math.floor(t - reach) - 1, level.getMinY());
+		int to = (int) Math.floor(t + reach);
 		for (int y = from; y <= to; y++) {
 			BlockPos pos = new BlockPos(column.getX(), y, column.getZ());
 			for (StandableRect rect : surfacesOf(level, pos, memo)) {
-				if (Math.abs(rect.topY() - t) <= MAX_STEP + EPS) {
+				if (Math.abs(rect.topY() - t) <= reach + EPS) {
 					out.add(new Surface(pos, rect));
 				}
 			}
@@ -237,32 +232,6 @@ public final class SurfaceSelection {
 			entries.remove(key);
 		} else {
 			entries.put(key, new Entry(state, rects, distance));
-		}
-	}
-
-	/**
-	 * Drop or recompute entries whose stored {@link BlockState} no longer matches
-	 * the world (place/break), so the painted surfaces stay accurate. Keyed on the
-	 * block's own state, so a change to the block <em>above</em> (which can alter
-	 * this block's occlusion) is not picked up until the next {@code select};
-	 * acceptable for a right-click-driven selection.
-	 */
-	public void pruneStale(Level level) {
-		Iterator<Map.Entry<BlockPos, Entry>> it = entries.entrySet().iterator();
-		while (it.hasNext()) {
-			Map.Entry<BlockPos, Entry> mapEntry = it.next();
-			BlockPos pos = mapEntry.getKey();
-			BlockState current = level.getBlockState(pos);
-			if (current.equals(mapEntry.getValue().state())) {
-				continue;
-			}
-
-			List<StandableRect> rects = exposedSurfaces(level, pos);
-			if (rects.isEmpty()) {
-				it.remove();
-			} else {
-				mapEntry.setValue(new Entry(current, rects, mapEntry.getValue().distance()));
-			}
 		}
 	}
 
