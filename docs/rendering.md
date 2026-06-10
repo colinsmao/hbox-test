@@ -136,13 +136,13 @@ region follows **walkable terrain** outward from the clicked block.
   Headroom beyond the immediately-above cell is intentionally ignored
   (entity-height headroom is deferred). Walkable-only: hole detection, fall
   tracing, region outlines, and asymmetric up/down steps are deferred.
-- **Per-surface draw = top (fill + outline) into the `FILLED` layer, skirt into
-  the `SKIRT` layer.** `emit` draws each `StandableRect`'s top as a half-alpha
-  fill plus a thin opaque border (4 clamped edge strips, both windings), so
-  neighboring surfaces — and the several sub-rects a single block can produce
-  (e.g. the 4-rect ring around a fence post) — stay visually separable. It then
-  drops a **vertical skirt** from every edge into the depth-tested layer (see
-  skirts below).
+- **Per-surface draw = top, optional outline, skirt.** `emit` draws each
+  `StandableRect`'s top as a half-alpha fill, and drops a **vertical skirt** from
+  every edge into the depth-tested `SKIRT` layer (see skirts below). The thin
+  opaque border (4 clamped edge strips, both windings) that separates adjacent
+  surfaces and the sub-rects of one block (e.g. the 4-rect ring around a fence
+  post) is a **debug aid** that clutters the normal view, so it draws **only while
+  the player is sneaking** (`crouching`, sampled in `extract`).
 - **Adjustable flood radius (shift+scroll).** The radius is a mutable field on
   `CollisionSurfaceOverlay` (clamped `[0, 10]`). `OverlayClient` registers
   `ClientHotbarScrollEvents.ALLOW` (Fabric API, the official hotbar-scroll hook —
@@ -164,21 +164,38 @@ region follows **walkable terrain** outward from the clicked block.
   the selection's `[minTopY, maxTopY]` range (single color when flat), so
   elevation and drops are readable. This replaced the old flood-distance HSV ramp
   (the `distance`/`DistancedRect` plumbing is gone).
-- **Two depth regimes (debug tops, real skirts).** The `FILLED` pipeline still
-  disables the depth test (`withDepthStencilState(Optional.empty())`) so **tops
-  draw through walls** — making any buried/buggy surface visible. The `SKIRT`
-  pipeline keeps the snippet's **default depth test on**, so skirts are occluded
-  by terrain: a step reads as a riser, a real drop as an open wall, and interior
-  skirts on solid-backed floors self-hide. (A **translucent** solid block writes
-  no depth, so it does not occlude a skirt — accepted limitation.)
-- **Skirts: fading, dilated.** Each edge drops a double-winding vertical skirt of
-  depth `reach + SKIRT_MARGIN` (~2), darker-shaded, **solid over its top half and
-  fading to transparent over the bottom half** so a deep drop doesn't read as a
-  hard floating wall. For drawing only, each rect is **dilated outward by
-  `SKIRT_OFFSET` (0.01)** — top, border, and skirts share the grown bounds — so a
-  rect's top meets its own skirts and neighbors overlap instead of sharing a
-  coincident skirt edge; this removes top-to-skirt gaps and adjacent-edge
-  z-fighting. (Renderer-only; independent of the future entity-width dilation.)
+- **Crouch-gated through-walls (debug), depth-tested by default.** Seeing
+  surfaces *through* solid blocks is a debug aid, so the flat top is routed
+  per-frame: **while sneaking** it goes into the depth-off `FILLED` pipeline
+  (`withDepthStencilState(Optional.empty())`) and draws through walls (along with
+  the borders); **otherwise** it goes into the depth-on `SKIRT` pipeline and is
+  occluded by terrain like a real surface. Skirts always live in the depth-tested
+  `SKIRT` layer, so a step reads as a riser, a real drop as an open wall, and
+  interior skirts on solid-backed floors self-hide. (A **translucent** solid block
+  writes no depth, so it does not occlude a skirt — accepted limitation.)
+- **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last
+  block before the flood-radius cutoff blend toward **grey** (`RING_COLOR`), so a
+  radius cutoff reads differently from a true boundary: a selection stopped by a
+  real drop ends short of the radius and stays height-colored. `publish` records
+  the ring as a Chebyshev square from the seed center (`ringStart`/`ringEnd`,
+  where `ringEnd = radius + 0.5 + halfW`); the per-vertex `vertex(...)` choke
+  point blends every layer (top, border, skirt) toward grey by depth into the
+  ring, eased with `sqrt` so the grey fills most of the outer block without
+  bleeding inward. Because the blend is per-vertex, `fadedTop` **splits each top
+  at the ring lines** (`|x-center| == ringStart`, likewise z) so a long merged
+  rect doesn't smear the ramp across its whole length — the interior stays one
+  fully-colored quad, only the ≤1-block outer strips fade. Window-boundary edges
+  still keep their skirts; the grey alone signals "increase the radius / re-center".
+- **Skirts: square, fading, tiny z-fight offset.** Each edge drops a
+  double-winding vertical skirt of depth `reach + SKIRT_MARGIN` (~2),
+  darker-shaded, **solid over its top half and fading to transparent over the
+  bottom half** so a deep drop doesn't read as a hard floating wall. Tops/borders
+  draw at the **true rect bounds** (no draw-time dilation — overlapping
+  translucent tops double-blend into visible seams); only the **skirts** are
+  nudged outward by a tiny `SKIRT_OFFSET` (0.002, square not splayed) purely to
+  lift them off the coplanar terrain side face so they don't z-fight. `Y_OFFSET`
+  is likewise small (0.002). (A trapezoidal/dilated skirt was tried and rejected:
+  splaying clipped the block's upper edge and re-introduced neighbor overlap.)
 - **World-space doubles, not a 1/16 grid:** each surface is a `StandableRect`
   (`record StandableRect(double minX, minZ, maxX, maxZ, topY)`) in absolute
   world coords (the resolved `BlockPos` folded in). Edge/overlap compares are
@@ -220,10 +237,12 @@ region follows **walkable terrain** outward from the clicked block.
 - `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
   right-click trigger (select/clear) + sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
-  publish-on-action snapshot, the fill+border top draw (`quad`) plus the
-  fading/dilated skirt draw (`fadedSkirt`/`vQuad`, `SKIRT_OFFSET`), the
-  height-gradient color (`heightColor`), the level-identity reset, `volatile`
-  snapshot/profile handoff, and the double-sided-winding requirement.
+  publish-on-action snapshot, the crouch-gated through-walls top + borders, the
+  ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
+  (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
+  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), the height-gradient color
+  (`heightColor`), the level-identity reset, `volatile` snapshot/profile/crouch
+  handoff, and the double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `OverlayClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak

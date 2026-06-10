@@ -10,6 +10,7 @@ detector consumes.
 - [x] **profiles** (Stage 1) - `EntityProfile` (Point default / Player / Ravager); active-profile field; sneak+right-click-at-nothing cycle in `onUseItem` (clear + advance + HUD ping); `profile.reach()` replaces `MAX_STEP`; `pruneStale` removed (publish-on-action). **Done + committed.**
 - [x] **rendering** (Stage 2) - Replaced distance/HSV coloring with a height-based gradient; added **depth-tested** vertical skirts (a second pipeline) at depth `reach + margin` (~2), drawn on the **current unmerged** point-model rects. Skirt every edge; depth-testing hides solid-backed/buried skirts. Skirts fade to transparent over their bottom half; each rect is **dilated outward by `SKIRT_OFFSET` for drawing only** so tops meet their skirts and neighbors overlap (no seams). Dropped the distance plumbing. **Done.**
 - [x] **merge + adjacency** (Stage 3) - `select` reworked to **enumerate → merge → flood**: enumerate `exposedSurfaces` over a spatial window of `radius` blocks, merge coplanar footprint-adjacent rects into maximal rects (greedy strip-merge X then Z), then flood the merged graph by one **geometric adjacency** rule (`footprintAdjacent && |dTopY| <= reach`). Dropped `collectColumn`/own-column/4-neighbor + the 0-1 BFS/block-keyed cache; the glass-pane link folds into geometric adjacency. **Radius is now a spatial block budget** (not merged-hop-count). Skirts ride on merged rects. **Done.**
+- [x] **rendering polish** (Stage 2.5, after Stage 3) - Reverted the Stage 2 draw-time dilation: tops/borders draw at **true bounds** (overlapping translucent tops double-blend into seams); only **square skirts** are nudged out by a tiny `SKIRT_OFFSET` (0.002) purely to dodge z-fighting the terrain face. Added a **grey cutoff ring** (surfaces in the last block before the radius cutoff blend toward grey, `sqrt`-eased; `fadedTop` splits each top at the ring lines so a long rect doesn't smear the fade). **Crouch-gated the debug aids**: through-walls tops + the opaque borders only render while sneaking; otherwise the top is depth-tested. **Done.**
 - [ ] **dilation** (Stage 4) - One unified pass: dilate every box footprint by `W/2` over the `ceil(W/2)` neighborhood; a box-top survives where no dilated box spans immediately above it (spans-above/buried test), non-burying overlaps stay distinct levels (not max-topY). **Reuses Stage 3 region adjacency** (no per-cell-clip hack). Verify gap-bridging, pillar/stair clearance, multi-level, Point == today.
 - [ ] **tricky-blocks** (Stage 5) - Verify tricky blocks + connectivity for both profiles: slab / stairs / fence / glass-pane / wall / carpet / snow, downward resolve, sweep growth.
 - [ ] **polish-docs** (Stage 6) - update `docs/geometry.md` + `docs/rendering.md`, `AGENTS.md` status (Milestone 4), clear `PLAN.md`.
@@ -214,6 +215,40 @@ Confirm in-game (all required):
 - [x] Sweeping the crosshair / changing radius still grows a **single connected set**; radius behaves sensibly under the spatial-budget semantics.
 - [x] Cross-cutting: no errors on resize/world change; server no-op.
 
+### Stage 2.5 - Rendering polish (done after Stage 3) -- DONE
+A rendering-only follow-up (an extension of the Stage 2 overhaul, but landed
+after Stage 3 since it builds on the merged rects). Geometry / flood unchanged.
+
+Work:
+- **Reverted the Stage 2 draw-time dilation.** Offsetting the translucent tops
+  made adjacent rects double-blend into visible seams. Tops **and** borders now
+  draw at the **true rect bounds**; only the **skirts** are pushed out, by a tiny
+  `SKIRT_OFFSET` (0.002, square -- not splayed/trapezoidal), purely to lift them
+  off the coplanar terrain side face so they don't z-fight. `Y_OFFSET` shrunk to
+  0.002 likewise. (A trapezoidal skirt was retried and rejected: the splay clipped
+  the block's upper edge and re-introduced neighbor overlap.)
+- **Grey cutoff ring.** Surfaces within the last block before the radius cutoff
+  blend toward grey (`RING_COLOR`) to signal "increase the radius / re-center",
+  so a radius cutoff reads differently from a real boundary (which stops short of
+  the radius and stays height-colored). `publish` records a Chebyshev ring
+  (`ringStart`/`ringEnd`) from the seed center; the per-vertex blend is `sqrt`-eased
+  so grey fills most of the outer block without bleeding in. `fadedTop` **splits
+  each top at the ring lines** so a long merged rect doesn't smear the ramp across
+  its length. Window-boundary edges still keep their skirts (grey alone signals
+  incompleteness -- tried suppressing those skirts, looked worse, reverted).
+- **Crouch-gated debug aids.** Seeing surfaces through walls and the opaque
+  per-rect borders are debugging aids that clutter the normal view, so both render
+  **only while sneaking**: the top is routed to the depth-off `FILLED` layer (+
+  borders) while crouching, else to the depth-on `SKIRT` layer (occluded by
+  terrain like a real surface). `crouching` is sampled in `extract`.
+
+Confirm in-game (all required):
+- [x] No seams between adjacent same-height painted blocks; tops sit flush with their skirts (no visible gap).
+- [x] Skirts are square (don't clip the block's upper edge) and don't visibly overlap neighbours; no z-fighting on skirts or tops.
+- [x] Near the radius limit the outer block fades to grey; a long merged rect stays height-colored through its middle (grey confined to the outer block, no inward smear); a selection bounded by a real drop is **not** greyed.
+- [x] Standing normally: surfaces behind walls are occluded; no borders. Crouching: surfaces show through walls and the borders appear.
+- [x] Cross-cutting: no errors on resize/world change; server no-op.
+
 ### Stage 4 - Entity-width dilation (one unified arrangement)
 Support-growth and occlusion are the **same** pass (see **Core idea**), so this is
 one stage, not two. Built on Stage 3's region adjacency.
@@ -289,7 +324,8 @@ Confirm in-game (all required):
 - `src/client/java/com/example/overlay/client/WorldOverlay.java` (Stage 2): `emit` gains the second (skirt) buffer.
 - `src/client/java/com/example/overlay/client/widgets/CollisionSurfaceOverlay.java`:
   - Stage 1 (done): active profile, sneak+clear cycle in `onUseItem` + HUD ping, `pruneStale` call dropped, publish-on-action.
-  - Stage 2 (done): height-gradient color; emit double-winding, bottom-fading skirts at `reach + SKIRT_MARGIN` into the skirt buffer; draw-time dilation by `SKIRT_OFFSET` (seam fix); make `profile` volatile (read in `emit`).
+  - Stage 2 (done): height-gradient color; emit double-winding, bottom-fading skirts at `reach + SKIRT_MARGIN` into the skirt buffer; make `profile` volatile (read in `emit`).
+  - Stage 2.5 (done): reverted draw-time dilation (tops/borders at true bounds; only square skirts nudged by tiny `SKIRT_OFFSET`); grey cutoff ring (`RING_COLOR`, `ringStart`/`ringEnd`, `fadedTop` ring-split, `sqrt`-eased `vertex` blend); crouch-gated through-walls top + borders (`crouching`).
 - `src/client/java/com/example/overlay/client/widgets/RadiusIndicatorOverlay.java` (Stage 1, done: shows profile name).
 - `src/client/java/com/example/overlay/client/OverlayClient.java` -- likely **no change**.
 - Docs: `docs/geometry.md`, `docs/rendering.md`, `AGENTS.md`, `PLAN.md`

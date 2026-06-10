@@ -31,9 +31,13 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * its exposed L. The flat tops/borders draw <b>through walls</b> (depth-off fill
  * layer in {@code WorldOverlayManager}) so any remaining buried surface is
  * visible for debugging; each surface is tinted by <b>height</b> (a blue-to-red
- * gradient across the selection's height range). Every edge drops a
- * <b>depth-tested vertical skirt</b> so the selection reads as a 3D mesh and a
- * real drop reads as an open wall. See {@code PLAN.md}.
+ * gradient across the selection's height range). Surfaces within the last block
+ * before the flood-radius cutoff blend toward <b>grey</b> to signal "increase the
+ * radius or re-center" — a selection bounded by a real drop stops short of the
+ * radius and stays height-colored, so a radius cutoff reads differently from a
+ * true boundary. Every edge drops a <b>depth-tested vertical skirt</b> so the
+ * selection reads as a 3D mesh and a real drop reads as an open wall. See
+ * {@code PLAN.md}.
  *
  * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
@@ -42,7 +46,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * blocks, into a persistent {@link SurfaceSelection}, replacing any previous
  * selection; right-clicking nothing clears it. The radius is adjustable at runtime via
  * shift+scroll while holding the stick ({@link #adjustRadius}). Each surface is
- * drawn as a translucent fill with an opaque outline plus its skirts. Every
+ * drawn as a translucent fill plus its skirts, with an opaque outline added only
+ * while crouching (a debug aid that otherwise clutters the view). Every
  * selected block's surface is drawn every frame; the selection persists when you switch
  * items and reappears on re-equip, and is emptied by a clearing right-click or
  * a level change.
@@ -54,8 +59,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  */
 public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
-	// surface.
-	private static final double Y_OFFSET = 0.01;
+	// surface. Kept as small as possible so the top hugs the real surface.
+	private static final double Y_OFFSET = 0.002;
 	private static final float FILL_ALPHA = 0.5f;
 	// An opaque outline drawn around each rect so adjacent surfaces (and the
 	// sub-rects of a single block) stay visually separable through the fill.
@@ -78,10 +83,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final double SKIRT_MARGIN = 1.0;
 	private static final float SKIRT_SHADE = 0.55f;
 	private static final float SKIRT_ALPHA = 0.6f;
-	// How far the skirt's bottom edge leans outward off the block-face plane, so
-	// the depth-tested skirt doesn't z-fight the block's own side face. The top
-	// edge stays on the surface bound (no corner seam with the top quad).
-	private static final double SKIRT_OFFSET = 0.01;
+	// Tiny uniform outward push of the (square) skirt edges — NOT a dilation: just
+	// enough to lift the skirt off the coplanar terrain side face so it doesn't
+	// z-fight. Kept tiny so the gap from the top edge stays invisible and skirts
+	// don't visibly overlap neighbours.
+	private static final double SKIRT_OFFSET = 0.002;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
@@ -118,7 +124,23 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Written on the extraction path, read on the render thread, so volatile.
 	private volatile boolean holdingStick = false;
+	// The opaque per-rect outlines are a debugging aid (they separate adjacent
+	// surfaces and sub-rects) but clutter the normal view, so they only draw while
+	// crouching. Sampled on the extraction thread, read in emit.
+	private volatile boolean crouching = false;
 	private volatile List<StandableRect> snapshot = List.of();
+
+	// Outer-ring greying: surfaces within the last block before the flood-radius
+	// cutoff are blended toward grey to signal "increase the radius or re-center".
+	// A selection bounded by a real drop stops short of the radius, so it never
+	// reaches the ring and stays height-colored — that's how a true boundary reads
+	// differently from a radius cutoff. Published with the snapshot (client
+	// thread), read per-vertex in emit (render thread). ringEnd > ringStart always.
+	private static final float[] RING_COLOR = {0.5f, 0.5f, 0.5f};
+	private volatile double ringCenterX;
+	private volatile double ringCenterZ;
+	private volatile double ringStart;
+	private volatile double ringEnd = 1.0;
 
 	@Override
 	public String id() {
@@ -142,6 +164,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		holdingStick = player != null && player.getMainHandItem().is(Items.STICK);
+		crouching = player != null && player.isShiftKeyDown();
 	}
 
 	// Publish the current selection into the volatile snapshot emit() reads. Called
@@ -149,6 +172,16 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// editing painted terrain therefore needs a re-click to refresh (intended).
 	private void publish() {
 		snapshot = cache.allRects();
+		// The cutoff ring sits one block inside the window's outer painted extent:
+		// the far edge of the outermost column (seed ± radius), grown by the
+		// entity half-width, measured (Chebyshev) from the seed block center.
+		if (lastSeed != null) {
+			double halfW = profile.width() / 2.0;
+			ringCenterX = lastSeed.getX() + 0.5;
+			ringCenterZ = lastSeed.getZ() + 0.5;
+			ringEnd = selectionRadius + 0.5 + halfW;
+			ringStart = ringEnd - 1.0;
+		}
 	}
 
 	// Walk down from the targeted block until a non-empty collision shape is
@@ -252,13 +285,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		float o = (float) SKIRT_OFFSET;
 
 		for (StandableRect rect : rects) {
-			// Draw-time dilation: grow the rect outward by SKIRT_OFFSET so a rect's
-			// top meets its own skirts (no seam) and neighbors overlap instead of
-			// sharing a coincident skirt edge (which z-fought). Purely cosmetic.
-			float minX = (float) rect.minX() - o;
-			float minZ = (float) rect.minZ() - o;
-			float maxX = (float) rect.maxX() + o;
-			float maxZ = (float) rect.maxZ() + o;
+			// Tops/borders draw at the TRUE rect bounds, so adjacent surfaces tile
+			// exactly instead of overlapping (overlapping translucent quads
+			// double-blend into visible seams). Only the skirts are nudged out by a
+			// tiny SKIRT_OFFSET to dodge z-fighting the terrain face (not a dilation).
+			float minX = (float) rect.minX();
+			float minZ = (float) rect.minZ();
+			float maxX = (float) rect.maxX();
+			float maxZ = (float) rect.maxZ();
 			float y = (float) rect.topY() + (float) Y_OFFSET;
 
 			float[] rgb = heightColor(rect.topY(), minTopY, maxTopY);
@@ -266,37 +300,51 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float g = rgb[1];
 			float b = rgb[2];
 
-			// Flat top + opaque outline into the depth-off fill layer (draws through
-			// walls). Border strips clamped to half the rect so tiny rects don't
+			// Flat top, split at the cutoff ring so the grey fade stays confined to
+			// the outer band even on a long merged rect. Seeing surfaces through
+			// solid blocks is a debug aid, so it only draws into the depth-off
+			// (through-walls) layer while crouching; otherwise it goes into the
+			// depth-tested layer and is occluded by terrain like a real surface.
+			BufferBuilder topBuffer = crouching ? fillBuffer : skirtBuffer;
+			fadedTop(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
+
+			// Opaque outline: a debug aid that separates adjacent surfaces and the
+			// sub-rects of one block, but clutters the normal view — only while
+			// crouching. Border strips clamped to half the rect so tiny rects don't
 			// invert.
-			quad(fillBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
+			if (crouching) {
+				float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
+				float bz = Math.min(BORDER_THICKNESS, (maxZ - minZ) * 0.5f);
+				quad(fillBuffer, positionMatrix, minX, maxX, minZ, minZ + bz, y, r, g, b, BORDER_ALPHA);
+				quad(fillBuffer, positionMatrix, minX, maxX, maxZ - bz, maxZ, y, r, g, b, BORDER_ALPHA);
+				quad(fillBuffer, positionMatrix, minX, minX + bx, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
+				quad(fillBuffer, positionMatrix, maxX - bx, maxX, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
+			}
 
-			float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
-			float bz = Math.min(BORDER_THICKNESS, (maxZ - minZ) * 0.5f);
-			quad(fillBuffer, positionMatrix, minX, maxX, minZ, minZ + bz, y, r, g, b, BORDER_ALPHA);
-			quad(fillBuffer, positionMatrix, minX, maxX, maxZ - bz, maxZ, y, r, g, b, BORDER_ALPHA);
-			quad(fillBuffer, positionMatrix, minX, minX + bx, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
-			quad(fillBuffer, positionMatrix, maxX - bx, maxX, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
-
-			// Vertical skirts at the dilated edges into the depth-tested layer:
-			// buried ones (riser-backed, solid-backed interior edges) are occluded by
-			// world geometry; open-drop edges stay visible. They meet the dilated top
-			// edge exactly and join neighbors, so no corner/edge seam.
+			// Vertical (square) skirts into the depth-tested layer, pushed out by a
+			// tiny SKIRT_OFFSET so they clear the coplanar terrain side face without
+			// z-fighting. Buried skirts (solid-backed edges) are depth-occluded;
+			// drop-edge skirts stay visible. Window-boundary edges keep their skirts
+			// too — the grey cutoff ring alone signals an incomplete selection.
+			float sMinX = minX - o;
+			float sMinZ = minZ - o;
+			float sMaxX = maxX + o;
+			float sMaxZ = maxZ + o;
 			float sr = r * SKIRT_SHADE;
 			float sg = g * SKIRT_SHADE;
 			float sb = b * SKIRT_SHADE;
 			float yBot = y - skirtDepth;
-			fadedSkirt(skirtBuffer, positionMatrix, minX, minZ, maxX, minZ, y, yBot, sr, sg, sb);
-			fadedSkirt(skirtBuffer, positionMatrix, minX, maxZ, maxX, maxZ, y, yBot, sr, sg, sb);
-			fadedSkirt(skirtBuffer, positionMatrix, minX, minZ, minX, maxZ, y, yBot, sr, sg, sb);
-			fadedSkirt(skirtBuffer, positionMatrix, maxX, minZ, maxX, maxZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, sMinX, sMinZ, sMaxX, sMinZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, sMinX, sMaxZ, sMaxX, sMaxZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, sMinX, sMinZ, sMinX, sMaxZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, sMaxX, sMinZ, sMaxX, sMaxZ, y, yBot, sr, sg, sb);
 		}
 	}
 
 	// One flat axis-aligned quad over [x0,x1] x [z0,z1] at height y, emitted with
 	// both windings (a zero-thickness quad would otherwise be culled from one
 	// side).
-	private static void quad(BufferBuilder buffer, Matrix4fc matrix,
+	private void quad(BufferBuilder buffer, Matrix4fc matrix,
 			float x0, float x1, float z0, float z1, float y,
 			float r, float g, float b, float a) {
 		vertex(buffer, matrix, x0, y, z0, r, g, b, a);
@@ -310,16 +358,63 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		vertex(buffer, matrix, x0, y, z0, r, g, b, a);
 	}
 
-	private static void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z,
+	// The flat top, split into sub-quads at the cutoff-ring square (the lines
+	// |x-center| == ringStart and |z-center| == ringStart). The grey fade is a
+	// per-vertex color, so a single huge quad would smear the ramp across its whole
+	// length; splitting keeps the fade inside the <=1-block outer band — the
+	// interior stays one fully-colored quad, the outer strips fade correctly.
+	private void fadedTop(BufferBuilder buffer, Matrix4fc matrix,
+			float minX, float maxX, float minZ, float maxZ, float y,
 			float r, float g, float b, float a) {
-		buffer.addVertex(matrix, x, y, z).setColor(r, g, b, a);
+		float[] xs = breakpoints(minX, maxX, (float) (ringCenterX - ringStart), (float) (ringCenterX + ringStart));
+		float[] zs = breakpoints(minZ, maxZ, (float) (ringCenterZ - ringStart), (float) (ringCenterZ + ringStart));
+		for (int i = 0; i + 1 < xs.length; i++) {
+			for (int j = 0; j + 1 < zs.length; j++) {
+				quad(buffer, matrix, xs[i], xs[i + 1], zs[j], zs[j + 1], y, r, g, b, a);
+			}
+		}
+	}
+
+	// Sorted span ends [lo, hi] plus any of the two cut coordinates lying strictly
+	// inside, so the span is split where it crosses the cutoff-ring boundary.
+	private static float[] breakpoints(float lo, float hi, float cutA, float cutB) {
+		float lowCut = Math.min(cutA, cutB);
+		float highCut = Math.max(cutA, cutB);
+		boolean useLow = lowCut > lo + 1.0e-4f && lowCut < hi - 1.0e-4f;
+		boolean useHigh = highCut > lo + 1.0e-4f && highCut < hi - 1.0e-4f;
+		if (useLow && useHigh) {
+			return new float[] {lo, lowCut, highCut, hi};
+		}
+		if (useLow) {
+			return new float[] {lo, lowCut, hi};
+		}
+		if (useHigh) {
+			return new float[] {lo, highCut, hi};
+		}
+		return new float[] {lo, hi};
+	}
+
+	// Single emission choke point: blends the vertex color toward RING_COLOR by how
+	// deep it is into the cutoff ring (0 one block in, 1 at the window edge), so
+	// every layer (top, border, skirt) greys out together near the radius limit.
+	private void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z,
+			float r, float g, float b, float a) {
+		double d = Math.max(Math.abs(x - ringCenterX), Math.abs(z - ringCenterZ));
+		double t = Math.max(0.0, Math.min(1.0, (d - ringStart) / (ringEnd - ringStart)));
+		// Ease the ramp up (sqrt) so the grey saturates early and fills most of the
+		// outer block, while staying pinned to 0 at ringStart (no bleed inward).
+		float f = (float) Math.sqrt(t);
+		float rr = r + (RING_COLOR[0] - r) * f;
+		float gg = g + (RING_COLOR[1] - g) * f;
+		float bb = b + (RING_COLOR[2] - b) * f;
+		buffer.addVertex(matrix, x, y, z).setColor(rr, gg, bb, a);
 	}
 
 	// A vertical skirt that is solid over its top half and fades to transparent
 	// over its bottom half, so a drop deeper than the skirt doesn't read as a hard
 	// floating wall. Two stacked double-winding segments between the horizontal
 	// endpoints (xa,za)-(xb,zb).
-	private static void fadedSkirt(BufferBuilder buffer, Matrix4fc matrix,
+	private void fadedSkirt(BufferBuilder buffer, Matrix4fc matrix,
 			float xa, float za, float xb, float zb, float yTop, float yBot,
 			float r, float g, float b) {
 		float yMid = (yTop + yBot) * 0.5f;
@@ -331,7 +426,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// (xa,za)-(xb,zb), with separate alpha at the top and bottom edges (linearly
 	// interpolated), emitted with both windings so it's visible from both sides
 	// (occlusion is handled by the depth-tested pipeline).
-	private static void vQuad(BufferBuilder buffer, Matrix4fc matrix,
+	private void vQuad(BufferBuilder buffer, Matrix4fc matrix,
 			float xa, float za, float xb, float zb, float yTop, float yBot,
 			float r, float g, float b, float aTop, float aBot) {
 		vertex(buffer, matrix, xa, yBot, za, r, g, b, aBot);
