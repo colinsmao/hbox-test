@@ -19,7 +19,7 @@ project knowledge there.
 
 ## Current status
 
-Milestones 1–3 building. The repo is a client-only Fabric Gradle project
+Milestones 1–4 building. The repo is a client-only Fabric Gradle project
 generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
 **Repository layout** below). `./gradlew build` passes (produces
 `build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
@@ -35,6 +35,13 @@ generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
  selects the standable surfaces reachable by a walkable flood (`SurfaceSelection`),
  drawn as fill + outline; shift+scroll (while holding the stick) sets the flood
  radius. Right-clicking nothing clears it.
+- **Milestone 4 — entity-size-aware surfaces:** the flood is **size-aware** via
+ configuration-space dilation (each collision footprint grown by the profile's
+ half-width before an occlusion/spans-above test), so gaps and walls eat into the
+ standable area by the entity's size; `EntityProfile` cycles Point/Player/Ravager.
+ `select` is an **output-sensitive lazy flood** (a surface BFS that exposes columns
+ *and* block rows on demand), verified set-equal to a full-window eager oracle. The
+ geometry/algorithm lives in [`docs/geometry.md`](docs/geometry.md).
 
 ## Repository layout
 
@@ -58,10 +65,10 @@ it.
         ├── WorldOverlay.java                # in-world widget interface
         ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
         ├── StandableRect.java               # world-space standable rectangle
-        ├── SurfaceSelection.java            # surface selection + walkable flood + cache
+        ├── SurfaceSelection.java            # size-aware surface compute: dilation + lazy flood
         └── widgets/
             ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
-            └── CollisionSurfaceOverlay.java  # standable-surface selection + flood
+            └── CollisionSurfaceOverlay.java  # standable-surface selection widget + drawing
 ```
 
 `fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`
@@ -272,6 +279,16 @@ incremental:
   **Future work** here, refresh the affected **`docs/<subsystem>.md`** guide, add
   **code comments** for file-level gotchas, and clear/refresh **`PLAN.md`**.
   Reviewing the docs for staleness should be a normal step before opening a PR.
+- **Log mid-task design changes into `PLAN.md` as they land (the running scratch
+  for durable docs).** When a decision or logical change emerges *in conversation*
+  during a task — a new approach, an algorithm/rendering change, a reversed choice
+  — write it into `PLAN.md` immediately, **including its stage's in-game test
+  checklist**, rather than only at the end. `PLAN.md` is transient (and not yet
+  cleared until the docs stage), so it is the accumulating record that the
+  end-of-task durable-doc update (`docs/<subsystem>.md`, `AGENTS.md`, code
+  comments) is distilled from. This keeps knowledge from being lost if a session
+  is interrupted and means the final docs pass is a consolidation, not a
+  recollection.
 - **Where knowledge goes (keep `AGENTS.md` lean):** when you learn something
   non-obvious, place it by scope —
   - specific to one file/widget → a **code comment** next to the code;

@@ -67,114 +67,114 @@ compiler and stale training data won't hand you.
 - **Framework:** `WorldOverlay` splits into `extract(...)` + `emit(...)`
   (mirroring the extract/draw phases) plus an `onUseItem(...)` hook. The model is
   **immediate-mode** (geometry rebuilt every frame), not retained.
-  `WorldOverlayManager` owns the `LevelRenderEvents` phases, a single shared
-  filled `RenderPipeline` + `BufferBuilder` (so all visible overlays batch into
-  one draw call), the `MeshData` → `MappableRingBuffer` → render-pass GPU
-  handoff, the use-key rising-edge dispatch, and GPU cleanup on
+  `WorldOverlayManager` owns the `LevelRenderEvents` phases, **two** shared
+  pipelines each with its own `BufferBuilder` — a **depth-off `FILLED`** layer
+  (draws through walls) and a **depth-on `SKIRT`** layer (occluded by terrain),
+  so `emit(matrix, fillBuffer, skirtBuffer)` writes into both and each layer
+  batches into one draw call — the `MeshData` → `MappableRingBuffer` →
+  render-pass GPU handoff (per layer), the use-key rising-edge dispatch, and GPU
+  cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
   mid-session renderer reload). `CollisionSurfaceOverlay` (Milestone 3, below)
   is the widget that currently exercises this framework.
 
-## Block-hitbox rendering (Milestone 3): `CollisionSurfaceOverlay` + `SurfaceSelection`
+## Block-hitbox rendering (Milestone 3–4): `CollisionSurfaceOverlay` + `SurfaceSelection`
 
-Draws the **standable surfaces** of blocks — the upward-facing collision faces
-an entity can stand on — for a region the player selects with a stick, where the
-region follows **walkable terrain** outward from the clicked block.
+Draws the **standable surfaces** of blocks — the upward-facing collision faces an
+entity of a chosen size can stand on — for a region the player selects with a
+stick, where the region follows **walkable terrain** outward from the clicked
+block. The geometry (occlusion-aware tops, entity-width dilation, the
+output-sensitive flood) is computed by `SurfaceSelection` and documented in
+[`geometry.md`](geometry.md); this section covers the **widget and its drawing**.
 
-- **Stick is a trigger, not a brush.** Right-clicking (use-key rising edge)
-  selects the surfaces reachable from the targeted block; right-clicking nothing
-  clears. The selection persists across item switches (drawn only while the stick
-  is held) until the next trigger or a level change. `extract` no longer mutates
-  the selection — it only prunes staleness and publishes the snapshot.
+### Selection lifecycle (input → snapshot)
+
+- **Stick is a trigger, not a brush.** Right-clicking (use-key rising edge) selects
+  the surfaces reachable from the targeted block; right-clicking nothing clears. The
+  selection persists across item switches (drawn only while the stick is held) until
+  the next trigger or a level change.
+- **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
+  `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
+  (re)published into a `volatile` field on each stick action (select / clear / radius
+  scroll / profile cycle). `extract` never mutates the selection; it only does the
+  **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
+  dimension change / disconnect all reset it without a manager-side hook). There is no
+  per-frame staleness pass, so editing painted terrain needs a re-click.
 - **Data source is the collision shape, not the visual shape:**
-  `BlockState.getCollisionShape(level, pos, CollisionContext.empty())`. Empty
-  shapes are pass-through (tall grass, flowers); `onUseItem` resolves the
-  targeted block **downward** (`MutableBlockPos.move(0,-1,0)`, capped and floored
-  at `level.getMinY()`) to the first non-empty shape, so looking at tall grass
-  resolves to the block beneath it.
-- **Surface-indexed walkable flood (`SurfaceSelection.select`).** The flood unit is a
-  single standable **surface** (`StandableRect`), not a block, so a stair is two
-  nodes (tread + top) and stacked surfaces (spiral staircases, overhangs) stay
-  distinct. From a surface at top `T` the flood considers the exposed surfaces of
-  the same block (siblings), the 4 neighbor columns, and its **own** column,
-  within a bounded vertical window (`topY` in `[T - MAX_STEP, T + MAX_STEP]`). An
-  edge requires both the height gate (`|T2 - T| <= MAX_STEP`, one symmetric
-  `MAX_STEP = 1.0`) **and** footprint adjacency (the two rects share an edge with
-  positive overlap), so a partial surface only connects on a side it physically
-  touches.
-- **Own-column (vertical) edges for partial-footprint blocks.** A glass pane /
-  fence / wall sitting on a block leaves a matching hole in that block's top
-  (occlusion), so the block's floor abuts the partial block's footprint **at the
-  hole edges** — but they live in the same column, one above the other, not a
-  horizontal neighbor. So the flood also scans the surface's own column (skipping
-  same-block siblings, which are handled for free) and connects vertically when
-  footprint-adjacent and within `MAX_STEP`. This is why a pane connects to the
-  block directly below it.
-- **0-1 BFS for shortest block-distance.** A same-block sibling step is free
-  (weight 0, pushed to the deque front); a neighbor-column step costs one
-  transition (weight 1, pushed to the back). Finalizing a surface on its first
-  pop yields the shortest distance, which bounds neighbor expansion at the
-  current flood radius and is the per-block distance used for debug coloring.
-- **Occlusion-aware extraction (`exposedSurfaces`) replaces "emit every top".** A
-  sub-box top at height `h` is standable only over the footprint where nothing
-  solid sits **directly above** it: it is clipped (guillotine rectangle
-  subtraction, `subtractRects`) by same-block boxes spanning `h` and by the block
-  above (shifted up by 1, only relevant at `h == 1.0`). So a stair's bottom-slab
-  top becomes just its exposed front strip (not the buried back half), and a
-  block directly under another exposes no top. This both **de-ghosts the flood**
-  (kills the stair-back "ghost step": you cannot walk up a stair's tall back as a
-  0.5 step) **and de-ghosts rendering** (only genuinely exposed tops are drawn).
-  Headroom beyond the immediately-above cell is intentionally ignored
-  (entity-height headroom is deferred). Walkable-only: hole detection, fall
-  tracing, region outlines, and asymmetric up/down steps are deferred.
-- **Per-surface draw = translucent fill + opaque outline.** `emit` draws each
-  `StandableRect` as a half-alpha fill plus a thin opaque border (4 clamped edge
-  strips, both windings) in the same hue, so neighboring surfaces — and the
-  several sub-rects a single block can produce (e.g. the 4-rect ring around a
-  fence post) — stay visually separable. All quads go through the one shared
-  `FILLED` pipeline; no separate lines pipeline.
-- **Adjustable flood radius (shift+scroll).** The radius is a mutable field on
-  `CollisionSurfaceOverlay` (clamped `[0, 10]`). `OverlayClient` registers
-  `ClientHotbarScrollEvents.ALLOW` (Fabric API, the official hotbar-scroll hook —
-  no mixin needed) and, **only while holding the stick and sneaking**, changes
-  the radius by the scroll direction, re-floods from the last seed so the change
-  is immediate, and returns `false` to cancel the vanilla hotbar slot change.
-  Plain scroll (or scroll without the stick) is left untouched. Each change pings
-  `RadiusIndicatorOverlay` (below).
-- **Debug rendering aids (v1.5), still on.** The `FILLED` pipeline disables the
-  depth test (`withDepthStencilState(Optional.empty())`) so surfaces draw
-  **through walls** — making any remaining buried/buggy surface visible — and
-  each surface is tinted by its flood distance via an HSV hue ramp (so connected
-  rings are visually distinct). These are debugging conveniences; final rendering
-  may re-enable depth and a fixed color.
-- **World-space doubles, not a 1/16 grid:** each surface is a `StandableRect`
-  (`record StandableRect(double minX, minZ, maxX, maxZ, topY)`) in absolute
-  world coords (the resolved `BlockPos` folded in). Edge/overlap compares are
-  epsilon-tolerant (`EPS = 1e-6`). The representation and the rect-space (not
-  pixel-raster) decision behind it live in [`geometry.md`](geometry.md).
-- **`SurfaceSelection` is both the selection set and the compute-cache:** a
-  `BlockPos -> {BlockState, List<StandableRect>, distance}` map. `select` floods
-  and `add`s each reached block's exposed surfaces (compute-once; already-present
-  blocks with an unchanged `BlockState` are not recomputed). Storage stays
-  **block-keyed**: reaching any one surface stores the whole block's exposed
-  rects. With occlusion + footprint edges a block's exposed surfaces are normally
-  one connected patch, so this matches the reached set; the rare block with two
-  *disjoint* exposed surfaces where only one is reached over-renders the other
-  (noted, acceptable). In-memory only, not persisted.
-- **Staleness:** `pruneStale` (run each `extract`) drops/recomputes entries whose
-  stored `BlockState` no longer matches the world (place/break). It is keyed on
-  the block's **own** state, so a change to the block *above* (which can alter
-  this block's occlusion) is not reflected until the next `select` — acceptable
-  for a right-click-driven selection.
-- **Lifecycle / threading:** the cache is mutated only on the client/extraction
-  thread (`select`/`add`/`pruneStale`/`clear`); the render thread reads only the
-  immutable `allRects()` snapshot (a `List<DistancedRect>`, rect + distance)
-  published into a `volatile` field (same handoff as the other widgets). It is
-  reset by a clearing right-click (`onUseItem`) and by a **level-identity check**
-  in `extract` (a changed/`null` `Level` empties it) — a self-contained
-  alternative to a manager-side world-unload hook, so world unload / dimension
-  change / disconnect all reset it.
+  `BlockState.getCollisionShape(level, pos, CollisionContext.empty())`. Empty shapes
+  are pass-through (tall grass, flowers); `onUseItem` resolves the targeted block
+  **downward** (`MutableBlockPos.move(0,-1,0)`, capped and floored at
+  `level.getMinY()`) to the first non-empty shape.
+- **Entity profiles + `reach`.** An `EntityProfile(name, width, reach)` selects the
+  entity size the flood/dilation use. Three ship, cycled in order **Point** (`width
+  0`, default — reproduces the zero-width point-walker) → **Player** (`0.6`) →
+  **Ravager** (`1.95`); `reach` (default `1.0`) is the single symmetric step
+  threshold. **No keybind:** the cycle rides the use-key dispatch — **sneak +
+  right-click at nothing** clears *and* advances the profile, then pings the HUD with
+  the new name. The `profile` field is `volatile` (read in `emit`); `width` drives
+  dilation (see `geometry.md`).
+- **Adjustable flood radius (shift+scroll).** `OverlayClient` registers
+  `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook — no mixin)
+  and, **only while holding the stick and sneaking**, changes the radius by the scroll
+  direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
+  and returns `false` to cancel the vanilla slot change. Plain scroll is untouched.
+  The radius is clamped `[0, 20]` and steps by **1 up to 10, then by 2** (`12, 14, …,
+  20`) — the window grows quadratically, so coarse steps keep the high end usable.
+  Each change pings `RadiusIndicatorOverlay`.
+- **Threading.** The selection is computed only on the client/extraction thread
+  (`select`/`clear`); the render thread reads only the immutable snapshot via the
+  `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
+  result list, not a per-block cache — each action recomputes from scratch.
+
+### Per-surface drawing (`emit`)
+
+Each reached `StandableRect` is drawn as a **top fill**, an optional **border**, and
+**skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
+through-walls, depth-on `SKIRT` occluded).
+
+- **Top fill (half-alpha), height-gradient colored.** Each surface is tinted by its
+  `topY` across the selection's `[minTopY, maxTopY]` range (single color when flat),
+  so elevation and drops read at a glance.
+- **Crouch-gated through-walls, depth-tested by default.** Seeing surfaces *through*
+  blocks is a debug aid, so the top is routed per-frame: **while sneaking** it goes
+  into the depth-off `FILLED` pipeline (`withDepthStencilState(Optional.empty())`) and
+  draws through walls (along with the borders); **otherwise** into the depth-on
+  `SKIRT` pipeline, occluded by terrain like a real surface.
+- **Border (debug, crouch-only).** A thin opaque border (4 clamped edge strips, both
+  windings) separates adjacent surfaces and the sub-rects of one block (e.g. the
+  4-rect ring around a fence post). It clutters the normal view, so it draws **only
+  while sneaking** (`crouching`, sampled in `extract`).
+- **Skirts: square, fading, depth-tested.** Each edge drops a double-winding vertical
+  skirt of depth `reach + SKIRT_MARGIN` (~2), darker, **solid over its top half and
+  fading to transparent over the bottom half** so a deep drop doesn't read as a hard
+  floating wall. Skirts always live in the depth-tested `SKIRT` layer, so a step reads
+  as a riser, a real drop as an open wall, and interior skirts on solid-backed floors
+  self-hide. (A **translucent** block writes no depth and so doesn't occlude a skirt —
+  accepted limitation.) Tops/borders draw at **true rect bounds**; only the skirts are
+  nudged out by a tiny `SKIRT_OFFSET` (0.002, square) to dodge z-fighting the coplanar
+  terrain face (`Y_OFFSET` is likewise 0.002). *A trapezoidal/dilated skirt was tried
+  and rejected — splaying clipped the block's upper edge and re-introduced overlap.*
+- **Skirt-diff (`openSpans` / `subtractSpans`).** Any rectangle partition of a holed /
+  L-shaped level has *internal* edges between equal-height pieces; a skirt there is a
+  **false interior wall** (and depth-testing can't hide it where it overhangs air near
+  a hole). So each edge is skirted only over the sub-spans **not** covered by an
+  equal-height neighbour abutting across it (a per-edge 1-D interval subtraction,
+  `O(n)` per edge). Partial sharing is handled (a big rect's edge shared with a sliver
+  over only part of its length skirts just the unshared remainder); true drops / hole
+  outlines / unshared remainders keep their skirts. Reusable for the future
+  hole/surface overlay.
+- **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last block
+  before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius cutoff
+  reads differently from a true boundary (a selection stopped by a real drop ends
+  short of the radius and stays height-colored). `publish` records the ring as a
+  Chebyshev square from the seed center (`ringStart`/`ringEnd`, `ringEnd = radius +
+  0.5 + halfW`); the per-vertex `vertex(...)` choke point blends every layer toward
+  grey by depth into the ring, `sqrt`-eased so the grey fills most of the outer block
+  without bleeding inward. `fadedTop` **splits each top at the ring lines** so a long
+  merged rect doesn't smear the ramp across its length — the interior stays one
+  fully-colored quad, only the ≤1-block outer strips fade. Window-boundary edges keep
+  their skirts; the grey alone signals "increase the radius / re-center".
 
 ## `26.1.2` rendering API names (verified against the resolved jars)
 
@@ -188,21 +188,28 @@ region follows **walkable terrain** outward from the clicked block.
 ## Where the file-specific gotchas live (inline comments)
 
 - `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
-  right-click trigger (select/clear), the runtime radius + re-flood
-  (`wantsRadiusScroll`/`adjustRadius`), the fill+border draw (`quad`), the
-  level-identity reset, `volatile` snapshot handoff, the double-sided-winding
-  requirement, and the distance→HSV color ramp.
+  right-click trigger (select/clear) + sneak-cycle of the active profile, the
+  runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
+  publish-on-action snapshot, the crouch-gated through-walls top + borders, the
+  ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
+  (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
+  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), the height-gradient color
+  (`heightColor`), the level-identity reset, `volatile` snapshot/profile/crouch
+  handoff, and the double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `OverlayClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the world overlay's radius and the HUD indicator.
-- `SurfaceSelection.java`: the surface-indexed 0-1 BFS (sibling=free, neighbor=+1),
-  the own-column vertical edge (partial-footprint block to the block below),
-  occlusion-aware `exposedSurfaces` + guillotine `subtractRects`, the
-  footprint-adjacency edge test + `MAX_STEP` height gate, the bounded
-  vertical-window column scan, `BlockState`-based staleness prune (own-state
-  only), and the extraction-thread-only (non-thread-safe) contract.
-- `WorldOverlayManager.java`: the through-walls pipeline (depth test disabled,
-  debug aid), the `CLIENT_STOPPING`-vs-mixin GPU-cleanup trade-off, the
-  camera-relative translate, and the use-key-edge-vs-`UseItemCallback` debounce.
+- `SurfaceSelection.java`: the output-sensitive `LazyFlood` (surface BFS,
+  on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo, the
+  `occluderColumns` shell, `floor(W)+1` neighbour reach, the 3-D cube cutoff,
+  merge-after-flood), the `selectEager` oracle + `PROFILE_FLOOD` parity/timing
+  harness, dilation + occlusion in `exposeBox` (guillotine `subtractRects`), the
+  `union` re-cut + `mergeCoplanar` strip-merge, the `footprintAdjacent` edge test +
+  profile-`reach` gate, and the extraction-thread-only (non-thread-safe) contract.
+  **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
+- `WorldOverlayManager.java`: the two-layer setup (depth-off `FILLED` tops +
+  depth-on `SKIRT`) and per-layer buffer/GPU handoff, the through-walls debug
+  aid, the `CLIENT_STOPPING`-vs-mixin GPU-cleanup trade-off, the camera-relative
+  translate, and the use-key-edge-vs-`UseItemCallback` debounce.

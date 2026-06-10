@@ -24,13 +24,21 @@ public interface WorldOverlay {
 	void extract(LevelExtractionContext context);
 
 	/**
-	 * Drawing phase: append quads to the shared buffer.
+	 * Drawing phase: append quads to the shared buffers.
+	 *
+	 * <p>{@link WorldOverlayManager} maintains two {@code POSITION_COLOR} /
+	 * {@code QUADS} layers with different depth state: {@code fillBuffer} is
+	 * <b>depth-disabled</b> (draws through walls — a debug aid) and
+	 * {@code skirtBuffer} is <b>depth-tested</b> (occluded by world geometry).
+	 * A widget puts flat "always visible" geometry in the fill buffer and
+	 * world-occluded geometry (e.g. vertical skirts) in the skirt buffer.
 	 *
 	 * @param positionMatrix already translated so world coordinates are
 	 *                       camera-relative; pass absolute world coords.
-	 * @param buffer         shared {@code POSITION_COLOR} / {@code QUADS} buffer.
+	 * @param fillBuffer     depth-disabled layer (draws through walls).
+	 * @param skirtBuffer    depth-tested layer (occluded by world geometry).
 	 */
-	void emit(Matrix4fc positionMatrix, BufferBuilder buffer);
+	void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer);
 
 	default boolean isVisible() {
 		return true;
