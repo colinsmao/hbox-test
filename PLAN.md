@@ -9,7 +9,7 @@ detector consumes.
 ## Todos
 - [x] **profiles** (Stage 1) - `EntityProfile` (Point default / Player / Ravager); active-profile field; sneak+right-click-at-nothing cycle in `onUseItem` (clear + advance + HUD ping); `profile.reach()` replaces `MAX_STEP`; `pruneStale` removed (publish-on-action). **Done + committed.**
 - [x] **rendering** (Stage 2) - Replaced distance/HSV coloring with a height-based gradient; added **depth-tested** vertical skirts (a second pipeline) at depth `reach + margin` (~2), drawn on the **current unmerged** point-model rects. Skirt every edge; depth-testing hides solid-backed/buried skirts. Skirts fade to transparent over their bottom half; each rect is **dilated outward by `SKIRT_OFFSET` for drawing only** so tops meet their skirts and neighbors overlap (no seams). Dropped the distance plumbing. **Done.**
-- [ ] **merge + adjacency** (Stage 3, NEW) - Merge coplanar adjacent surfaces into maximal rects, and replace per-block-column candidate collection with a **rect/region** adjacency (geometric edge-abut + reach). The own-column glass-pane link folds into geometric adjacency. Skirts ride on merged rects.
+- [x] **merge + adjacency** (Stage 3) - `select` reworked to **enumerate → merge → flood**: enumerate `exposedSurfaces` over a spatial window of `radius` blocks, merge coplanar footprint-adjacent rects into maximal rects (greedy strip-merge X then Z), then flood the merged graph by one **geometric adjacency** rule (`footprintAdjacent && |dTopY| <= reach`). Dropped `collectColumn`/own-column/4-neighbor + the 0-1 BFS/block-keyed cache; the glass-pane link folds into geometric adjacency. **Radius is now a spatial block budget** (not merged-hop-count). Skirts ride on merged rects. **Done.**
 - [ ] **dilation** (Stage 4) - One unified pass: dilate every box footprint by `W/2` over the `ceil(W/2)` neighborhood; a box-top survives where no dilated box spans immediately above it (spans-above/buried test), non-burying overlaps stay distinct levels (not max-topY). **Reuses Stage 3 region adjacency** (no per-cell-clip hack). Verify gap-bridging, pillar/stair clearance, multi-level, Point == today.
 - [ ] **tricky-blocks** (Stage 5) - Verify tricky blocks + connectivity for both profiles: slab / stairs / fence / glass-pane / wall / carpet / snow, downward resolve, sweep growth.
 - [ ] **polish-docs** (Stage 6) - update `docs/geometry.md` + `docs/rendering.md`, `AGENTS.md` status (Milestone 4), clear `PLAN.md`.
@@ -193,7 +193,7 @@ Confirm in-game (all required):
 - [x] No seams: no top-to-skirt gap on isolated rects, no seam/z-fight between adjacent painted blocks.
 - [x] Cross-cutting: no errors on resize/world change; server no-op.
 
-### Stage 3 (NEW) - Surface merge + neighbor-detection rework
+### Stage 3 (NEW) - Surface merge + neighbor-detection rework -- DONE
 Move from a per-block-column flood to **surfaces-as-rects-in-space with geometric
 adjacency**, and merge coplanar adjacent surfaces into maximal rects. This is the
 representation both rendering (clean skirts) and dilation (non-column-aligned
@@ -202,17 +202,17 @@ rects, perches over the void) need, so the two changes are grouped here.
 Work:
 - **Neighbor-detection rework:** replace `collectColumn` / the own-column case / the rigid 4-horizontal-neighbor candidate collection with a **geometric adjacency** test: two standable rects are flood-adjacent iff their footprints share an edge with positive overlap (`footprintAdjacent`, kept) **and** `|dTopY| <= reach`. The glass-pane/fence/wall "own-column" vertical link **folds into** this (the partial block's footprint edges abut the exposed ring of the block below), so the special case is removed.
 - **Merge:** union coplanar (`|dTopY| < EPS`) footprint-adjacent rects into maximal rectangles (greedy: merge along one axis within equal extents, then merge those strips). Merged rects feed both the snapshot (rendering + skirts) and the flood's node set.
-- **Open sub-decisions to resolve in this stage (call out in-game results):**
-  - *Radius semantics:* a merged rect is a single node, so one hop covers more ground than a per-block hop today. **Default:** keep `radius` as merged-rect hop-count (coarser, simplest); **alternative:** convert `radius` to a spatial block-distance budget. Decide by feel in-game.
-  - *Enumeration vs. laziness:* merging needs surfaces known before the flood, but the radius-bounded flood discovers them incrementally. **Proposed:** compute exposed surfaces over a bounded window (radius-derived), merge, then flood the merged-rect graph from the seed rect.
+- **Open sub-decisions — RESOLVED in-game:**
+  - *Radius semantics:* chose the **spatial block-distance budget** (window half-extent) over merged-hop-count — after merge an open floor is one rect, so hop-count reaches the whole plane in one hop (useless on open ground). Straight-line reach still matches Stage 2; the cutoff is now a Chebyshev square, not a taxicab diamond (accepted in-game as "good enough for now").
+  - *Enumeration vs. laziness:* went with the **Proposed** path — enumerate `exposedSurfaces` over the radius-derived window, merge, then flood the merged graph from the seed rect.
 
 Confirm in-game (all required):
-- [ ] **Coverage parity:** for **Point**, the reachable area is the **same** as Stage 2 -- merge/adjacency change only the rect *grouping*, never which surfaces are reachable.
-- [ ] **Clean skirts:** adjacent same-height patches render as merged rects -- skirts only around the merged outline, **no internal walls even over air** (the thin-platform case from Stage 2 is now clean).
-- [ ] **Glass pane on a block** still connects to the block-below ring -- now via geometric adjacency (no own-column special case).
-- [ ] Stair tread<->top, fence post/arms, slab/carpet/snow heights still connect and paint as before; downward resolve still works.
-- [ ] Sweeping the crosshair / changing radius still grows a **single connected set**; radius behaves sensibly under the chosen semantics.
-- [ ] Cross-cutting: no errors on resize/world change; server no-op.
+- [x] **Coverage parity:** for **Point**, the reachable *set* is the same as Stage 2 -- merge/adjacency change only the rect *grouping* (and the cutoff shape: square not diamond), never which surfaces are reachable.
+- [x] **Clean skirts:** adjacent same-height patches render as merged rects -- skirts only around the merged outline, **no internal walls even over air** (the thin-platform case from Stage 2 is now clean).
+- [x] **Glass pane on a block** still connects to the block-below ring -- now via geometric adjacency (no own-column special case).
+- [x] Stair tread<->top, fence post/arms, slab/carpet/snow heights still connect and paint as before; downward resolve still works.
+- [x] Sweeping the crosshair / changing radius still grows a **single connected set**; radius behaves sensibly under the spatial-budget semantics.
+- [x] Cross-cutting: no errors on resize/world change; server no-op.
 
 ### Stage 4 - Entity-width dilation (one unified arrangement)
 Support-growth and occlusion are the **same** pass (see **Core idea**), so this is
@@ -283,7 +283,7 @@ Confirm in-game (all required):
 - `src/client/java/com/example/overlay/client/SurfaceSelection.java`:
   - Stage 1 (done): `select` takes a profile; `profile.reach()` replaces `MAX_STEP`; `pruneStale` removed.
   - Stage 2: drop `distance`/`DistancedRect` plumbing.
-  - Stage 3: replace `collectColumn`/own-column/4-neighbor collection with **geometric region adjacency**; add coplanar **merge** into maximal rects (feeds snapshot + flood).
+  - Stage 3 (done): `select` reworked to enumerate→merge→flood; `collectColumn`/own-column/4-neighbor + 0-1 BFS + block-keyed cache removed; coplanar **merge** (`mergeCoplanar`/`mergeAlong`) into maximal rects feeds the flood; **geometric region adjacency** (`footprintAdjacent && |dTopY|<=reach`); radius = spatial window.
   - Stage 4: `exposedSurfaces` takes a profile and dilates every footprint by `W/2` over the `ceil(W/2)` neighborhood (unified spans-above arrangement, multi-level preserved), feeding the region flood (no per-cell-clip hack).
 - `src/client/java/com/example/overlay/client/WorldOverlayManager.java` (Stage 2): add a **second, depth-tested skirt pipeline** + buffer; two-buffer draw.
 - `src/client/java/com/example/overlay/client/WorldOverlay.java` (Stage 2): `emit` gains the second (skirt) buffer.

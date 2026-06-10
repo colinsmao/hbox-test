@@ -34,6 +34,40 @@ This is the load-bearing decision; a pixel-mask rewrite was prototyped and
 So: keep surface and collision geometry in rect/double space. Don't reach for a
 pixel raster.
 
+## Standable-surface model (enumerate → merge → flood)
+
+`SurfaceSelection.select` builds the drawn set in three geometric phases (no
+block-graph special cases):
+
+1. **Enumerate** — `exposedSurfaces(level, pos)` returns a block's
+   *occlusion-aware* standable tops: each collision sub-box's top, clipped
+   (guillotine `subtractRects`) to the footprint where nothing solid sits
+   **directly above** it (same-block higher boxes, and the block above shifted up
+   by 1, relevant only at `T == 1.0`). This both de-ghosts the flood (no walking
+   up a stair's buried back) and de-ghosts rendering. `select` enumerates this for
+   every block in a **spatial window of `radius` blocks** around the seed.
+2. **Merge** — coplanar (`|dTopY| < EPS`) footprint-adjacent rects are unioned
+   into maximal rectangles (`mergeCoplanar`: group by `topY`, then greedy
+   strip-merge of equal-span abutting rects along X then Z to a fixpoint). A flat
+   floor collapses from a grid of unit cells to one rect → clean skirts, fewer
+   quads. Greedy is not a minimal partition, but a missed merge only costs an
+   extra interior skirt, **never reachability** (the flood reconnects the pieces).
+3. **Flood** — BFS over the merged rects from the seed rect(s), with **one
+   geometric adjacency rule**: an edge exists iff the footprints share an edge
+   with positive overlap (`footprintAdjacent`) **and** `|dTopY| ≤ reach` (the
+   profile's single symmetric threshold). This subsumes the old same-block /
+   own-column / 4-neighbor-column cases: a glass pane on a block connects to that
+   block's exposed ring because their footprints abut at the hole edges — no
+   special case. A drop `> reach` or a disconnected patch is simply never reached.
+
+**Radius is a spatial budget** (the window half-extent in blocks), not a graph
+hop-count: after merge an open floor is a single rect, so a hop-count would reach
+the whole plane in one hop. Straight-line reach matches a per-block hop flood; the
+cutoff is a Chebyshev square rather than a taxicab diamond. This is the rect-in-
+space representation the dilation stage builds on — dilated rects (including a
+perch over the void that straddles cells) merge and flood by the **same** two
+tests, with no per-cell-clip step.
+
 ## Entity-width dilation (the rect-space model)
 
 Treat the entity as a point and pre-grow the world by its half-width `W/2`:

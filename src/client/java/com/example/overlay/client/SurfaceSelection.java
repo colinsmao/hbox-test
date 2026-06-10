@@ -2,179 +2,168 @@ package com.example.overlay.client;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
- * The selection set and the compute-cache in one structure: a
- * {@code BlockPos -> {BlockState, List<StandableRect>}} map. {@link #select}
- * (re)populates it from a right-click; every entry's rectangles are the draw
- * set. In-memory only, not persisted.
+ * Computes and holds the set of standable surfaces ({@link StandableRect}) drawn
+ * by the overlay. In-memory only, not persisted.
  *
- * <p><b>v2 model: surface-indexed walkable flood.</b> The unit of the flood is a
- * single standable <em>surface</em> ({@link StandableRect}), not a block, so a
- * block can contribute several nodes (a stair is a tread + a top) and stacked
- * surfaces (spiral staircases, overhangs) stay distinct. Surfaces are
- * <em>occlusion-aware</em> ({@link #exposedSurfaces}): a sub-box top counts only
- * over the footprint where nothing solid sits directly above it, clipped by the
- * same block's higher boxes and by the block above. Edges are
- * <em>footprint-aware</em> ({@link #footprintAdjacent}) and height-gated by the
- * active {@link EntityProfile}'s symmetric {@code reach}, which together kill the
- * stair-back "ghost step".
- * Candidates come from the same block (siblings, free), the 4 horizontal
- * neighbor columns, and the surface's <em>own</em> column (so a partial-footprint
- * block like a glass pane connects to the block it sits on, whose top has a
- * matching hole). Storage stays block-keyed: reaching any surface stores the
- * whole block's exposed rects (its draw set).
+ * <p><b>v3 model: enumerate &rarr; merge &rarr; flood (geometric adjacency).</b>
+ * {@link #select} works in three phases:
+ * <ol>
+ * <li><b>Enumerate</b> the occlusion-aware exposed surfaces
+ *     ({@link #exposedSurfaces}) of every block in a spatial window of half-extent
+ *     {@code radius} blocks around the seed. A sub-box top counts only over the
+ *     footprint where nothing solid sits directly above it (clipped by the same
+ *     block's higher boxes and the block above), so e.g. a stair contributes its
+ *     exposed L, not its buried back half.
+ * <li><b>Merge</b> coplanar ({@code |dTopY| < EPS}) footprint-adjacent rects into
+ *     maximal rectangles (greedy strip merge along X then Z), so a flat floor
+ *     becomes one rect instead of a grid of unit cells (clean skirts, fewer quads).
+ * <li><b>Flood</b> the merged-rect graph from the seed rect(s) by <b>geometric
+ *     adjacency</b>: two rects are connected iff their footprints share an edge
+ *     with positive overlap ({@link #footprintAdjacent}) and their heights are
+ *     within the active {@link EntityProfile}'s symmetric {@code reach}. This one
+ *     test subsumes the old same-block / own-column / 4-neighbor-column cases: a
+ *     glass pane on a block connects to that block's exposed ring because their
+ *     footprints abut at the hole edges, no special case needed.
+ * </ol>
+ *
+ * <p><b>Radius is a spatial budget</b> (the window half-extent in blocks), not a
+ * graph hop-count: with merge an open floor is a single rect, so hop-count would
+ * make the radius meaningless on open ground. Straight-line reach still matches a
+ * per-block hop flood; the cutoff is a Chebyshev square rather than a taxicab
+ * diamond. Connectivity gating is unchanged (a drop {@code > reach} or a
+ * disconnected patch is never reached).
  *
  * <p>Not thread-safe by design. It is mutated only on the client thread
- * ({@code select}/{@code add}/{@code clear}); the render thread never touches it
- * — the overlay publishes an immutable {@link #allRects()} snapshot into a
- * {@code volatile} field for {@code emit} to read.
+ * ({@code select}/{@code clear}); the render thread reads only the immutable
+ * {@link #allRects()} snapshot the overlay publishes into a {@code volatile} field.
  */
 public final class SurfaceSelection {
-	private record Entry(BlockState state, List<StandableRect> rects) {
-	}
-
-	// A surface plus its owning block: the flood's node. visited keys on the rect
-	// alone (rects are globally unique by world coords); pos is needed to add the
-	// owning block and to tell siblings (same pos, free) from neighbors (+1).
-	private record Node(BlockPos pos, StandableRect rect, int depth) {
-	}
-
-	// A flood candidate: an exposed surface and the column block that owns it.
-	private record Surface(BlockPos pos, StandableRect rect) {
-	}
-
-	// An axis-aligned XZ rectangle (world coords), used only for the per-box
-	// footprint clip in exposedSurfaces.
+	// An axis-aligned XZ rectangle (world coords), used for the per-box footprint
+	// clip in exposedSurfaces and as the mutable merge accumulator.
 	private record Rect(double minX, double minZ, double maxX, double maxZ) {
 	}
 
-	// LinkedHashMap for deterministic iteration (stable draw order).
-	private final Map<BlockPos, Entry> entries = new LinkedHashMap<>();
-
-	// The 4 horizontal neighbor columns the flood expands across.
-	private static final Direction[] HORIZONTAL_NEIGHBORS = {
-		Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST
-	};
+	// Grouping key for the merge: two doubles quantized to 1/1024 of a block
+	// (finer than any collision-box edge, incl. dilated 0.3 / 0.975 later) so
+	// equal spans hash together despite float noise.
+	private record SpanKey(long a, long b) {
+	}
 
 	// Tolerance for the double coordinate compares (box edges are multiples of
 	// 1/16). Used to drop subtraction slivers and to test edge adjacency/overlap.
 	private static final double EPS = 1.0e-6;
 
+	// The reached, merged surfaces from the last select (the draw set). Replaced
+	// wholesale each select; an immutable snapshot is published by the overlay.
+	private List<StandableRect> result = List.of();
+
 	/**
-	 * Replace the selection with a breadth-first walkable flood from the surfaces
-	 * of {@code start}, following standable terrain across footprint-adjacent,
-	 * height-gated steps out to a graph distance of {@code radius} block
-	 * transitions.
-	 *
-	 * <p>0-1 BFS over surfaces: a same-block sibling step is free (weight 0,
-	 * pushed to the deque front), a neighbor-column step costs one transition
-	 * (weight 1, pushed to the back). Finalizing each surface on its first pop
-	 * gives the shortest block-distance, so neighbor expansion is gated by
-	 * {@code depth < radius} using the shortest path.
+	 * Replace the selection with the merged standable surfaces reachable from the
+	 * surfaces of {@code start}, within a spatial window of half-extent
+	 * {@code radius} blocks, across footprint-adjacent height-gated steps.
 	 */
 	public void select(Level level, BlockPos start, int radius, EntityProfile profile) {
-		clear();
-		BlockPos origin = start.immutable();
 		double reach = profile.reach();
+		BlockPos origin = start.immutable();
 
-		// Per-select memo so each block's exposed surfaces are computed once; the
-		// rect instances are shared, so reference and value identity agree.
-		Map<BlockPos, List<StandableRect>> memo = new HashMap<>();
-		List<StandableRect> seed = surfacesOf(level, origin, memo);
-		if (seed.isEmpty()) {
+		// The seed's own exposed surfaces decide where the flood starts; if the
+		// targeted block has no standable top, there is nothing to select.
+		List<StandableRect> seedSurfaces = exposedSurfaces(level, origin);
+		if (seedSurfaces.isEmpty()) {
+			result = List.of();
 			return;
 		}
 
-		Set<StandableRect> done = new HashSet<>();
-		Deque<Node> deque = new ArrayDeque<>();
-		for (StandableRect rect : seed) {
-			deque.addLast(new Node(origin, rect, 0));
-		}
-
-		while (!deque.isEmpty()) {
-			Node node = deque.pollFirst();
-			if (!done.add(node.rect())) {
-				continue;
-			}
-			add(level, node.pos());
-
-			double t = node.rect().topY();
-
-			// Same-block siblings: free (weight 0), so the flood can hop between a
-			// block's own surfaces (stair tread <-> top) without spending a step.
-			for (StandableRect sib : surfacesOf(level, node.pos(), memo)) {
-				if (sib == node.rect() || done.contains(sib)) {
-					continue;
-				}
-				if (Math.abs(sib.topY() - t) <= reach + EPS && footprintAdjacent(node.rect(), sib)) {
-					deque.addFirst(new Node(node.pos(), sib, node.depth()));
-				}
-			}
-
-			// Neighbor steps cost one transition (weight 1), only while there is
-			// radius budget left.
-			if (node.depth() < radius) {
-				// Own column, but a different block: a partial-footprint block (glass
-				// pane, fence, wall) leaves a matching hole in the top of the block it
-				// sits on, so that block's floor abuts the partial block's footprint at
-				// the hole edges and the two should connect (vertically, same column).
-				// Same-block surfaces are siblings, handled (free) above.
-				for (Surface cand : collectColumn(level, node.pos(), t, reach, memo)) {
-					if (cand.pos().equals(node.pos()) || done.contains(cand.rect())) {
-						continue;
-					}
-					if (footprintAdjacent(node.rect(), cand.rect())) {
-						deque.addLast(new Node(cand.pos(), cand.rect(), node.depth() + 1));
-					}
-				}
-				// The 4 horizontal neighbor columns.
-				for (Direction dir : HORIZONTAL_NEIGHBORS) {
-					BlockPos column = node.pos().relative(dir);
-					for (Surface cand : collectColumn(level, column, t, reach, memo)) {
-						if (done.contains(cand.rect())) {
-							continue;
-						}
-						if (footprintAdjacent(node.rect(), cand.rect())) {
-							deque.addLast(new Node(cand.pos(), cand.rect(), node.depth() + 1));
-						}
-					}
+		// Phase 1: enumerate every exposed surface in the radius-block window.
+		int minY = level.getMinY();
+		int maxY = level.getMaxY();
+		int y0 = Math.max(origin.getY() - radius, minY);
+		int y1 = Math.min(origin.getY() + radius, maxY);
+		List<StandableRect> all = new ArrayList<>();
+		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+		for (int x = origin.getX() - radius; x <= origin.getX() + radius; x++) {
+			for (int z = origin.getZ() - radius; z <= origin.getZ() + radius; z++) {
+				for (int y = y0; y <= y1; y++) {
+					cursor.set(x, y, z);
+					all.addAll(exposedSurfaces(level, cursor));
 				}
 			}
 		}
+
+		// Phase 2: merge coplanar adjacent rects into maximal rectangles.
+		List<StandableRect> merged = mergeCoplanar(all);
+
+		// Phase 3: flood the merged graph from the rect(s) covering a seed surface.
+		result = flood(merged, seedSurfaces, reach);
 	}
 
-	// Exposed surfaces of one column block whose top is within reach of T,
-	// scanned over a bounded vertical window (clamped at world min-Y).
-	private static List<Surface> collectColumn(Level level, BlockPos column, double t, double reach,
-			Map<BlockPos, List<StandableRect>> memo) {
-		List<Surface> out = new ArrayList<>();
-		int from = Math.max((int) Math.floor(t - reach) - 1, level.getMinY());
-		int to = (int) Math.floor(t + reach);
-		for (int y = from; y <= to; y++) {
-			BlockPos pos = new BlockPos(column.getX(), y, column.getZ());
-			for (StandableRect rect : surfacesOf(level, pos, memo)) {
-				if (Math.abs(rect.topY() - t) <= reach + EPS) {
-					out.add(new Surface(pos, rect));
+	public void clear() {
+		result = List.of();
+	}
+
+	/** Immutable snapshot of the reached surfaces (height-tinted at draw time). */
+	public List<StandableRect> allRects() {
+		return result;
+	}
+
+	// BFS over merged rects: an edge exists iff footprints share an edge with
+	// positive overlap and the height difference is within reach (a single
+	// symmetric threshold). Seeds are the merged rects that cover a seed surface.
+	private static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
+		int n = rects.size();
+		boolean[] visited = new boolean[n];
+		Deque<Integer> queue = new ArrayDeque<>();
+		for (int i = 0; i < n; i++) {
+			if (coversAnySeed(rects.get(i), seeds)) {
+				visited[i] = true;
+				queue.addLast(i);
+			}
+		}
+
+		List<StandableRect> out = new ArrayList<>();
+		while (!queue.isEmpty()) {
+			int i = queue.pollFirst();
+			StandableRect cur = rects.get(i);
+			out.add(cur);
+			for (int j = 0; j < n; j++) {
+				if (visited[j]) {
+					continue;
+				}
+				StandableRect other = rects.get(j);
+				if (Math.abs(other.topY() - cur.topY()) <= reach + EPS && footprintAdjacent(cur, other)) {
+					visited[j] = true;
+					queue.addLast(j);
 				}
 			}
 		}
 		return out;
+	}
+
+	// A merged rect is a seed iff it is coplanar with and overlaps (positive area)
+	// one of the seed block's surfaces; merge partitions the union, so the surface
+	// lands in exactly one merged rect.
+	private static boolean coversAnySeed(StandableRect rect, List<StandableRect> seeds) {
+		for (StandableRect seed : seeds) {
+			if (Math.abs(rect.topY() - seed.topY()) <= EPS
+					&& Math.min(rect.maxX(), seed.maxX()) - Math.max(rect.minX(), seed.minX()) > EPS
+					&& Math.min(rect.maxZ(), seed.maxZ()) - Math.max(rect.minZ(), seed.minZ()) > EPS) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// Two surfaces connect only if their rects share an edge with positive
@@ -192,63 +181,85 @@ public final class SurfaceSelection {
 				&& (Math.abs(a.maxZ() - b.minZ()) < EPS || Math.abs(b.maxZ() - a.minZ()) < EPS);
 	}
 
-	// Memoized exposed-surface lookup for the flood.
-	private static List<StandableRect> surfacesOf(Level level, BlockPos pos,
-			Map<BlockPos, List<StandableRect>> memo) {
-		BlockPos key = pos.immutable();
-		List<StandableRect> cached = memo.get(key);
-		if (cached != null) {
-			return cached;
+	// Merge coplanar (same topY) footprint-adjacent rects into maximal rects.
+	// Group by topY, then within each group greedily merge abutting equal-span
+	// strips along X then Z (repeated until stable), which collapses a grid of
+	// unit cells back to whole rectangles. Greedy is not a minimal partition, but
+	// any miss only costs an extra interior skirt, never reachability.
+	private static List<StandableRect> mergeCoplanar(List<StandableRect> input) {
+		if (input.size() < 2) {
+			return input;
 		}
-		List<StandableRect> surfaces = exposedSurfaces(level, key);
-		memo.put(key, surfaces);
-		return surfaces;
+		List<StandableRect> sorted = new ArrayList<>(input);
+		sorted.sort(Comparator.comparingDouble(StandableRect::topY));
+
+		List<StandableRect> out = new ArrayList<>();
+		int i = 0;
+		while (i < sorted.size()) {
+			double topY = sorted.get(i).topY();
+			int j = i + 1;
+			while (j < sorted.size() && sorted.get(j).topY() - topY <= EPS) {
+				j++;
+			}
+
+			List<Rect> rects = new ArrayList<>();
+			for (StandableRect r : sorted.subList(i, j)) {
+				rects.add(new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ()));
+			}
+			int before;
+			do {
+				before = rects.size();
+				rects = mergeAlong(rects, true);
+				rects = mergeAlong(rects, false);
+			} while (rects.size() < before);
+
+			for (Rect r : rects) {
+				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY));
+			}
+			i = j;
+		}
+		return out;
 	}
 
-	/**
-	 * Add a resolved block to the selection, computing its exposed surfaces once.
-	 * A block already present with the same {@link BlockState} is left untouched
-	 * (BFS reaches each block once). Blocks with no exposed surface are not stored.
-	 */
-	public void add(Level level, BlockPos pos) {
-		BlockPos key = pos.immutable();
-		BlockState state = level.getBlockState(key);
-
-		Entry existing = entries.get(key);
-		if (existing != null && existing.state().equals(state)) {
-			return;
+	// Merge rects that share the perpendicular span and abut/overlap along the
+	// merge axis. alongX: group by (minZ,maxZ), extend X; else group by (minX,maxX),
+	// extend Z. Non-overlapping input, so "abut" (gap <= EPS) is the merge test.
+	private static List<Rect> mergeAlong(List<Rect> rects, boolean alongX) {
+		Map<SpanKey, List<Rect>> groups = new LinkedHashMap<>();
+		for (Rect r : rects) {
+			SpanKey key = alongX ? spanKey(r.minZ(), r.maxZ()) : spanKey(r.minX(), r.maxX());
+			groups.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
 		}
 
-		List<StandableRect> rects = exposedSurfaces(level, key);
-		if (rects.isEmpty()) {
-			entries.remove(key);
-		} else {
-			entries.put(key, new Entry(state, rects));
+		List<Rect> out = new ArrayList<>();
+		for (List<Rect> group : groups.values()) {
+			group.sort(Comparator.comparingDouble(r -> alongX ? r.minX() : r.minZ()));
+			Rect cur = group.get(0);
+			for (int k = 1; k < group.size(); k++) {
+				Rect r = group.get(k);
+				if (alongX) {
+					if (r.minX() <= cur.maxX() + EPS) {
+						cur = new Rect(cur.minX(), cur.minZ(), Math.max(cur.maxX(), r.maxX()), cur.maxZ());
+					} else {
+						out.add(cur);
+						cur = r;
+					}
+				} else {
+					if (r.minZ() <= cur.maxZ() + EPS) {
+						cur = new Rect(cur.minX(), cur.minZ(), cur.maxX(), Math.max(cur.maxZ(), r.maxZ()));
+					} else {
+						out.add(cur);
+						cur = r;
+					}
+				}
+			}
+			out.add(cur);
 		}
+		return out;
 	}
 
-	public void clear() {
-		entries.clear();
-	}
-
-	public boolean isEmpty() {
-		return entries.isEmpty();
-	}
-
-	/**
-	 * Immutable snapshot of every selected block's rectangles, concatenated. The
-	 * overlay tints them by height, so no per-rect tag is carried.
-	 */
-	public List<StandableRect> allRects() {
-		if (entries.isEmpty()) {
-			return List.of();
-		}
-
-		List<StandableRect> all = new ArrayList<>();
-		for (Entry entry : entries.values()) {
-			all.addAll(entry.rects());
-		}
-		return all;
+	private static SpanKey spanKey(double lo, double hi) {
+		return new SpanKey(Math.round(lo * 1024.0), Math.round(hi * 1024.0));
 	}
 
 	/**

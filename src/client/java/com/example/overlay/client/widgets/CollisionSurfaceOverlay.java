@@ -37,10 +37,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  *
  * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
- * collision shape) outward across walkable, footprint-adjacent surfaces within a
- * one-block step, out to the current flood radius (block transitions) into a
- * persistent {@link SurfaceSelection}, replacing any previous selection;
- * right-clicking nothing clears it. The radius is adjustable at runtime via
+ * collision shape) outward across walkable, footprint-adjacent surfaces (height
+ * steps within the profile's reach) over a spatial window of {@code radius}
+ * blocks, into a persistent {@link SurfaceSelection}, replacing any previous
+ * selection; right-clicking nothing clears it. The radius is adjustable at runtime via
  * shift+scroll while holding the stick ({@link #adjustRadius}). Each surface is
  * drawn as a translucent fill with an opaque outline plus its skirts. Every
  * selected block's surface is drawn every frame; the selection persists when you switch
@@ -87,14 +87,15 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
 
-	// Flood radius (block transitions from the seed). Adjustable at runtime via
-	// shift+scroll while holding the stick (see adjustRadius), clamped to range.
+	// Flood radius: the spatial window half-extent in blocks (not a graph
+	// hop-count — merge would make hops meaningless on open ground). Adjustable at
+	// runtime via shift+scroll while holding the stick (see adjustRadius), clamped.
 	private static final int MIN_RADIUS = 0;
 	private static final int MAX_RADIUS = 10;
 	private static final int DEFAULT_RADIUS = 3;
 
-	// Selection set + compute-cache. Mutated on the client thread by the stick
-	// actions (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
+	// The computed surfaces, recomputed from scratch on each stick action
+	// (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
 	private final SurfaceSelection cache = new SurfaceSelection();
 
 	// Current flood radius and the last resolved seed block, so a radius change
