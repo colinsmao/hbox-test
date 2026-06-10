@@ -46,13 +46,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * {@code volatile} field for {@code emit} to read.
  */
 public final class SurfaceSelection {
-	// distance = flood block-transition distance from the seed (seed = 0). Carried
-	// so the overlay can tint surfaces by connectivity distance (v1.5 debug aid).
-	private record Entry(BlockState state, List<StandableRect> rects, int distance) {
-	}
-
-	/** A standable rectangle tagged with its flood distance from the seed. */
-	public record DistancedRect(StandableRect rect, int distance) {
+	private record Entry(BlockState state, List<StandableRect> rects) {
 	}
 
 	// A surface plus its owning block: the flood's node. visited keys on the rect
@@ -86,14 +80,13 @@ public final class SurfaceSelection {
 	 * Replace the selection with a breadth-first walkable flood from the surfaces
 	 * of {@code start}, following standable terrain across footprint-adjacent,
 	 * height-gated steps out to a graph distance of {@code radius} block
-	 * transitions. Seed surfaces are distance 0.
+	 * transitions.
 	 *
 	 * <p>0-1 BFS over surfaces: a same-block sibling step is free (weight 0,
 	 * pushed to the deque front), a neighbor-column step costs one transition
 	 * (weight 1, pushed to the back). Finalizing each surface on its first pop
-	 * gives the shortest block-distance, so neighbor expansion (gated by
-	 * {@code depth < radius}) and the stored per-block distance both use the
-	 * shortest path.
+	 * gives the shortest block-distance, so neighbor expansion is gated by
+	 * {@code depth < radius} using the shortest path.
 	 */
 	public void select(Level level, BlockPos start, int radius, EntityProfile profile) {
 		clear();
@@ -119,7 +112,7 @@ public final class SurfaceSelection {
 			if (!done.add(node.rect())) {
 				continue;
 			}
-			add(level, node.pos(), node.depth());
+			add(level, node.pos());
 
 			double t = node.rect().topY();
 
@@ -213,12 +206,11 @@ public final class SurfaceSelection {
 	}
 
 	/**
-	 * Add a resolved block to the selection at the given flood {@code distance},
-	 * computing its exposed surfaces once. A block already present with the same
-	 * {@link BlockState} is left untouched (BFS reaches each block once, at its
-	 * shortest distance). Blocks with no exposed surface are not stored.
+	 * Add a resolved block to the selection, computing its exposed surfaces once.
+	 * A block already present with the same {@link BlockState} is left untouched
+	 * (BFS reaches each block once). Blocks with no exposed surface are not stored.
 	 */
-	public void add(Level level, BlockPos pos, int distance) {
+	public void add(Level level, BlockPos pos) {
 		BlockPos key = pos.immutable();
 		BlockState state = level.getBlockState(key);
 
@@ -231,7 +223,7 @@ public final class SurfaceSelection {
 		if (rects.isEmpty()) {
 			entries.remove(key);
 		} else {
-			entries.put(key, new Entry(state, rects, distance));
+			entries.put(key, new Entry(state, rects));
 		}
 	}
 
@@ -244,19 +236,17 @@ public final class SurfaceSelection {
 	}
 
 	/**
-	 * Immutable snapshot of every selected block's rectangles, concatenated, each
-	 * tagged with its owning block's flood distance for distance-based coloring.
+	 * Immutable snapshot of every selected block's rectangles, concatenated. The
+	 * overlay tints them by height, so no per-rect tag is carried.
 	 */
-	public List<DistancedRect> allRects() {
+	public List<StandableRect> allRects() {
 		if (entries.isEmpty()) {
 			return List.of();
 		}
 
-		List<DistancedRect> all = new ArrayList<>();
+		List<StandableRect> all = new ArrayList<>();
 		for (Entry entry : entries.values()) {
-			for (StandableRect rect : entry.rects()) {
-				all.add(new DistancedRect(rect, entry.distance()));
-			}
+			all.addAll(entry.rects());
 		}
 		return all;
 	}

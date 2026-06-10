@@ -28,10 +28,12 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * stand on) of a region the player selects with a stick. The surfaces are
  * occlusion-aware (computed in {@link SurfaceSelection#select}): only tops not
  * covered by something directly above are emitted, so e.g. a stair renders as
- * its exposed L. For debugging this milestone the world-overlay pipeline draws
- * <b>through walls</b> (depth test disabled in {@code WorldOverlayManager}) so
- * any remaining buried surface is visible, and each surface is tinted by its
- * flood distance from the clicked block (an HSV hue ramp). See {@code PLAN.md}.
+ * its exposed L. The flat tops/borders draw <b>through walls</b> (depth-off fill
+ * layer in {@code WorldOverlayManager}) so any remaining buried surface is
+ * visible for debugging; each surface is tinted by <b>height</b> (a blue-to-red
+ * gradient across the selection's height range). Every edge drops a
+ * <b>depth-tested vertical skirt</b> so the selection reads as a 3D mesh and a
+ * real drop reads as an open wall. See {@code PLAN.md}.
  *
  * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
@@ -40,8 +42,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * persistent {@link SurfaceSelection}, replacing any previous selection;
  * right-clicking nothing clears it. The radius is adjustable at runtime via
  * shift+scroll while holding the stick ({@link #adjustRadius}). Each surface is
- * drawn as a translucent fill with an opaque outline. Every selected
- * block's surface is drawn every frame; the selection persists when you switch
+ * drawn as a translucent fill with an opaque outline plus its skirts. Every
+ * selected block's surface is drawn every frame; the selection persists when you switch
  * items and reappears on re-equip, and is emptied by a clearing right-click or
  * a level change.
  *
@@ -60,12 +62,26 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final float BORDER_ALPHA = 1.0f;
 	private static final float BORDER_THICKNESS = 0.045f;
 
-	// Distance coloring (v1.5 debug): each BFS ring gets a distinct hue so the
-	// flood's connectivity is visible. HUE_STEP is the hue advance per ring;
-	// 0.15 keeps several rings distinguishable before the wheel wraps.
-	private static final float HUE_STEP = 0.15f;
+	// Height coloring: map each surface's topY across the selection's height range
+	// to a hue ramp from blue (lowest) to red (highest) so elevation/drops read.
+	private static final float HUE_LOW = 0.66f;
 	private static final float SATURATION = 0.9f;
 	private static final float VALUE = 1.0f;
+	// Height range below which the selection is treated as flat (single color).
+	private static final double FLAT_EPS = 1.0e-6;
+
+	// Vertical skirts dropped from each surface edge so the selection reads as a
+	// 3D mesh. Depth = profile.reach() + SKIRT_MARGIN (~2): a region boundary is
+	// always a drop > reach, so this clears the reachable zone, and the
+	// depth-tested skirt pipeline then occludes the buried part. Skirts are shaded
+	// darker than the top for legibility.
+	private static final double SKIRT_MARGIN = 1.0;
+	private static final float SKIRT_SHADE = 0.55f;
+	private static final float SKIRT_ALPHA = 0.6f;
+	// How far the skirt's bottom edge leans outward off the block-face plane, so
+	// the depth-tested skirt doesn't z-fight the block's own side face. The top
+	// edge stays on the surface bound (no corner seam with the top quad).
+	private static final double SKIRT_OFFSET = 0.01;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
@@ -77,8 +93,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final int MAX_RADIUS = 10;
 	private static final int DEFAULT_RADIUS = 3;
 
-	// Selection set + compute-cache. Mutated on the client thread: extract prunes
-	// it; the use-key trigger (onUseItem) (re)selects or clears it.
+	// Selection set + compute-cache. Mutated on the client thread by the stick
+	// actions (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
 	private final SurfaceSelection cache = new SurfaceSelection();
 
 	// Current flood radius and the last resolved seed block, so a radius change
@@ -90,8 +106,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Active entity profile, cycled by sneak+right-click at nothing (see
 	// onUseItem). Point is a no-op for dilation, so it reproduces today's
-	// point-particle behavior. Touched only on the client thread.
-	private EntityProfile profile = EntityProfile.POINT;
+	// point-particle behavior. Written on the client thread (onUseItem), read on
+	// the render thread (emit, for the skirt depth), so volatile.
+	private volatile EntityProfile profile = EntityProfile.POINT;
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
 	// switch, disconnect/reconnect) empties the in-memory selection — a
@@ -100,7 +117,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	// Written on the extraction path, read on the render thread, so volatile.
 	private volatile boolean holdingStick = false;
-	private volatile List<SurfaceSelection.DistancedRect> snapshot = List.of();
+	private volatile List<StandableRect> snapshot = List.of();
 
 	@Override
 	public String id() {
@@ -215,36 +232,63 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	@Override
-	public void emit(Matrix4fc positionMatrix, BufferBuilder buffer) {
-		List<SurfaceSelection.DistancedRect> rects = snapshot;
+	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer) {
+		List<StandableRect> rects = snapshot;
 		if (rects.isEmpty()) {
 			return;
 		}
 
-		for (SurfaceSelection.DistancedRect tagged : rects) {
-			StandableRect rect = tagged.rect();
-			float minX = (float) rect.minX();
-			float minZ = (float) rect.minZ();
-			float maxX = (float) rect.maxX();
-			float maxZ = (float) rect.maxZ();
-			float y = (float) (rect.topY() + Y_OFFSET);
+		// Height range for the color gradient (single color when flat).
+		double minTopY = Double.POSITIVE_INFINITY;
+		double maxTopY = Double.NEGATIVE_INFINITY;
+		for (StandableRect rect : rects) {
+			minTopY = Math.min(minTopY, rect.topY());
+			maxTopY = Math.max(maxTopY, rect.topY());
+		}
 
-			float[] rgb = distanceColor(tagged.distance());
+		float skirtDepth = (float) (profile.reach() + SKIRT_MARGIN);
+
+		float o = (float) SKIRT_OFFSET;
+
+		for (StandableRect rect : rects) {
+			// Draw-time dilation: grow the rect outward by SKIRT_OFFSET so a rect's
+			// top meets its own skirts (no seam) and neighbors overlap instead of
+			// sharing a coincident skirt edge (which z-fought). Purely cosmetic.
+			float minX = (float) rect.minX() - o;
+			float minZ = (float) rect.minZ() - o;
+			float maxX = (float) rect.maxX() + o;
+			float maxZ = (float) rect.maxZ() + o;
+			float y = (float) rect.topY() + (float) Y_OFFSET;
+
+			float[] rgb = heightColor(rect.topY(), minTopY, maxTopY);
 			float r = rgb[0];
 			float g = rgb[1];
 			float b = rgb[2];
 
-			// Translucent fill, then an opaque outline so neighboring rects stay
-			// distinguishable. Border strips are clamped to half the rect so tiny
-			// rects don't invert.
-			quad(buffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
+			// Flat top + opaque outline into the depth-off fill layer (draws through
+			// walls). Border strips clamped to half the rect so tiny rects don't
+			// invert.
+			quad(fillBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
 
 			float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
 			float bz = Math.min(BORDER_THICKNESS, (maxZ - minZ) * 0.5f);
-			quad(buffer, positionMatrix, minX, maxX, minZ, minZ + bz, y, r, g, b, BORDER_ALPHA);
-			quad(buffer, positionMatrix, minX, maxX, maxZ - bz, maxZ, y, r, g, b, BORDER_ALPHA);
-			quad(buffer, positionMatrix, minX, minX + bx, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
-			quad(buffer, positionMatrix, maxX - bx, maxX, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
+			quad(fillBuffer, positionMatrix, minX, maxX, minZ, minZ + bz, y, r, g, b, BORDER_ALPHA);
+			quad(fillBuffer, positionMatrix, minX, maxX, maxZ - bz, maxZ, y, r, g, b, BORDER_ALPHA);
+			quad(fillBuffer, positionMatrix, minX, minX + bx, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
+			quad(fillBuffer, positionMatrix, maxX - bx, maxX, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
+
+			// Vertical skirts at the dilated edges into the depth-tested layer:
+			// buried ones (riser-backed, solid-backed interior edges) are occluded by
+			// world geometry; open-drop edges stay visible. They meet the dilated top
+			// edge exactly and join neighbors, so no corner/edge seam.
+			float sr = r * SKIRT_SHADE;
+			float sg = g * SKIRT_SHADE;
+			float sb = b * SKIRT_SHADE;
+			float yBot = y - skirtDepth;
+			fadedSkirt(skirtBuffer, positionMatrix, minX, minZ, maxX, minZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, minX, maxZ, maxX, maxZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, minX, minZ, minX, maxZ, y, yBot, sr, sg, sb);
+			fadedSkirt(skirtBuffer, positionMatrix, maxX, minZ, maxX, maxZ, y, yBot, sr, sg, sb);
 		}
 	}
 
@@ -270,9 +314,42 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		buffer.addVertex(matrix, x, y, z).setColor(r, g, b, a);
 	}
 
-	// Map a BFS ring distance to an RGB color by stepping the hue per ring.
-	private static float[] distanceColor(int distance) {
-		float hue = (distance * HUE_STEP) % 1.0f;
+	// A vertical skirt that is solid over its top half and fades to transparent
+	// over its bottom half, so a drop deeper than the skirt doesn't read as a hard
+	// floating wall. Two stacked double-winding segments between the horizontal
+	// endpoints (xa,za)-(xb,zb).
+	private static void fadedSkirt(BufferBuilder buffer, Matrix4fc matrix,
+			float xa, float za, float xb, float zb, float yTop, float yBot,
+			float r, float g, float b) {
+		float yMid = (yTop + yBot) * 0.5f;
+		vQuad(buffer, matrix, xa, za, xb, zb, yTop, yMid, r, g, b, SKIRT_ALPHA, SKIRT_ALPHA);
+		vQuad(buffer, matrix, xa, za, xb, zb, yMid, yBot, r, g, b, SKIRT_ALPHA, 0.0f);
+	}
+
+	// One vertical quad spanning [yBot, yTop] between horizontal endpoints
+	// (xa,za)-(xb,zb), with separate alpha at the top and bottom edges (linearly
+	// interpolated), emitted with both windings so it's visible from both sides
+	// (occlusion is handled by the depth-tested pipeline).
+	private static void vQuad(BufferBuilder buffer, Matrix4fc matrix,
+			float xa, float za, float xb, float zb, float yTop, float yBot,
+			float r, float g, float b, float aTop, float aBot) {
+		vertex(buffer, matrix, xa, yBot, za, r, g, b, aBot);
+		vertex(buffer, matrix, xa, yTop, za, r, g, b, aTop);
+		vertex(buffer, matrix, xb, yTop, zb, r, g, b, aTop);
+		vertex(buffer, matrix, xb, yBot, zb, r, g, b, aBot);
+
+		vertex(buffer, matrix, xb, yBot, zb, r, g, b, aBot);
+		vertex(buffer, matrix, xb, yTop, zb, r, g, b, aTop);
+		vertex(buffer, matrix, xa, yTop, za, r, g, b, aTop);
+		vertex(buffer, matrix, xa, yBot, za, r, g, b, aBot);
+	}
+
+	// Map a surface height to RGB: a hue ramp from blue (lowest) to red (highest)
+	// across the selection's [minTopY, maxTopY]; a flat selection -> single color.
+	private static float[] heightColor(double topY, double minTopY, double maxTopY) {
+		double range = maxTopY - minTopY;
+		float t = range < FLAT_EPS ? 0.5f : (float) ((topY - minTopY) / range);
+		float hue = HUE_LOW * (1.0f - t);
 		return hsvToRgb(hue, SATURATION, VALUE);
 	}
 

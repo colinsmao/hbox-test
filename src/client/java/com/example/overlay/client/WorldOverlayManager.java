@@ -52,9 +52,9 @@ public final class WorldOverlayManager {
 	private static final List<WorldOverlay> OVERLAYS = new ArrayList<>();
 
 	// Reuses vanilla's filled debug pipeline (QUADS + POSITION_COLOR). Depth test
-	// is disabled (withDepthStencilState empty) so overlay surfaces draw THROUGH
-	// solid geometry — a v1.5 debug aid that reveals surfaces buried inside blocks
-	// (e.g. occlusion bugs). v2 keeps this; final rendering may re-enable depth.
+	// is disabled (withDepthStencilState empty) so the flat tops/borders draw
+	// THROUGH solid geometry — a debug aid that reveals surfaces buried inside
+	// blocks (e.g. occlusion bugs).
 	private static final RenderPipeline FILLED = RenderPipelines.register(
 		RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
 			.withLocation(Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "pipeline/world_overlay_filled"))
@@ -62,13 +62,25 @@ public final class WorldOverlayManager {
 			.build()
 	);
 
-	private static final ByteBufferBuilder ALLOCATOR = new ByteBufferBuilder(RenderType.SMALL_BUFFER_SIZE);
+	// Same snippet but with its DEFAULT depth state (depth test kept, not
+	// disabled), used for the vertical skirts: a skirt buried behind solid
+	// geometry (a step riser, an interior floor edge) is occluded, while a skirt
+	// over an open drop stays visible, so the selection reads as a 3D mesh.
+	private static final RenderPipeline SKIRT = RenderPipelines.register(
+		RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
+			.withLocation(Identifier.fromNamespaceAndPath(OverlayMod.MOD_ID, "pipeline/world_overlay_skirt"))
+			.build()
+	);
+
 	private static final Vector4f COLOR_MODULATOR = new Vector4f(1f, 1f, 1f, 1f);
 	private static final Vector3f MODEL_OFFSET = new Vector3f();
 	private static final Matrix4f TEXTURE_MATRIX = new Matrix4f();
 
-	private static BufferBuilder buffer;
-	private static MappableRingBuffer vertexBuffer;
+	// One GPU layer (own allocator + ring buffer) per pipeline. The depth-off
+	// FILLED layer carries the flat tops/borders; the depth-tested SKIRT layer
+	// carries the vertical edge walls.
+	private static final Layer fillLayer = new Layer(FILLED);
+	private static final Layer skirtLayer = new Layer(SKIRT);
 
 	private static boolean usePressedLastTick = false;
 
@@ -138,42 +150,50 @@ public final class WorldOverlayManager {
 		matrices.pushPose();
 		matrices.translate(-camera.x, -camera.y, -camera.z);
 
-		if (buffer == null) {
-			buffer = new BufferBuilder(ALLOCATOR, FILLED.getVertexFormatMode(), FILLED.getVertexFormat());
-		}
-
 		Matrix4fc pose = matrices.last().pose();
+		BufferBuilder fill = fillLayer.begin();
+		BufferBuilder skirt = skirtLayer.begin();
 		for (WorldOverlay overlay : visible) {
-			overlay.emit(pose, buffer);
+			overlay.emit(pose, fill, skirt);
 		}
 
 		matrices.popPose();
 
-		drawBuffer(Minecraft.getInstance());
+		// Fill first (depth-off, drawn through walls), then skirts (depth-tested):
+		// tops never occlude skirts, and skirts are occluded only by world geometry.
+		Minecraft client = Minecraft.getInstance();
+		drawLayer(client, fillLayer);
+		drawLayer(client, skirtLayer);
 	}
 
-	private static void drawBuffer(Minecraft client) {
-		MeshData builtBuffer = buffer.buildOrThrow();
+	private static void drawLayer(Minecraft client, Layer layer) {
+		// build() returns null when nothing was emitted into this layer's buffer;
+		// reset the builder regardless so next frame starts fresh.
+		MeshData builtBuffer = layer.buffer.build();
+		layer.buffer = null;
+		if (builtBuffer == null) {
+			return;
+		}
+
 		MeshData.DrawState drawParameters = builtBuffer.drawState();
 		VertexFormat format = drawParameters.format();
 
-		GpuBuffer vertices = upload(drawParameters, format, builtBuffer);
+		GpuBuffer vertices = upload(layer, drawParameters, format, builtBuffer);
 
-		execute(client, FILLED, builtBuffer, drawParameters, vertices, format);
+		execute(client, layer, builtBuffer, drawParameters, vertices, format);
 
-		vertexBuffer.rotate();
-		buffer = null;
+		layer.vertexBuffer.rotate();
 	}
 
-	private static GpuBuffer upload(MeshData.DrawState drawParameters, VertexFormat format, MeshData builtBuffer) {
+	private static GpuBuffer upload(Layer layer, MeshData.DrawState drawParameters, VertexFormat format, MeshData builtBuffer) {
 		int vertexBufferSize = drawParameters.vertexCount() * format.getVertexSize();
 
-		if (vertexBuffer == null || vertexBuffer.size() < vertexBufferSize) {
-			if (vertexBuffer != null) {
-				vertexBuffer.close();
+		if (layer.vertexBuffer == null || layer.vertexBuffer.size() < vertexBufferSize) {
+			if (layer.vertexBuffer != null) {
+				layer.vertexBuffer.close();
 			}
 
-			vertexBuffer = new MappableRingBuffer(
+			layer.vertexBuffer = new MappableRingBuffer(
 				() -> OverlayMod.MOD_ID + " world overlay pipeline",
 				GpuBuffer.USAGE_VERTEX | GpuBuffer.USAGE_MAP_WRITE,
 				vertexBufferSize
@@ -183,20 +203,21 @@ public final class WorldOverlayManager {
 		CommandEncoder commandEncoder = RenderSystem.getDevice().createCommandEncoder();
 
 		try (GpuBuffer.MappedView mappedView = commandEncoder.mapBuffer(
-				vertexBuffer.currentBuffer().slice(0, builtBuffer.vertexBuffer().remaining()), false, true)) {
+				layer.vertexBuffer.currentBuffer().slice(0, builtBuffer.vertexBuffer().remaining()), false, true)) {
 			MemoryUtil.memCopy(builtBuffer.vertexBuffer(), mappedView.data());
 		}
 
-		return vertexBuffer.currentBuffer();
+		return layer.vertexBuffer.currentBuffer();
 	}
 
-	private static void execute(Minecraft client, RenderPipeline pipeline, MeshData builtBuffer,
+	private static void execute(Minecraft client, Layer layer, MeshData builtBuffer,
 			MeshData.DrawState drawParameters, GpuBuffer vertices, VertexFormat format) {
+		RenderPipeline pipeline = layer.pipeline;
 		GpuBuffer indices;
 		VertexFormat.IndexType indexType;
 
 		if (pipeline.getVertexFormatMode() == VertexFormat.Mode.QUADS) {
-			builtBuffer.sortQuads(ALLOCATOR, RenderSystem.getProjectionType().vertexSorting());
+			builtBuffer.sortQuads(layer.allocator, RenderSystem.getProjectionType().vertexSorting());
 			indices = pipeline.getVertexFormat().uploadImmediateIndexBuffer(builtBuffer.indexBuffer());
 			indexType = builtBuffer.drawState().indexType();
 		} else {
@@ -228,11 +249,36 @@ public final class WorldOverlayManager {
 	}
 
 	private static void close() {
-		ALLOCATOR.close();
+		fillLayer.close();
+		skirtLayer.close();
+	}
 
-		if (vertexBuffer != null) {
-			vertexBuffer.close();
-			vertexBuffer = null;
+	// A single GPU draw layer: its pipeline, a private vertex allocator/builder,
+	// and a ring buffer sized to its largest batch. The builder is rebuilt each
+	// frame (see drawLayer); the allocator and ring buffer are reused.
+	private static final class Layer {
+		final RenderPipeline pipeline;
+		final ByteBufferBuilder allocator = new ByteBufferBuilder(RenderType.SMALL_BUFFER_SIZE);
+		BufferBuilder buffer;
+		MappableRingBuffer vertexBuffer;
+
+		Layer(RenderPipeline pipeline) {
+			this.pipeline = pipeline;
+		}
+
+		BufferBuilder begin() {
+			if (buffer == null) {
+				buffer = new BufferBuilder(allocator, pipeline.getVertexFormatMode(), pipeline.getVertexFormat());
+			}
+			return buffer;
+		}
+
+		void close() {
+			allocator.close();
+			if (vertexBuffer != null) {
+				vertexBuffer.close();
+				vertexBuffer = null;
+			}
 		}
 	}
 }
