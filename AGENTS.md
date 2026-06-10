@@ -19,7 +19,7 @@ project knowledge there.
 
 ## Current status
 
-Milestones 1–3 building. The repo is a client-only Fabric Gradle project
+Milestones 1–4 building. The repo is a client-only Fabric Gradle project
 generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
 **Repository layout** below). `./gradlew build` passes (produces
 `build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
@@ -35,6 +35,13 @@ generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
  selects the standable surfaces reachable by a walkable flood (`SurfaceSelection`),
  drawn as fill + outline; shift+scroll (while holding the stick) sets the flood
  radius. Right-clicking nothing clears it.
+- **Milestone 4 — entity-size-aware surfaces:** the flood is **size-aware** via
+ configuration-space dilation (each collision footprint grown by the profile's
+ half-width before an occlusion/spans-above test), so gaps and walls eat into the
+ standable area by the entity's size; `EntityProfile` cycles Point/Player/Ravager.
+ `select` is an **output-sensitive lazy flood** (a surface BFS that exposes columns
+ *and* block rows on demand), verified set-equal to a full-window eager oracle. The
+ geometry/algorithm lives in [`docs/geometry.md`](docs/geometry.md).
 
 ## Repository layout
 
@@ -58,10 +65,10 @@ it.
         ├── WorldOverlay.java                # in-world widget interface
         ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
         ├── StandableRect.java               # world-space standable rectangle
-        ├── SurfaceSelection.java            # surface selection + walkable flood + cache
+        ├── SurfaceSelection.java            # size-aware surface compute: dilation + lazy flood
         └── widgets/
             ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
-            └── CollisionSurfaceOverlay.java  # standable-surface selection + flood
+            └── CollisionSurfaceOverlay.java  # standable-surface selection widget + drawing
 ```
 
 `fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`

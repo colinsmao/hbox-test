@@ -1,91 +1,156 @@
 # Surface / collision geometry
 
-How standable surfaces are represented and how entity-size awareness (width
-dilation) is computed. This is the **math layer** under the block-hitbox overlay;
-how those surfaces are *drawn* lives in [`rendering.md`](rendering.md), and the
-staged dilation plan lives in [`PLAN.md`](../PLAN.md).
+How standable surfaces are represented, made entity-size aware (width dilation),
+and computed (the output-sensitive flood). This is the **math layer** under the
+block-hitbox overlay; how those surfaces are *drawn* lives in
+[`rendering.md`](rendering.md). Surface/collision geometry stays in **rect/double
+space**, never a pixel raster (a raster rewrite was prototyped and rejected — see
+[Appendix A](#appendix-a-rejected-pixel-raster)).
 
-## Representation: rect/double space, not a pixel grid
+## Representation: rect/double space
 
 A standable surface is a `StandableRect(double minX, minZ, maxX, maxZ, topY)` in
 absolute world coordinates (the owning `BlockPos` folded in). Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
-epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose — width
-dilation (below) expands surfaces by entity-dependent amounts that are not
-`1/16`-aligned, so precision is left to the math rather than baked into a grid.
+epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose: width dilation
+(below) expands surfaces by entity-dependent amounts that are not `1/16`-aligned,
+so precision is left to the math rather than baked into a grid. Minecraft
+hitboxes are axis-aligned squares that never rotate, so the Minkowski sum of two
+axis-aligned rects is again an axis-aligned rect — dilation is **exact and closed
+over rectangles**, no rounding and no new primitive.
 
-## Why rect/double space, not a pixel raster
+## What the selection is (the computed result)
 
-This is the load-bearing decision; a pixel-mask rewrite was prototyped and
-**rejected**.
+`SurfaceSelection.select(level, seed, radius, profile)` produces the set of
+**dilated, occlusion-aware standable tops reachable from the seed**, merged into
+maximal rectangles for drawing. Independent of how it is computed, the result is
+defined by four rules:
 
-- **Minecraft hitboxes are axis-aligned squares that never rotate.** The
-  Minkowski sum of two axis-aligned rects is again an axis-aligned rect, so
-  entity-width dilation is **exact and closed over rectangles** — no rounding,
-  no new primitive. `W/2` is a clean fraction even for odd pixel widths (e.g.
-  ravager `31/16` → `31/32`), so there is no parity problem to chase.
-- **A raster buys nothing here and costs plenty.** Rebuilding the per-block
-  surface compute and the flood on an integer pixel mask (1/16, then 1/32 for
-  odd-width parity) made dilation a morphological op but added resampling cost,
-  ring/seam artifacts, and a slower flood (the prototype stuttered on click) for
-  **no accuracy gain** over exact rect math. The dead-end prototype lives in
-  branch history if ever needed.
+1. **Occlusion-aware tops.** A collision sub-box's top at height `T` is standable
+   only over the footprint where **no box spans immediately above it** (`minY <= T
+   < maxY`). The covering box's own top is itself a (higher) standable surface, so
+   one rule both removes a buried lower top and supplies the higher one. Non-burying
+   overlaps (an air gap between two tops) stay **distinct levels** — never collapsed
+   to `max topY` — so stacked surfaces (overhangs, spiral staircases) are preserved.
+2. **Entity-width dilation** (see [below](#entity-width-dilation)): every footprint
+   is grown by the profile half-width `W/2` before the spans-above test, so gaps and
+   walls eat into the standable area by the entity's size.
+3. **Merge.** Coplanar (`|dTopY| < EPS`) rects are unioned into maximal rectangles
+   (`mergeCoplanar`: group by `topY`, re-cut each level to a non-overlapping
+   `union`, then greedy strip-merge equal-span abutting rects along X then Z to a
+   fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
+   skirts, fewer quads. Greedy is not a minimal partition, but a missed merge only
+   costs an extra interior skirt, **never reachability**.
+4. **Flood / reachability.** Starting from the seed block's surface(s), a surface is
+   reached iff it connects to an already-reached surface by **one geometric
+   adjacency rule**: the footprints share an edge with positive overlap (or overlap
+   with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach` (the
+   profile's single symmetric step threshold). This subsumes the old same-block /
+   own-column / neighbour-column special cases: a glass pane on a block connects to
+   that block's exposed ring because their footprints abut at the hole edges — no
+   special case.
 
-So: keep surface and collision geometry in rect/double space. Don't reach for a
-pixel raster.
+**Radius is a spatial budget**, not a graph hop-count: the reached set is bounded by
+a Chebyshev cube around the seed — `|x-ox| <= radius` ∧ `|z-oz| <= radius` ∧ `|y-oy|
+<= radius` (block coords). It bounds by *physical distance*, so a spiral staircase
+is followed only while it stays inside the cube (it does not wind indefinitely) and
+a narrow cave only as far as the cube reaches. (A hop-count would be meaningless:
+after merge an open floor is a single rect, reached in one hop.)
 
-## Standable-surface model (enumerate → merge → flood)
+A **Point** profile (`W = 0`) reproduces the original zero-width point-walker
+exactly (dilation is a no-op, tops only abut).
 
-`SurfaceSelection.select` builds the drawn set in three geometric phases (no
-block-graph special cases):
-
-1. **Enumerate** — `exposedSurfaces(level, pos)` returns a block's
-   *occlusion-aware* standable tops: each collision sub-box's top, clipped
-   (guillotine `subtractRects`) to the footprint where nothing solid sits
-   **directly above** it (same-block higher boxes, and the block above shifted up
-   by 1, relevant only at `T == 1.0`). This both de-ghosts the flood (no walking
-   up a stair's buried back) and de-ghosts rendering. `select` enumerates this for
-   every block in a **spatial window of `radius` blocks** around the seed.
-2. **Merge** — coplanar (`|dTopY| < EPS`) footprint-adjacent rects are unioned
-   into maximal rectangles (`mergeCoplanar`: group by `topY`, then greedy
-   strip-merge of equal-span abutting rects along X then Z to a fixpoint). A flat
-   floor collapses from a grid of unit cells to one rect → clean skirts, fewer
-   quads. Greedy is not a minimal partition, but a missed merge only costs an
-   extra interior skirt, **never reachability** (the flood reconnects the pieces).
-3. **Flood** — BFS over the merged rects from the seed rect(s), with **one
-   geometric adjacency rule**: an edge exists iff the footprints share an edge
-   with positive overlap (`footprintAdjacent`) **and** `|dTopY| ≤ reach` (the
-   profile's single symmetric threshold). This subsumes the old same-block /
-   own-column / 4-neighbor-column cases: a glass pane on a block connects to that
-   block's exposed ring because their footprints abut at the hole edges — no
-   special case. A drop `> reach` or a disconnected patch is simply never reached.
-
-**Radius is a spatial budget** (the window half-extent in blocks), not a graph
-hop-count: after merge an open floor is a single rect, so a hop-count would reach
-the whole plane in one hop. Straight-line reach matches a per-block hop flood; the
-cutoff is a Chebyshev square rather than a taxicab diamond. This is the rect-in-
-space representation the dilation stage builds on — dilated rects (including a
-perch over the void that straddles cells) merge and flood by the **same** two
-tests, with no per-cell-clip step.
-
-## Entity-width dilation (the rect-space model)
+## Entity-width dilation
 
 Treat the entity as a point and pre-grow the world by its half-width `W/2`:
 
-- **Grow the *forbidden* region (holes / unsupported gaps), not just supports.**
-  Dilation distributes over a union (`dilate(A ∪ B) = dilate(A) ∪ dilate(B)`), so
-  the forbidden region can be grown **per rect** and unioned, then subtracted from
-  the support rects. A gap of width `g` flanked by support loses `W/2` on each
-  side: `g ≤ W` bridges (no hole), `g > W` leaves a hole — exactly "can't fall
-  into a hole smaller than yourself".
-- **Occlusion is the same pass, not a separate subtract.** A box-top at height
-  `T` survives where no dilated box spans immediately above it (`minY ≤ T <
-  maxY`); the spanning box's own (dilated) top is itself a standable surface. One
-  pass both removes the buried lower top and supplies the higher one.
-- **Not `max topY`:** non-burying overlaps (an air gap between two tops) stay as
-  distinct levels, preserving multi-level / stacked surfaces. A zero-width point
-  profile reproduces today's behavior exactly.
+- **The forbidden region grows, not just the supports.** Dilation distributes over
+  a union (`dilate(A ∪ B) = dilate(A) ∪ dilate(B)`), so growing each support rect by
+  `W/2` and unioning is equivalent to shrinking each gap by `W/2` per side. A gap of
+  width `g` flanked by support: `g <= W` bridges (no hole), `g > W` leaves a hole —
+  exactly "can't fall into a hole smaller than yourself". Plateau edges overhang by
+  `~W/2`; a wall pulls the standable region back `~W/2` from its base (the entity
+  perches onto the wall top) as a free byproduct.
+- **Occlusion is the same pass.** The spans-above test (rule 1 above) runs on the
+  *dilated* footprints, so cutting a buried lower top and supplying the higher one
+  is one operation, not a separate subtract.
+- **`exposeBox` is the unit op.** It grows one box's footprint by `W/2`, then
+  subtracts (guillotine `subtractRects`) every *dilated* box that spans immediately
+  above its top, yielding 0..N surviving top rects. The boxes it must subtract live
+  in a bounded column window — see `occluderColumns` below.
 
-Locality is bounded (`< 1` block of growth even for the ravager), so building a
-cell's region only needs its `ceil(W/2)` neighborhood. See [`PLAN.md`](../PLAN.md)
-for the staged implementation and per-stage in-game tests.
+Locality is bounded (growth is `< 1` block even for the Ravager), which is what
+makes the output-sensitive flood possible.
+
+## How it is computed: the output-sensitive (lazy) flood
+
+`select` dispatches to **`selectLazy`** (the production path, `LAZY = true`). A
+full-window reference implementation, **`selectEager`** (enumerate the whole
+`radius + margin` cube → dilate all → merge → flood), is kept behind a flag as the
+**correctness oracle**; a `PROFILE_FLOOD` switch runs both per call, asserts they
+cover the same area, and logs timing/exposure counts. The lazy path is verified
+**set-equal** to eager for Point/Player/Ravager at radii `0..20`.
+
+`LazyFlood` is a **surface BFS that exposes geometry only as it reaches it**, so
+cost tracks the reachable set (and its occluder shells) rather than the window
+volume — a large win in caves / against walls, and asymptotically on open ground.
+
+- **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
+  tagged with its source cell (`CellSurface`). The union/merge runs **after** the
+  flood, on the reached set only (area-preserving, so connectivity is identical with
+  or without an early merge).
+- **Neighbour search is column-local.** From a popped surface in cell `c`, candidate
+  cells are within Chebyshev `floor(W) + 1` of `c` (`1` for Point/Player, `2` for
+  Ravager). This is the cell distance at which two dilated tops can still bridge or
+  abut (raw gap `Δ-1 <= W`). It is **not** `ceil(W)`: that is `0` for Point and would
+  never connect adjacent floor tiles. The same `floor(W)+1` is the eager occluder
+  margin too — one reach everywhere.
+- **Lazy in XZ.** A cell's collision boxes are queried on first touch and cached
+  per-column, so a column is exposed at most once and only reachable columns (plus
+  the occluder shells around them) are ever touched.
+- **Lazy in Y (`ensureRows`).** A column is scanned only over the narrow block-row
+  windows the flood needs near its current height — never the full `[oy-radius-1,
+  oy+radius+1]` band. A neighbour cell is scanned for tops within one `reach` step of
+  the popped surface (`collect(cx, cz, h-reach, h+reach)`); each candidate box's
+  occluder shell is scanned only at the rows around *that box's own top*
+  (`floor(yMax)±1`); `exposeBox` is memoized per box. A `BitSet` per column records
+  scanned rows so each `(column,row)` is queried at most once. Only the **origin
+  column** exposes its full band — it has to, to seed every standable top there. The
+  flood front moves `<= reach` per hop, so by induction everything reachable is found
+  near an already-reached height; the band is never needed. This drops the per-column
+  vertical factor from `O(radius)` to `O(heights the flood actually traverses there)`,
+  so open ground goes `~radius³ → ~radius²`.
+- **`occluderColumns` (the occluder shell).** For `exposeBox` to trim a box's
+  dilated top correctly it needs every box that can span above that top. A box in
+  column `(cx,*)` spans `[cx, cx+1]`, dilated to `[cx-W/2, cx+1+W/2]`, which overlaps
+  the target's dilated footprint iff `floor(min - W) <= cx <= ceil(max + W) - 1` per
+  axis. This is the exact (full-block-conservative) window — for Point (`W=0`) it
+  collapses to the box's own column. It is shared by `exposeBox` (so the eager path
+  shifts identically) and `LazyFlood.ensureRows`, keeping the index and the scan in
+  lock-step. Tightening it is **result-preserving**: the dropped columns abut with
+  zero overlap and trimmed nothing.
+
+Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
+first factor; lazy-Y trims the second — orthogonal, and they compose.
+
+## Reachability model (current scope)
+
+Reach is a **single symmetric threshold** (`profile.reach()`, default `1.0`): a step
+up or down of `<= reach` connects, anything deeper does not. So a shallow (`<= 1`
+deep) trench is reversibly reachable and its floor *is* painted (not a hole); to see
+the width rule you need a gap that is **deep (`>= 2`) or over the void**. Asymmetric
+up/down reach, entity-height headroom, and true fall/escape ("unreturnable space")
+semantics are deferred to the next milestone — this stage paints *coverage*, framed
+as "a `g > W` gap leaves a hole in the standable coverage", not "the entity falls in".
+
+## Appendix A: rejected pixel raster
+
+A pixel-mask rewrite (rebuild the per-block surface compute and the flood on an
+integer `1/16`, then `1/32`-for-odd-width-parity grid, making dilation a
+morphological op) was prototyped and **rejected**. Because hitboxes are
+non-rotating axis-aligned squares, rect math already gives exact, closed-form
+dilation (`W/2` is a clean fraction even for odd pixel widths, e.g. Ravager `31/16
+→ 31/32`), so the raster added resampling cost, ring/seam artifacts, and a slower
+flood (it stuttered on click) for **no accuracy gain**. The dead-end prototype lives
+in branch history if ever needed. Keep surface/collision geometry in rect/double
+space.
