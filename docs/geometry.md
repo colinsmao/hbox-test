@@ -136,12 +136,15 @@ first factor; lazy-Y trims the second — orthogonal, and they compose.
 ## Reachability model (current scope)
 
 Reach is a **single symmetric threshold** (`profile.reach()`, default `1.0`): a step
-up or down of `<= reach` connects, anything deeper does not. So a shallow (`<= 1`
-deep) trench is reversibly reachable and its floor *is* painted (not a hole); to see
-the width rule you need a gap that is **deep (`>= 2`) or over the void**. Asymmetric
-up/down reach, entity-height headroom, and true fall/escape ("unreturnable space")
-semantics are deferred to the next milestone — this stage paints *coverage*, framed
-as "a `g > W` gap leaves a hole in the standable coverage", not "the entity falls in".
+up or down of `<= reach` connects, anything deeper does not. Because the threshold is
+symmetric the flood is **reversibly reachable**, so there is no "unreturnable space" —
+anything not connected to the seed is simply **unreachable** (a hole/gap), modulo the
+radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
+trench is reachable and its floor *is* painted (not a hole); to see the width rule you
+need a gap that is **deep (`>= 2`) or over the void**. Explicit hole detection /
+classification and entity-height headroom are deferred to later milestones — this
+stage paints *coverage*, framed as "a `g > W` gap leaves a hole in the standable
+coverage", not "the entity falls in".
 
 ## Appendix A: rejected pixel raster
 

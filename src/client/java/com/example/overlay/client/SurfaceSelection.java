@@ -63,7 +63,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * <p>For a gap of width {@code g} flanked by support, each side grows {@code W/2},
  * leaving {@code g - W} uncovered: {@code g <= W} bridges, {@code g > W} leaves a
  * hole — "can't fall into a hole smaller than yourself". (This stage shows only
- * the <em>geometry</em>; fall/unreturnable semantics are a later milestone.)
+ * the <em>geometry</em>; explicit hole detection is a later milestone.)
  *
  * <p><b>Radius is a spatial budget</b> (the window half-extent in blocks), not a
  * graph hop-count: with merge an open floor is a single rect, so hop-count would
