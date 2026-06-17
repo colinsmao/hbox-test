@@ -38,7 +38,34 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-	
+
+	// Pure-logic unit tests (the surface geometry: rect ops, edge classification,
+	// headroom predicate). fabric-loader-junit boots the transforming classloader
+	// so client classes load in tests.
+	testImplementation "net.fabricmc:fabric-loader-junit:${project.loader_version}"
+}
+
+// The geometry under test lives in the client source set (splitEnvironmentSourceSets),
+// so the test source set must compile/run against it, and the Minecraft jars must be on
+// the test classpath or fabric-loader-junit's game provider can't locate the game.
+// See FabricMC/fabric-loom#1060.
+sourceSets {
+	test {
+		compileClasspath += sourceSets.client.compileClasspath + sourceSets.client.output
+		runtimeClasspath += sourceSets.client.runtimeClasspath + sourceSets.client.output
+	}
+}
+
+configurations {
+	testCompileClasspath.extendsFrom(minecraftCommonNamedCompile)
+	testRuntimeClasspath.extendsFrom(minecraftCommonNamedRuntime)
+	testCompileClasspath.extendsFrom(minecraftClientOnlyNamedCompile)
+	testRuntimeClasspath.extendsFrom(minecraftClientOnlyNamedRuntime)
+	testRuntimeClasspath.extendsFrom(modRuntimeClasspathClientMapped)
+}
+
+test {
+	useJUnitPlatform()
 }
 
 processResources {

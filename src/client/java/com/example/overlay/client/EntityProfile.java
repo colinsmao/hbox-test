@@ -17,12 +17,19 @@ package com.example.overlay.client;
  * threshold on {@code |dT|} (the flood is reversible, so this is a single value,
  * not an up/down split). Defaulted to {@code 1.0} for every profile to preserve
  * current flood behavior; per-profile tuning (e.g. a higher jump reach) is
- * deferred. Entity height (headroom) is reserved for later and not modeled here.
+ * deferred.
+ *
+ * <p>{@code height} is the entity's hitbox height (vanilla values; doubles, not
+ * {@code 1/16}-quantized — see {@code docs/geometry.md}). It drives the
+ * <b>headroom</b> rule: a box top at {@code T} stays standable only where the
+ * standing column {@code (T, T+height]} is clear of collision boxes. {@code POINT}
+ * keeps {@code height 0} so it stays the pure point-walker (the headroom test then
+ * reduces to today's buried test) and the oracle baseline.
  */
-public record EntityProfile(String name, double width, double reach) {
-	public static final EntityProfile POINT = new EntityProfile("Point", 0.0, 1.0);
-	public static final EntityProfile PLAYER = new EntityProfile("Player", 0.6, 1.0);
-	public static final EntityProfile RAVAGER = new EntityProfile("Ravager", 1.95, 1.0);
+public record EntityProfile(String name, double width, double height, double reach) {
+	public static final EntityProfile POINT = new EntityProfile("Point", 0.0, 0.0, 1.0);
+	public static final EntityProfile PLAYER = new EntityProfile("Player", 0.6, 1.8, 1.0);
+	public static final EntityProfile RAVAGER = new EntityProfile("Ravager", 1.95, 2.2, 1.0);
 
 	// Cycle order for the sneak+right-click-at-nothing toggle.
 	private static final EntityProfile[] CYCLE = {POINT, PLAYER, RAVAGER};
