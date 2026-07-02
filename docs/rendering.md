@@ -192,7 +192,10 @@ through-walls, depth-on `SKIRT` occluded).
   scroll/use handlers) increments a `volatile` style index (tiny / half-block / full /
   bold-line, wrapping). It is a pure render-thread choice, so it does **not** touch the
   published spans or re-flood. The `full` style clamps to `reach + SKIRT_MARGIN` so a
-  tall wall isn't a giant curtain.
+  tall wall isn't a giant curtain. **Deferred:** no single baseline style was ever
+  chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
+  later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
+  toggle and the four styles stay as-is until then.
 - **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last block
   before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius cutoff
   reads differently from a true boundary (a selection stopped by a real drop ends

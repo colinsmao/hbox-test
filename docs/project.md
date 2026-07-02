@@ -15,9 +15,10 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–4.5 building. The repo is a client-only Fabric Gradle project
-generated from `FabricMC/fabric-example-mod` and trimmed to client-only (see
-**Repository layout** below). `./gradlew build` passes (produces
+Milestones 1–4.5 merged; **Milestone 5 (reachability / hole detection) in
+progress** (plan in [`PLAN.md`](../PLAN.md)). The repo is a client-only Fabric
+Gradle project generated from `FabricMC/fabric-example-mod` and trimmed to
+client-only (see **Repository layout** below). `./gradlew build` passes (produces
 `build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
 [`rendering.md`](rendering.md).
 
@@ -172,3 +173,8 @@ these incremental:
   client tick events for values that change over time.
 - **Distribution:** `fabric.mod.json` metadata, license, and a Modrinth/
   CurseForge publish pipeline.
+- **Settle a single skirt/occluder rendering baseline (deferred from 4.5).** The
+  `K`-key `cycleOccluderStyle` debug toggle (tiny / half-block / full / bold-line)
+  shipped in 4.5 for A/B'ing the upward-marker look, but no single style was ever
+  chosen and the toggle dropped-or-kept. This is purely appearance, so it is
+  deferred to a later appearance-focused milestone; see [`rendering.md`](rendering.md).
