@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 
 import com.example.overlay.client.EntityProfile;
+import com.example.overlay.client.OccluderSpan;
 import com.example.overlay.client.OverlayManager;
 import com.example.overlay.client.StandableRect;
 import com.example.overlay.client.SurfaceSelection;
@@ -97,6 +98,23 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// small epsilon is ample.
 	private static final double SKIRT_EPS = 1.0e-6;
 
+	// Upward (occluder) skirts: drawn where a surface edge borders a wall/ceiling
+	// (the compute-side OccluderSpans), solid at the surface top and fading to
+	// transparent at the marker top. A lighter shade than the (darker) downward drop
+	// skirts so the two read distinctly. Four debug styles cycle on a keybind
+	// (cycleOccluderStyle) so the final look can be A/B'd in-game; the heights below
+	// are the candidate looks (tiny default).
+	private static final float UP_SKIRT_SHADE = 0.85f;
+	private static final float UP_SKIRT_ALPHA = 0.7f;
+	private static final int OCC_STYLE_COUNT = 4;
+	private static final int OCC_STYLE_TINY = 0;
+	private static final int OCC_STYLE_HALF = 1;
+	private static final int OCC_STYLE_FULL = 2;
+	private static final int OCC_STYLE_BOLD = 3;
+	private static final double OCC_TINY_HEIGHT = 0.15;
+	private static final double OCC_HALF_HEIGHT = 0.5;
+	private static final double OCC_BOLD_HEIGHT = 0.1;
+
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
@@ -141,6 +159,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// crouching. Sampled on the extraction thread, read in emit.
 	private volatile boolean crouching = false;
 	private volatile List<StandableRect> snapshot = List.of();
+	// Upward (occluder) skirt spans, published with the snapshot (compute-side, since
+	// they read collision boxes). Read per-frame in emit. See SurfaceSelection.
+	private volatile List<OccluderSpan> occluderSnapshot = List.of();
+	// Debug A/B style for the occluder markers (tiny / half-block / full / bold-line),
+	// incremented by a standalone keybind (cycleOccluderStyle, client thread), read in
+	// emit (render thread). A render-thread-only choice, so it does not touch the
+	// published spans.
+	private volatile int occluderStyle = OCC_STYLE_TINY;
 
 	// Outer-ring greying: surfaces within the last block before the flood-radius
 	// cutoff are blended toward grey to signal "increase the radius or re-center".
@@ -173,6 +199,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			lastSeed = null;
 			lastLevel = level;
 			snapshot = List.of();
+			occluderSnapshot = List.of();
 		}
 
 		holdingStick = player != null && player.getMainHandItem().is(Items.STICK);
@@ -184,6 +211,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// editing painted terrain therefore needs a re-click to refresh (intended).
 	private void publish() {
 		snapshot = cache.allRects();
+		occluderSnapshot = cache.allOccluders();
 		// The cutoff ring sits one block inside the window's outer painted extent:
 		// the far edge of the outermost column (seed ± radius), grown by the
 		// entity half-width, measured (Chebyshev) from the seed block center.
@@ -282,6 +310,15 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		return selectionRadius;
 	}
 
+	// Advance the occluder-marker debug style (wrapping). Bound to a standalone key in
+	// OverlayClient; a pure render-thread choice, so it does not touch the published
+	// spans (no re-flood). Returns the new style index for the on-screen ping.
+	public int cycleOccluderStyle() {
+		int next = (occluderStyle + 1) % OCC_STYLE_COUNT;
+		occluderStyle = next;
+		return next;
+	}
+
 	@Override
 	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer) {
 		List<StandableRect> rects = snapshot;
@@ -354,19 +391,139 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float sg = g * SKIRT_SHADE;
 			float sb = b * SKIRT_SHADE;
 			float yBot = y - skirtDepth;
-			for (float[] sp : openSpans(rects, rect, EDGE_MIN_Z)) {
+			// Downward drop skirts: each edge's open span MINUS the wall/ceiling
+			// sub-spans (occluder spans), which get an upward skirt instead, so a
+			// wall edge isn't double-skirted.
+			for (float[] sp : downSpans(rects, rect, EDGE_MIN_Z)) {
 				fadedSkirt(skirtBuffer, positionMatrix, sp[0] - o, sMinZ, sp[1] + o, sMinZ, y, yBot, sr, sg, sb);
 			}
-			for (float[] sp : openSpans(rects, rect, EDGE_MAX_Z)) {
+			for (float[] sp : downSpans(rects, rect, EDGE_MAX_Z)) {
 				fadedSkirt(skirtBuffer, positionMatrix, sp[0] - o, sMaxZ, sp[1] + o, sMaxZ, y, yBot, sr, sg, sb);
 			}
-			for (float[] sp : openSpans(rects, rect, EDGE_MIN_X)) {
+			for (float[] sp : downSpans(rects, rect, EDGE_MIN_X)) {
 				fadedSkirt(skirtBuffer, positionMatrix, sMinX, sp[0] - o, sMinX, sp[1] + o, y, yBot, sr, sg, sb);
 			}
-			for (float[] sp : openSpans(rects, rect, EDGE_MAX_X)) {
+			for (float[] sp : downSpans(rects, rect, EDGE_MAX_X)) {
 				fadedSkirt(skirtBuffer, positionMatrix, sMaxX, sp[0] - o, sMaxX, sp[1] + o, y, yBot, sr, sg, sb);
 			}
 		}
+
+		// Upward (occluder) skirts: drawn once per published span, into the same
+		// depth-tested layer, in the active debug style.
+		emitOccluders(skirtBuffer, positionMatrix, minTopY, maxTopY, skirtDepth);
+	}
+
+	// Draw every published upward (occluder) skirt span in the active debug style.
+	// Solid at the surface top (baseY), fading to transparent at the marker top, the
+	// marker pulled toward the surface interior by SKIRT_OFFSET to clear the wall face.
+	private void emitOccluders(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
+			double minTopY, double maxTopY, float skirtClamp) {
+		List<OccluderSpan> spans = occluderSnapshot;
+		if (spans.isEmpty()) {
+			return;
+		}
+		int style = occluderStyle;
+		float o = (float) SKIRT_OFFSET;
+		for (OccluderSpan span : spans) {
+			float base = (float) span.baseY();
+			float available = (float) (span.topY() - span.baseY());
+			if (available <= 0.0f) {
+				continue;
+			}
+			float markerHeight = switch (style) {
+				case OCC_STYLE_HALF -> (float) OCC_HALF_HEIGHT;
+				case OCC_STYLE_FULL -> skirtClamp;
+				case OCC_STYLE_BOLD -> (float) OCC_BOLD_HEIGHT;
+				default -> (float) OCC_TINY_HEIGHT;
+			};
+			markerHeight = Math.min(markerHeight, available);
+			float yTopMarker = base + markerHeight;
+
+			float[] rgb = heightColor(span.baseY(), minTopY, maxTopY);
+			float r = rgb[0] * UP_SKIRT_SHADE;
+			float g = rgb[1] * UP_SKIRT_SHADE;
+			float b = rgb[2] * UP_SKIRT_SHADE;
+
+			// Nudge toward the surface interior (away from the wall face) to dodge
+			// z-fighting; the interior is on the -axis side when the occluder is on +.
+			float shift = span.positiveSide() ? -o : o;
+			float xa;
+			float za;
+			float xb;
+			float zb;
+			if (span.alongX()) {
+				float line = (float) span.line() + shift;
+				xa = (float) span.lo();
+				xb = (float) span.hi();
+				za = line;
+				zb = line;
+			} else {
+				float line = (float) span.line() + shift;
+				za = (float) span.lo();
+				zb = (float) span.hi();
+				xa = line;
+				xb = line;
+			}
+
+			if (style == OCC_STYLE_BOLD) {
+				// A crisp opaque line (no fade), marking the wall edge.
+				vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
+					r, g, b, BORDER_ALPHA, BORDER_ALPHA);
+			} else {
+				// Solid at the base (T), fading to transparent at the marker top.
+				vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
+					r, g, b, 0.0f, UP_SKIRT_ALPHA);
+			}
+		}
+	}
+
+	// The downward-skirt sub-spans of one rect edge: openSpans (equal-height
+	// neighbour suppressed) MINUS the upward (occluder) sub-spans on that edge, so a
+	// wall/ceiling edge gets an upward skirt (emitOccluders) instead of a downward one.
+	private List<float[]> downSpans(List<StandableRect> rects, StandableRect r, int edge) {
+		List<float[]> open = openSpans(rects, r, edge);
+		List<double[]> up = upIntervalsOnEdge(r, edge);
+		if (up.isEmpty()) {
+			return open;
+		}
+		List<float[]> out = new ArrayList<>();
+		for (float[] sp : open) {
+			List<double[]> covered = new ArrayList<>(up);
+			out.addAll(subtractSpans(sp[0], sp[1], covered));
+		}
+		return out;
+	}
+
+	// The occluder (upward) sub-spans lying on one rect edge, as [lo,hi] intervals on
+	// the edge's varying axis (X for the Z edges, Z for the X edges), clipped to the
+	// edge. Matches the published spans by orientation, side, edge line, and base
+	// height (the surface top).
+	private List<double[]> upIntervalsOnEdge(StandableRect r, int edge) {
+		boolean alongX = edge < EDGE_MIN_X;
+		boolean positiveSide = edge == EDGE_MAX_Z || edge == EDGE_MAX_X;
+		double line = switch (edge) {
+			case EDGE_MIN_Z -> r.minZ();
+			case EDGE_MAX_Z -> r.maxZ();
+			case EDGE_MIN_X -> r.minX();
+			default -> r.maxX();
+		};
+		double rangeLo = alongX ? r.minX() : r.minZ();
+		double rangeHi = alongX ? r.maxX() : r.maxZ();
+		List<double[]> out = new ArrayList<>();
+		for (OccluderSpan span : occluderSnapshot) {
+			if (span.alongX() != alongX || span.positiveSide() != positiveSide) {
+				continue;
+			}
+			if (Math.abs(span.line() - line) > SKIRT_EPS || Math.abs(span.baseY() - r.topY()) > SKIRT_EPS) {
+				continue;
+			}
+			double lo = Math.max(span.lo(), rangeLo);
+			double hi = Math.min(span.hi(), rangeHi);
+			if (hi - lo > SKIRT_EPS) {
+				out.add(new double[] {lo, hi});
+			}
+		}
+		return out;
 	}
 
 	// Edge selectors for openSpans: the four sides of a rect.

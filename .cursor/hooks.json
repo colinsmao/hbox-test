@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/commit-gate.js",
+        "matcher": "git\\s+commit"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "node .cursor/hooks/plan-checklist-nudge.js"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/stop-ingame-reminder.js",
+        "loop_limit": 1
+      }
+    ]
+  }
+}

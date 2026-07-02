@@ -79,7 +79,7 @@ compiler and stale training data won't hand you.
   mid-session renderer reload). `CollisionSurfaceOverlay` (Milestone 3, below)
   is the widget that currently exercises this framework.
 
-## Block-hitbox rendering (Milestone 3–4): `CollisionSurfaceOverlay` + `SurfaceSelection`
+## Block-hitbox rendering (Milestone 3–4.5): `CollisionSurfaceOverlay` + `SurfaceSelection`
 
 Draws the **standable surfaces** of blocks — the upward-facing collision faces an
 entity of a chosen size can stand on — for a region the player selects with a
@@ -106,14 +106,16 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   are pass-through (tall grass, flowers); `onUseItem` resolves the targeted block
   **downward** (`MutableBlockPos.move(0,-1,0)`, capped and floored at
   `level.getMinY()`) to the first non-empty shape.
-- **Entity profiles + `reach`.** An `EntityProfile(name, width, reach)` selects the
-  entity size the flood/dilation use. Three ship, cycled in order **Point** (`width
-  0`, default — reproduces the zero-width point-walker) → **Player** (`0.6`) →
-  **Ravager** (`1.95`); `reach` (default `1.0`) is the single symmetric step
-  threshold. **No keybind:** the cycle rides the use-key dispatch — **sneak +
-  right-click at nothing** clears *and* advances the profile, then pings the HUD with
-  the new name. The `profile` field is `volatile` (read in `emit`); `width` drives
-  dilation (see `geometry.md`).
+- **Entity profiles + `reach`.** An `EntityProfile(name, width, height, reach)`
+  selects the entity the flood/dilation/headroom use. Three ship, cycled in order
+  **Point** (`width 0`, `height 0`, default — reproduces the zero-width point-walker)
+  → **Player** (`0.6`, `1.8`) → **Ravager** (`1.95`, `2.2`); `reach` (default `1.0`)
+  is the single symmetric step threshold. **No keybind for the cycle:** it rides the
+  use-key dispatch — **sneak + right-click at nothing** clears *and* advances the
+  profile, then pings the HUD with the new name. The `profile` field is `volatile`
+  (read in `emit`); `width` drives dilation and `height` drives headroom (see
+  `geometry.md`). (The separate occluder-style debug key above is unrelated to the
+  profile cycle.)
 - **Adjustable flood radius (shift+scroll).** `OverlayClient` registers
   `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook — no mixin)
   and, **only while holding the stick and sneaking**, changes the radius by the scroll
@@ -164,6 +166,33 @@ through-walls, depth-on `SKIRT` occluded).
   over only part of its length skirts just the unshared remainder); true drops / hole
   outlines / unshared remainders keep their skirts. Reusable for the future
   hole/surface overlay.
+- **Upward (occluder) skirts — wall-vs-drop classification (Milestone 4.5).** A
+  surface edge bordering a **wall** (a box rising above the surface) or a **ceiling**
+  (an overhang within the entity's headroom) is *not* a drop, so a downward skirt
+  there reads wrongly. Such edges instead draw an **upward** skirt — a wall face
+  rising from the surface top — solid at the base `T` and fading to transparent at the
+  marker top (every height fades out at the top). Because the wall/drop split needs
+  collision-box data the render thread may not query, the classification is done
+  **compute-side** (`SurfaceSelection.computeOccluders`, once per stick action) and
+  published as `OccluderSpan`s in the snapshot. The minimal snapshot shape is kept:
+  the render-side `openSpans` still produces the *downward* skirts, then `emit`
+  **subtracts** the occluder sub-spans on each edge (`downSpans` / `upIntervalsOnEdge`)
+  so an edge is never double-skirted, and draws the published occluder spans as upward
+  skirts (`emitOccluders`). Each span carries its orientation, **side** (so the
+  skirt is nudged toward the surface interior to dodge z-fighting the wall face, and
+  opposite-side edges at one coordinate aren't merged), the dilated edge line, the
+  `[lo,hi]` interval, the base height `T`, and the occluder top. The marker sits at
+  the **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
+  `W = 0`, at the face). This per-edge wall-vs-drop classification is the
+  **prerequisite for Milestone 5 (hole detection)**: the drop-classified edges are the
+  hole candidates.
+- **Occluder-marker debug style (`cycleOccluderStyle` + a keybind).** The final
+  upward-marker look is being A/B'd in-game: a **standalone keybind** (default `K`,
+  registered in `OverlayClient` via `KeyMappingHelper`, **not** tied to the
+  scroll/use handlers) increments a `volatile` style index (tiny / half-block / full /
+  bold-line, wrapping). It is a pure render-thread choice, so it does **not** touch the
+  published spans or re-flood. The `full` style clamps to `reach + SKIRT_MARGIN` so a
+  tall wall isn't a giant curtain.
 - **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last block
   before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius cutoff
   reads differently from a true boundary (a selection stopped by a real drop ends
@@ -193,21 +222,31 @@ through-walls, depth-on `SKIRT` occluded).
   publish-on-action snapshot, the crouch-gated through-walls top + borders, the
   ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
   (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
-  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), the height-gradient color
-  (`heightColor`), the level-identity reset, `volatile` snapshot/profile/crouch
-  handoff, and the double-sided-winding requirement.
+  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), the **upward occluder skirts**
+  (`emitOccluders`, the `downSpans`/`upIntervalsOnEdge` down-skirt subtraction, the
+  side-based interior nudge, the four debug styles + `cycleOccluderStyle`), the
+  height-gradient color (`heightColor`), the level-identity reset, `volatile`
+  snapshot/occluder/profile/crouch/style handoff, and the double-sided-winding
+  requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `OverlayClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
-  scroll input to the world overlay's radius and the HUD indicator.
+  scroll input to the world overlay's radius and the HUD indicator — and the
+  standalone occluder-style debug keybind (`KeyMappingHelper.registerKeyMapping`,
+  `KeyMapping(..., KeyMapping.Category.MISC)`, `consumeClick` in `END_CLIENT_TICK`).
+  Note `26.1.2` uses the `keymapping` API (not `keybinding`) and `KeyMapping.Category`
+  (not a `String` category).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (surface BFS,
   on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo, the
   `occluderColumns` shell, `floor(W)+1` neighbour reach, the 3-D cube cutoff,
   merge-after-flood), the `selectEager` oracle + `PROFILE_FLOOD` parity/timing
-  harness, dilation + occlusion in `exposeBox` (guillotine `subtractRects`), the
-  `union` re-cut + `mergeCoplanar` strip-merge, the `footprintAdjacent` edge test +
-  profile-`reach` gate, and the extraction-thread-only (non-thread-safe) contract.
+  harness, dilation + **headroom** occlusion in `exposeBox` (the `(T, T+H]` standing-
+  column predicate, guillotine `subtractRects`), the `union` re-cut + `mergeCoplanar`
+  strip-merge, the `footprintAdjacent` edge test + profile-`reach` gate, the
+  **compute-side occluder-span classification** (`computeOccluders` /
+  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
+  `OccluderSpan`), and the extraction-thread-only (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
 - `WorldOverlayManager.java`: the two-layer setup (depth-off `FILLED` tops +
   depth-on `SKIRT`) and per-layer buffer/GPU handoff, the through-walls debug

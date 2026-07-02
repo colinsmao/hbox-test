@@ -26,12 +26,26 @@ over rectangles**, no rounding and no new primitive.
 maximal rectangles for drawing. Independent of how it is computed, the result is
 defined by four rules:
 
-1. **Occlusion-aware tops.** A collision sub-box's top at height `T` is standable
-   only over the footprint where **no box spans immediately above it** (`minY <= T
-   < maxY`). The covering box's own top is itself a (higher) standable surface, so
-   one rule both removes a buried lower top and supplies the higher one. Non-burying
-   overlaps (an air gap between two tops) stay **distinct levels** — never collapsed
-   to `max topY` — so stacked surfaces (overhangs, spiral staircases) are preserved.
+1. **Occlusion-aware tops, with entity-height headroom.** A collision sub-box's top
+   at height `T` is standable only over the footprint that is *not* occluded. A box is
+   an occluder iff it **rises above `T`** (`yMax > T`) **and** either is **buried**
+   over the top (reaches down to/below the surface, `yMin <= T` — a box resting
+   directly on the top has `yMin == T`, a box straddling it has `yMin < T`) **or**
+   floats within the entity's **standing column** as a headroom ceiling
+   (`yMin < T+H`, `H = profile.height()`). The buried term is the `H = 0` base case —
+   exactly the old `minY <= T < maxY` test — so a box directly on the surface still
+   buries the top and **embedded/stacked tops are removed**; without it (`yMin < T+H`
+   alone) a directly-on-top box at `H = 0` would have `yMin == T` ≮ `T`, so every
+   embedded top would leak. **Point is therefore unchanged.** The `yMax > T` bound is
+   strict so the box being stood on never self-occludes, and a ceiling bottom exactly
+   at `T+H` (`H > 0`) is just-enough clearance (neither term fires). The covering
+   box's own top is itself a (higher) standable surface, so one rule both removes the
+   buried/headroom-robbed lower top and supplies the higher one; a **ceiling** robs
+   headroom from the floor **below** it (the removal zone extends downward by `H`, it
+   is not "extend occluders upward"). A partial overhang yields a **partial** surface
+   via the same guillotine subtract. Non-burying overlaps (an air gap larger than `H`
+   between two tops) stay **distinct levels** — never collapsed to `max topY` — so
+   stacked surfaces (overhangs, spiral staircases) are preserved.
 2. **Entity-width dilation** (see [below](#entity-width-dilation)): every footprint
    is grown by the profile half-width `W/2` before the spans-above test, so gaps and
    walls eat into the standable area by the entity's size.
@@ -75,9 +89,10 @@ Treat the entity as a point and pre-grow the world by its half-width `W/2`:
   *dilated* footprints, so cutting a buried lower top and supplying the higher one
   is one operation, not a separate subtract.
 - **`exposeBox` is the unit op.** It grows one box's footprint by `W/2`, then
-  subtracts (guillotine `subtractRects`) every *dilated* box that spans immediately
-  above its top, yielding 0..N surviving top rects. The boxes it must subtract live
-  in a bounded column window — see `occluderColumns` below.
+  subtracts (guillotine `subtractRects`) every *dilated* box that occludes its top
+  (`yMax > T && (yMin <= T || yMin < T+H)` — the buried-or-headroom test, rule 1),
+  yielding 0..N surviving top rects. The boxes it must subtract live in a bounded
+  column window — see `occluderColumns` below.
 
 Locality is bounded (growth is `< 1` block even for the Ravager), which is what
 makes the output-sensitive flood possible.
@@ -112,8 +127,12 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   windows the flood needs near its current height — never the full `[oy-radius-1,
   oy+radius+1]` band. A neighbour cell is scanned for tops within one `reach` step of
   the popped surface (`collect(cx, cz, h-reach, h+reach)`); each candidate box's
-  occluder shell is scanned only at the rows around *that box's own top*
-  (`floor(yMax)±1`); `exposeBox` is memoized per box. A `BitSet` per column records
+  occluder shell is scanned over the rows from `floor(yMax)-1` up to
+  `floor(yMax+H)+1` — the upper bound **extended by the headroom `H`** so the
+  ceilings/overhangs in the standing column `(T, T+H]` are exposed before
+  `exposeBox` runs (not just the box's own buried shell); `H = 0` collapses it back
+  to `floor(yMax)±1`. `exposeBox` is memoized per box (and `H` is fixed per
+  `select`, so the memo key is unchanged). A `BitSet` per column records
   scanned rows so each `(column,row)` is queried at most once. Only the **origin
   column** exposes its full band — it has to, to seed every standable top there. The
   flood front moves `<= reach` per hop, so by induction everything reachable is found
@@ -136,12 +155,34 @@ first factor; lazy-Y trims the second — orthogonal, and they compose.
 ## Reachability model (current scope)
 
 Reach is a **single symmetric threshold** (`profile.reach()`, default `1.0`): a step
-up or down of `<= reach` connects, anything deeper does not. So a shallow (`<= 1`
-deep) trench is reversibly reachable and its floor *is* painted (not a hole); to see
-the width rule you need a gap that is **deep (`>= 2`) or over the void**. Asymmetric
-up/down reach, entity-height headroom, and true fall/escape ("unreturnable space")
-semantics are deferred to the next milestone — this stage paints *coverage*, framed
-as "a `g > W` gap leaves a hole in the standable coverage", not "the entity falls in".
+up or down of `<= reach` connects, anything deeper does not. Because the threshold is
+symmetric the flood is **reversibly reachable**, so there is no "unreturnable space" —
+anything not connected to the seed is simply **unreachable** (a hole/gap), modulo the
+radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
+trench is reachable and its floor *is* painted (not a hole); to see the width rule you
+need a gap that is **deep (`>= 2`) or over the void**. **Entity-height headroom** is
+now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
+so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
+classification is still deferred to a later milestone — this stage paints *coverage*,
+framed as "a `g > W` gap leaves a hole in the standable coverage", not "the entity
+falls in".
+
+## Entity profiles (size + headroom)
+
+`EntityProfile(name, width, height, reach)` selects the entity the flood is computed
+for. Three ship, cycled Point → Player → Ravager:
+
+| Profile | width `W` | height `H` | reach |
+| ------- | --------- | ---------- | ----- |
+| Point   | 0.0       | 0.0        | 1.0   |
+| Player  | 0.6       | 1.8        | 1.0   |
+| Ravager | 1.95      | 2.2        | 1.0   |
+
+`W` drives dilation (above); `H` drives headroom (rule 1); `reach` is the symmetric
+step threshold (and sets the downward-skirt depth + the upward-skirt clamp). Heights
+are the vanilla hitbox heights — doubles, not `1/16`-aligned, consistent with the
+rect-space model. **Point keeps `H = 0`** so it stays the pure point-walker and the
+eager-vs-lazy oracle baseline.
 
 ## Appendix A: rejected pixel raster
 
