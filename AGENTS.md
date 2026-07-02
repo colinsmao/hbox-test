@@ -9,64 +9,74 @@ in **[`docs/rendering.md`](docs/rendering.md)** and
 in that area); the *current short-term plan* lives in **[`PLAN.md`](PLAN.md)**
 (transient, often empty between tasks — never durable knowledge).
 
-> ⛔ **THE #1 RULE — read before doing anything:** every step of every plan MUST
-> have a detailed, enumerated **in-game** checklist, and that checklist MUST be
-> fully validated in-game (`./gradlew runClient`) before the next step or any
-> commit. No exceptions — including "logical-only" steps. See **[Stage-gating is
-> MANDATORY](#-stage-gating-is-mandatory--the-1-rule-of-this-repo-read-twice)**.
+> **The core workflow:** work proceeds one plan step at a time, and **each step is
+> its own commit.** A step is not done until its enumerated in-game checklist has
+> passed in-game (`./gradlew runClient`) — a green build is not enough — and only
+> then is it committed. A `git commit` hook enforces the pause at each commit, so
+> keeping steps small and committing each one is what makes the gate work per step.
+> See **[Stage-gating and commit-per-step](#stage-gating-and-commit-per-step)**.
 
-## ⛔ Stage-gating is MANDATORY — THE #1 RULE OF THIS REPO (READ TWICE)
+## Stage-gating and commit-per-step
 
-> This is the single most-violated, most-important rule here. It has been
-> re-stated repeatedly because it keeps getting skipped. **DO NOT SKIP IT. EVER.
-> EVERY SINGLE STEP. EVERY SINGLE TIME.**
+The backbone of all work here: **a plan is a sequence of small steps, and each step
+is validated in-game and committed before the next one begins.** Behavior is almost
+entirely runtime/visual, so a green build proves little on its own; validating and
+committing each step catches a regression at the step that introduced it, and the
+per-commit hook (below) only becomes a per-step checkpoint if each step is its own
+commit. This has historically been the most-skipped rule here, so treat it as the
+default shape of every task.
 
-**The absolute rules (no exceptions):**
+**The rules:**
 
-1. **EVERY step of EVERY plan MUST have its own detailed, enumerated in-game
-   checklist.** Not a summary. Not "verify it works". A numbered list of concrete
-   `action → exact expected on-screen result` items (e.g. "right-click a slab → its
-   half-height top face is drawn, and *only* that block"). This includes a
-   regression line for anything the step could break.
-2. **A plan is NOT READY TO EXECUTE until this checklist exists for every step.**
-   Writing the checklist *is part of writing the plan* — a step without its
-   enumerated in-game checklist is an incomplete plan. If you are in plan mode, do
-   not present the plan as done until every step carries one.
-3. **The checklist MUST BE FULLY VALIDATED IN-GAME (`./gradlew runClient`) before
-   ANY next step begins.** Every box ticked, in the game, by you or the user. You
-   may not start the next step, and you may not commit, until the current step's
-   checklist has fully passed in-game. A green `./gradlew build` / `./gradlew test`
-   proves **nothing** about what is displayed.
-4. **"It's just a logical change" is NOT an exemption.** A purely internal
-   refactor with provably zero behavioral effect *may* gate on unit tests alone —
-   but **almost every logical change alters what gets calculated, and therefore what
-   is drawn in-game.** Treat logical steps as visual steps by default: they get a
-   full enumerated in-game checklist too, and must be validated in-game. When in
-   doubt, it needs an in-game checklist.
+1. **Design the plan as committable steps.** Each step should be a self-contained,
+   independently verifiable unit of work — the thing that becomes one commit. Prefer
+   more small steps over a few large ones. If a step can't be validated and committed
+   on its own, it's too big; split it.
+2. **Every step has its own enumerated in-game checklist.** Not a summary, not
+   "verify it works": a numbered list of concrete `action → exact expected on-screen
+   result` items (e.g. "right-click a slab → its half-height top face is drawn, and
+   *only* that block"), plus a regression line for anything the step could break.
+   Writing the checklist is part of writing the plan — a step without one is
+   incomplete, so don't present a plan as ready until every step carries a checklist.
+3. **Validate in-game, then commit, before the next step.** Run the step's checklist
+   in-game (`./gradlew runClient`) — you or the user tick every box — then commit that
+   step. Do not start the next step until the current one is validated and committed.
+   A green `./gradlew build` / `./gradlew test` proves nothing about what is displayed.
+4. **"It's just a logical change" is not an exemption.** A purely internal refactor
+   with provably zero behavioral effect *may* gate on unit tests alone, but almost
+   every logical change alters what gets calculated and therefore what is drawn.
+   Treat logical steps as visual steps by default; when in doubt, it needs an in-game
+   checklist.
 
-Why: behavior here is almost entirely runtime/visual, so a green build proves
-*almost nothing* (winding, culling, depth/z-fighting, occlusion math, visibility,
-once-per-click cycling, the swing animation, skirt/headroom rendering are all
-runtime-only). Gating each step in-game catches a regression **at the step that
-introduced it** instead of at the end, where it is far harder to bisect.
+**The procedure, every step:**
 
-**The procedure, every step, no shortcuts:**
-
-1. **Write the enumerated checklist into `PLAN.md`** as part of the step's plan —
-   `action → expected on-screen result`, plus a regression line.
-2. **When the step's code builds, STOP and surface that checklist verbatim** and
-   run it in-game (`runClient`) — or ask the user to — and record each result. Do
-   not silently move on.
-3. **Gate hard.** Do not start the next step and do not commit (see **Git /
-   workflow → Don't commit until confirmed in-game**) until the checklist has
-   **fully passed in-game**. If you cannot run `runClient` yourself, you MUST pause
-   and hand the checklist to the user for validation rather than proceeding.
+1. **Write the step's enumerated checklist into `PLAN.md`** — `action → expected
+   on-screen result`, plus a regression line.
+2. **When the step's code builds, surface that checklist verbatim** and run it
+   in-game (`runClient`) — or hand it to the user — and record each result. If you
+   can't run `runClient` yourself, pause and hand off rather than proceeding.
+3. **Commit the step once its checklist passes in-game**, then move to the next step
+   (see **Git / workflow**). One validated step → one commit.
 
 Every step's checklist also ends with the build gate (below) and inherits these
 **cross-cutting checks** (necessary, not sufficient): `runClient` launches with no
 log errors; no errors on world load/unload or window resize; the mod does nothing
 on a dedicated server. The current full feature checklist lives in
 [`docs/project.md`](docs/project.md).
+
+**Enforcement hooks (`.cursor/hooks.json`).** Project [Cursor hooks](https://cursor.com/docs/hooks)
+back these rules mechanically, so they aren't honor-system only — do not treat them
+as a substitute for actually validating in-game, and keep them working if you touch
+`.cursor/hooks/`:
+- `commit-gate.js` (`beforeShellExecution`) turns every `git commit` into a manual
+  **ask** carrying the checklist reminder — a hook can't verify you ran `runClient`,
+  only force the pause, so the confirmation is on you.
+- `plan-checklist-nudge.js` (`postToolUse`) reminds, on each `PLAN.md` edit, that
+  every step needs its own enumerated in-game checklist.
+- `stop-ingame-reminder.js` (`stop`) nudges once when a turn ends with uncommitted
+  `src/`/`docs/` changes. Caveat: `stop` hooks don't run on cloud agents and have a
+  known Windows stdout-capture quirk, so this one is best-effort — the commit gate is
+  the reliable backstop.
 
 ## Build, test & run
 
@@ -141,17 +151,22 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
 ## Git / workflow
 
-- **One commit per conceptually-distinct change — docs included.** Split work into
-  separate commits *by concept*, not by file or by a trailing "docs" pass. Each such commit must be self-contained and
-  **fully update its own documentation in that same commit** — the relevant
-  `docs/*.md`, `docs/project.md` status, code comments, and `PLAN.md` — so no concept
-  ever lands with stale or deferred docs. Never lump distinct concepts together, and
-  never defer all doc updates to one commit at the end.
-- **Don't commit until confirmed in-game.** A green `./gradlew build` is not
-  sufficient — behavior here is runtime/visual. Make the edits, run the gates, then
-  **wait until the step's in-game checklist passes** (user confirms, or you run
-  `runClient` and verify) before committing. This applies to `PLAN.md` / doc updates
-  too: don't commit a step's plan or doc change until that step is confirmed working.
+- **One commit per validated plan step — docs included.** Each plan step (see
+  **Stage-gating and commit-per-step**) is its own commit; equivalently, one
+  conceptually-distinct change per commit, never split by file or by a trailing
+  "docs" pass. Each commit must be self-contained and **fully update its own
+  documentation in that same commit** — the relevant `docs/*.md`, `docs/project.md`
+  status, code comments, and `PLAN.md` — so no step ever lands with stale or deferred
+  docs. Never lump distinct steps together, and never defer doc updates to the end.
+  This cadence is also what makes the commit hook a per-step checkpoint: batching many
+  steps into one commit defeats it.
+- **Don't commit until the step is confirmed in-game.** A green `./gradlew build` is
+  not sufficient — behavior here is runtime/visual. Make the edits, run the gates,
+  then **wait until the step's in-game checklist passes** (user confirms, or you run
+  `runClient` and verify) before committing that step. This applies to `PLAN.md` / doc
+  updates too: don't commit a step's plan or doc change until that step is confirmed
+  working. (The `git commit` hook in `.cursor/hooks.json` will pause each commit to
+  reconfirm this.)
 - **Sole-agent assumption.** Unless told otherwise, assume you are the only
   agent/person in this repo; no need to defensively re-check remote/branch state for
   concurrent changes before each action (a quick check when something looks off is
