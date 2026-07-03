@@ -20,11 +20,16 @@ import org.junit.jupiter.api.Test;
 final class HoleSubSpanTest {
 	private static final double EPS = 1.0e-6;
 
-	private static List<HoleSpan> run(DownSkirtSpan sp, List<StandableRect> reached) {
+	private static List<HoleSpan> run(DownSkirtSpan sp, List<StandableRect> reached,
+			List<StandableRect> ledges) {
 		Rect band = SurfaceSelection.fallFootprint(sp);
 		List<HoleSpan> out = new ArrayList<>();
-		SurfaceSelection.holeSubSpans(sp, band, reached, out);
+		SurfaceSelection.holeSubSpans(sp, band, reached, ledges, out);
 		return out;
+	}
+
+	private static List<HoleSpan> run(DownSkirtSpan sp, List<StandableRect> reached) {
+		return run(sp, reached, List.of());
 	}
 
 	@Test
@@ -74,6 +79,29 @@ final class HoleSubSpanTest {
 		DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
 		StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
 		List<HoleSpan> holes = run(sp, List.of(reachedFloor));
+		assertEquals(0, holes.size());
+	}
+
+	@Test
+	void ledgeBetweenEdgeAndReachedFloorIsHole() {
+		// A reached floor at Y=60 covers the footprint, but a ledge at Y=62
+		// (between 60 and 64) also overlaps -> HOLE (entity trapped on ledge).
+		DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+		StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
+		StandableRect ledge = new StandableRect(0, 1, 2, 2, 62.0);
+		List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
+		assertEquals(1, holes.size());
+		assertEquals(0.0, holes.get(0).lo(), EPS);
+		assertEquals(2.0, holes.get(0).hi(), EPS);
+	}
+
+	@Test
+	void ledgeNotOverlappingFootprintIsIgnored() {
+		// A ledge at Y=62 exists but at x=[3,4] (no XZ overlap) -> benign.
+		DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+		StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
+		StandableRect ledge = new StandableRect(3, 1, 4, 2, 62.0);
+		List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
 		assertEquals(0, holes.size());
 	}
 }

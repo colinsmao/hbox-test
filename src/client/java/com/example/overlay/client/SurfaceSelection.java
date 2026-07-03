@@ -723,18 +723,22 @@ public final class SurfaceSelection {
 	}
 
 	/**
-	 * Classify one drop sub-span. Pure: given the fall footprint and the flood's
-	 * reached set, returns HOLE or BENIGN.
+	 * Classify one drop sub-span. Pure: given the fall footprint, the flood's
+	 * reached set, and any intermediate standable ledges between the edge and the
+	 * reached floor, returns HOLE or BENIGN.
 	 *
-	 * <p>The rule: is there a reached surface below {@code topY} that overlaps
-	 * {@code fallFootprint}? If yes &rarr; BENIGN (the mob lands on reachable
-	 * ground; fall distance = topY &minus; landing). If no &rarr; HOLE (void, or
-	 * unreached ground the mob cannot escape from).
-	 *
-	 * <p>Step B will add a ledge check between the edge and the reached floor.
+	 * <ol>
+	 * <li>Find the topmost reached surface strictly below {@code topY} that
+	 *     overlaps the footprint. If none &rarr; HOLE (void / unreached ground).
+	 * <li>If a reached floor exists at {@code landY}: check whether any surface in
+	 *     {@code ledges} (dilated standable surfaces with top in {@code (landY,
+	 *     topY)}) overlaps the footprint. If yes &rarr; HOLE (entity lands on the
+	 *     ledge and is trapped). If no &rarr; BENIGN (fall distance = topY &minus;
+	 *     landY).
+	 * </ol>
 	 */
 	static DropClassification classifyDrop(Rect fallFootprint, double topY,
-			List<StandableRect> reached) {
+			List<StandableRect> reached, List<StandableRect> ledges) {
 		StandableRect landing = null;
 		for (StandableRect r : reached) {
 			if (r.topY() >= topY - EPS) {
@@ -748,10 +752,21 @@ public final class SurfaceSelection {
 				landing = r;
 			}
 		}
-		if (landing != null) {
-			return new DropClassification(DropClass.BENIGN, topY - landing.topY());
+		if (landing == null) {
+			return new DropClassification(DropClass.HOLE, 0.0);
 		}
-		return new DropClassification(DropClass.HOLE, 0.0);
+		double landY = landing.topY();
+		for (StandableRect ledge : ledges) {
+			if (ledge.topY() <= landY + EPS || ledge.topY() >= topY - EPS) {
+				continue;
+			}
+			if (Math.min(ledge.maxX(), fallFootprint.maxX()) - Math.max(ledge.minX(), fallFootprint.minX()) <= EPS
+					|| Math.min(ledge.maxZ(), fallFootprint.maxZ()) - Math.max(ledge.minZ(), fallFootprint.minZ()) <= EPS) {
+				continue;
+			}
+			return new DropClassification(DropClass.HOLE, topY - ledge.topY());
+		}
+		return new DropClassification(DropClass.BENIGN, topY - landY);
 	}
 
 	// Compute the downward drop-skirt spans of the whole reached set, once per
@@ -852,33 +867,38 @@ public final class SurfaceSelection {
 	private static final double FALL_PROBE = 1.0;
 
 	// Classify each drop span and return the hole sub-spans (through-walls beam
-	// candidates). For each drop span, builds the fall footprint and checks for a
-	// reached surface below it. No world scan: reachability is the flood's reached
-	// set. Because one edge can span several verdicts (part over reached ground, part
-	// over void), the span is SUBDIVIDED at reached-rect boundaries into homogeneous
-	// sub-spans; each is classified and contiguous HOLE pieces are coalesced. Runs once
-	// per select (not per frame). Border uncertainty is left to the render-side grey
-	// ring (a hole whose rim is in the ring is drawn grey), so this does no ring math.
+	// candidates). For each drop span: (1) check if a reached surface exists below
+	// under the fall footprint, (2) if yes, scan the world between topY and landY for
+	// intermediate standable surfaces (ledges) via exposeBox — if any overlap the
+	// footprint, the entity gets trapped on the ledge -> HOLE. Because one edge can
+	// span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
+	// homogeneous sub-spans. Runs once per select (not per frame).
 	private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
 			List<DownSkirtSpan> drops, EntityProfile profile) {
 		if (drops.isEmpty()) {
 			return List.of();
 		}
+		double halfW = profile.width() / 2.0;
+		double height = profile.height();
 		List<HoleSpan> out = new ArrayList<>();
+		List<StandableRect> ledges = new ArrayList<>();
+		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 		for (DownSkirtSpan sp : drops) {
 			Rect band = fallFootprint(sp);
-			holeSubSpans(sp, band, rects, out);
+			ledges.clear();
+			gatherLedges(level, cursor, band, sp.baseY(), rects, halfW, height, ledges);
+			holeSubSpans(sp, band, rects, ledges, out);
 		}
 		return out;
 	}
 
 	// Pure: subdivide one drop span into homogeneous sub-spans (at reached-rect
-	// boundaries), classify each via classifyDrop, and append the contiguous HOLE
-	// pieces (coalesced) as HoleSpans. A single edge can span reached and unreached
-	// ground, so classifying the whole edge at once mislabels it. Package-private for
-	// unit tests (synthetic reached rects, no world).
+	// boundaries), classify each via classifyDrop (with ledge check), and append the
+	// contiguous HOLE pieces (coalesced) as HoleSpans. A single edge can span reached
+	// and unreached ground, so classifying the whole edge at once mislabels it.
+	// Package-private for unit tests (synthetic reached rects / ledges, no world).
 	static void holeSubSpans(DownSkirtSpan sp, Rect band,
-			List<StandableRect> reached, List<HoleSpan> out) {
+			List<StandableRect> reached, List<StandableRect> ledges, List<HoleSpan> out) {
 		double topY = sp.baseY();
 		double[] cuts = spanBreakpoints(sp, band, reached);
 		double holeLo = Double.NaN;
@@ -891,7 +911,7 @@ public final class SurfaceSelection {
 				continue;
 			}
 			Rect subFp = subBand(sp, band, a, b);
-			DropClassification c = classifyDrop(subFp, topY, reached);
+			DropClassification c = classifyDrop(subFp, topY, reached, ledges);
 			if (c.kind() != DropClass.HOLE) {
 				continue;
 			}
@@ -979,6 +999,81 @@ public final class SurfaceSelection {
 		return new Rect(xNear, sp.lo(), xFar, sp.hi());
 	}
 
+
+	// Scan the world for standable surfaces (via exposeBox) between landY and topY that
+	// overlap the fall footprint — intermediate ledges that would trap the entity. For
+	// each block column overlapping fp, scan rows in (landY, topY), gather collision
+	// boxes, build a local occluder index, and call exposeBox on each candidate whose
+	// top is strictly between landY and topY. Appends exposed StandableRects to out.
+	// Only called when a reached floor exists below (landY is known).
+	private static void gatherLedges(Level level, BlockPos.MutableBlockPos cursor,
+			Rect fp, double topY, List<StandableRect> reached, double halfW, double height,
+			List<StandableRect> out) {
+		// Find landY: the topmost reached surface below topY overlapping the footprint.
+		double landY = Double.NEGATIVE_INFINITY;
+		for (StandableRect r : reached) {
+			if (r.topY() >= topY - EPS) {
+				continue;
+			}
+			if (Math.min(r.maxX(), fp.maxX()) - Math.max(r.minX(), fp.minX()) <= EPS
+					|| Math.min(r.maxZ(), fp.maxZ()) - Math.max(r.minZ(), fp.minZ()) <= EPS) {
+				continue;
+			}
+			if (r.topY() > landY) {
+				landY = r.topY();
+			}
+		}
+		if (landY == Double.NEGATIVE_INFINITY) {
+			return;
+		}
+		// Scan block columns overlapping the footprint in the Y band (landY, topY).
+		int xLo = (int) Math.floor(fp.minX());
+		int xHi = (int) Math.ceil(fp.maxX()) - 1;
+		int zLo = (int) Math.floor(fp.minZ());
+		int zHi = (int) Math.ceil(fp.maxZ()) - 1;
+		int yLo = (int) Math.floor(landY);
+		int yHi = (int) Math.ceil(topY);
+		// Gather all boxes in the band (used both as candidates and as occluders).
+		Map<ColKey, List<WorldBox>> index = new HashMap<>();
+		List<WorldBox> candidates = new ArrayList<>();
+		for (int x = xLo - (int) Math.ceil(halfW); x <= xHi + (int) Math.ceil(halfW) + 1; x++) {
+			for (int z = zLo - (int) Math.ceil(halfW); z <= zHi + (int) Math.ceil(halfW) + 1; z++) {
+				for (int y = yLo; y <= yHi; y++) {
+					cursor.set(x, y, z);
+					VoxelShape shape = level.getBlockState(cursor)
+						.getCollisionShape(level, cursor, CollisionContext.empty());
+					if (shape.isEmpty()) {
+						continue;
+					}
+					for (AABB box : shape.toAabbs()) {
+						WorldBox wb = new WorldBox(x, y, z,
+							x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
+							y + box.minY, y + box.maxY);
+						index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>()).add(wb);
+						double top = wb.yMax();
+						if (top > landY + EPS && top < topY - EPS) {
+							candidates.add(wb);
+						}
+					}
+				}
+			}
+		}
+		// exposeBox each candidate and collect fragments overlapping the footprint.
+		List<StandableRect> exposed = new ArrayList<>();
+		for (WorldBox cand : candidates) {
+			exposed.clear();
+			exposeBox(cand, index, halfW, height, exposed);
+			for (StandableRect s : exposed) {
+				if (s.topY() <= landY + EPS || s.topY() >= topY - EPS) {
+					continue;
+				}
+				if (Math.min(s.maxX(), fp.maxX()) - Math.max(s.minX(), fp.minX()) > EPS
+						&& Math.min(s.maxZ(), fp.maxZ()) - Math.max(s.minZ(), fp.minZ()) > EPS) {
+					out.add(s);
+				}
+			}
+		}
+	}
 
 	// World-reading wrapper (client thread): for each reached surface, gather the
 	// collision boxes near its dilated edges (and, with headroom, above its interior)
