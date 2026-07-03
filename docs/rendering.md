@@ -110,7 +110,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   selects the entity the flood/dilation/headroom use. Three ship, cycled in order
   **Point** (`width 0`, `height 0`, default — reproduces the zero-width point-walker)
   → **Player** (`0.6`, `1.8`) → **Ravager** (`1.95`, `2.2`); `reach` (default `1.0`)
-  is the single symmetric step threshold. **No keybind for the cycle:** it rides the
+  is the single step threshold. **No keybind for the cycle:** it rides the
   use-key dispatch — **sneak + right-click at nothing** clears *and* advances the
   profile, then pings the HUD with the new name. The `profile` field is `volatile`
   (read in `emit`); `width` drives dilation and `height` drives headroom (see

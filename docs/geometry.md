@@ -59,7 +59,7 @@ defined by four rules:
    reached iff it connects to an already-reached surface by **one geometric
    adjacency rule**: the footprints share an edge with positive overlap (or overlap
    with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach` (the
-   profile's single symmetric step threshold). This subsumes the old same-block /
+   profile's single step threshold). This subsumes the old same-block /
    own-column / neighbour-column special cases: a glass pane on a block connects to
    that block's exposed ring because their footprints abut at the hole edges — no
    special case.
@@ -152,13 +152,13 @@ volume — a large win in caves / against walls, and asymptotically on open grou
 Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
 first factor; lazy-Y trims the second — orthogonal, and they compose.
 
-## Reachability model (current scope)
+## Reachability model
 
-Reach is a **single symmetric threshold** (`profile.reach()`, default `1.0`): a step
-up or down of `<= reach` connects, anything deeper does not. Because the threshold is
-symmetric the flood is **reversibly reachable**, so there is no "unreturnable space" —
-anything not connected to the seed is simply **unreachable** (a hole/gap), modulo the
-radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
+Reach is a **single threshold** (`profile.reach()`, default `1.0`): two surfaces
+connect when their height difference is `<= reach`, anything deeper does not.
+Reachability is plain yes/no — a location is reachable from the seed or it is not —
+so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
+the radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
 trench is reachable and its floor *is* painted (not a hole); to see the width rule you
 need a gap that is **deep (`>= 2`) or over the void**. **Entity-height headroom** is
 now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
@@ -178,8 +178,8 @@ for. Three ship, cycled Point → Player → Ravager:
 | Player  | 0.6       | 1.8        | 1.0   |
 | Ravager | 1.95      | 2.2        | 1.0   |
 
-`W` drives dilation (above); `H` drives headroom (rule 1); `reach` is the symmetric
-step threshold (and sets the downward-skirt depth + the upward-skirt clamp). Heights
+`W` drives dilation (above); `H` drives headroom (rule 1); `reach` is the step
+threshold (and sets the downward-skirt depth + the upward-skirt clamp). Heights
 are the vanilla hitbox heights — doubles, not `1/16`-aligned, consistent with the
 rect-space model. **Point keeps `H = 0`** so it stays the pure point-walker and the
 eager-vs-lazy oracle baseline.

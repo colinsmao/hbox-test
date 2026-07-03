@@ -53,7 +53,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * <li><b>Flood</b> the merged-rect graph from the seed rect(s) by <b>geometric
  *     adjacency</b>: two rects are connected iff their footprints share an edge
  *     with positive overlap ({@link #footprintAdjacent}) and their heights are
- *     within the active {@link EntityProfile}'s symmetric {@code reach}. This one
+ *     within the active {@link EntityProfile}'s {@code reach}. This one
  *     test subsumes the old same-block / own-column / 4-neighbor-column cases: a
  *     glass pane on a block connects to that block's exposed ring because their
  *     footprints abut at the hole edges, no special case needed. A dilated perch
@@ -290,7 +290,7 @@ public final class SurfaceSelection {
 
 	// BFS over merged rects: an edge exists iff footprints share an edge with
 	// positive overlap and the height difference is within reach (a single
-	// symmetric threshold). Seeds are the merged rects that cover a seed surface.
+	// threshold). Seeds are the merged rects that cover a seed surface.
 	private static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
 		int n = rects.size();
 		boolean[] visited = new boolean[n];

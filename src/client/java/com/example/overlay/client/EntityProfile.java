@@ -4,7 +4,7 @@ package com.example.overlay.client;
  * The size/reach of the entity the standable-surface flood is computed for. A
  * Minecraft hitbox is an axis-aligned {@code width x width} square footprint, so
  * {@code width} fully describes the horizontal extent; {@code reach} is the
- * symmetric walkable height threshold (see {@code PLAN.md} "Reachability model").
+ * walkable height threshold (see {@code docs/geometry.md} "Reachability model").
  *
  * <p>Three profiles ship, cycled in order ({@link #next()}): {@link #POINT}
  * (width 0, the default), {@link #PLAYER} (0.6), {@link #RAVAGER} (1.95).
@@ -13,11 +13,10 @@ package com.example.overlay.client;
  * the safe default and an A/B baseline. {@code width} is carried but unused until
  * the dilation stages.
  *
- * <p>{@code reach} replaces the old single {@code MAX_STEP}: one symmetric
- * threshold on {@code |dT|} (the flood is reversible, so this is a single value,
- * not an up/down split). Defaulted to {@code 1.0} for every profile to preserve
- * current flood behavior; per-profile tuning (e.g. a higher jump reach) is
- * deferred.
+ * <p>{@code reach} is the walkable height threshold on {@code |dT|}: two surfaces
+ * connect when their height difference is at most {@code reach}. Reachability is
+ * plain yes/no — a location is reachable or it is not — so this is a single scalar
+ * ({@code 1.0} for every profile).
  *
  * <p>{@code height} is the entity's hitbox height (vanilla values; doubles, not
  * {@code 1/16}-quantized — see {@code docs/geometry.md}). It drives the
