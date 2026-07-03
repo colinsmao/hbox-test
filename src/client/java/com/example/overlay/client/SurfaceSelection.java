@@ -135,6 +135,13 @@ public final class SurfaceSelection {
 	// boxes), published alongside result. Replaced wholesale each select.
 	private List<OccluderSpan> occluders = List.of();
 
+	// Downward drop-skirt spans for the last select: each merged-rect edge minus its
+	// equal-height merge seams (openSpans) minus the occluder sub-spans above. Once a
+	// per-frame O(n^2) render-side scan; now computed compute-side once per select
+	// (behavior-preserving) so emit just draws published spans, and so Milestone 5's
+	// hole classification can share this same drop-edge pass. Replaced each select.
+	private List<DownSkirtSpan> downSkirts = List.of();
+
 	/**
 	 * Replace the selection with the merged standable surfaces reachable from the
 	 * surfaces of {@code start}, within a spatial window of half-extent
@@ -151,6 +158,7 @@ public final class SurfaceSelection {
 			result = LAZY ? selectLazy(level, start, radius, profile)
 					: selectEager(level, start, radius, profile);
 			occluders = computeOccluders(level, result, profile);
+			downSkirts = computeDownSkirts(result, occluders);
 			return;
 		}
 
@@ -180,6 +188,7 @@ public final class SurfaceSelection {
 		}
 		result = LAZY ? lazyRects : eager;
 		occluders = computeOccluders(level, result, profile);
+		downSkirts = computeDownSkirts(result, occluders);
 	}
 
 	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
@@ -276,6 +285,7 @@ public final class SurfaceSelection {
 	public void clear() {
 		result = List.of();
 		occluders = List.of();
+		downSkirts = List.of();
 	}
 
 	/** Immutable snapshot of the reached surfaces (height-tinted at draw time). */
@@ -286,6 +296,11 @@ public final class SurfaceSelection {
 	/** Immutable snapshot of the upward (occluder) skirt spans for the reached set. */
 	public List<OccluderSpan> allOccluders() {
 		return occluders;
+	}
+
+	/** Immutable snapshot of the downward drop-skirt spans for the reached set. */
+	public List<DownSkirtSpan> allDownSkirts() {
+		return downSkirts;
 	}
 
 	// BFS over merged rects: an edge exists iff footprints share an edge with
@@ -773,6 +788,99 @@ public final class SurfaceSelection {
 			}
 		}
 		return false;
+	}
+
+	// Compute the downward drop-skirt spans of the whole reached set, once per
+	// select. For each merged rect edge: the edge minus the parts covered by an
+	// equal-height neighbour abutting across it (a merge seam, not a drop) minus the
+	// occluder (wall/ceiling) sub-spans on that edge (they get an upward skirt), the
+	// leftover being the genuine drop sub-spans. This replaces the old per-frame
+	// render-side scan (openSpans/upIntervalsOnEdge, O(n^2) every frame) with one
+	// compute-side pass; the result must be pixel-identical. Package-private for unit
+	// tests (synthetic rects, no world).
+	static List<DownSkirtSpan> computeDownSkirts(List<StandableRect> rects, List<OccluderSpan> occluders) {
+		List<DownSkirtSpan> out = new ArrayList<>();
+		for (StandableRect r : rects) {
+			edgeDownSpans(rects, occluders, r, true, false, out);  // -Z edge
+			edgeDownSpans(rects, occluders, r, true, true, out);   // +Z edge
+			edgeDownSpans(rects, occluders, r, false, false, out); // -X edge
+			edgeDownSpans(rects, occluders, r, false, true, out);  // +X edge
+		}
+		return out;
+	}
+
+	// Append the drop sub-spans of one rect edge (see computeDownSkirts). alongX: the
+	// edge runs along X at a fixed Z; maxSide: the +axis edge (line = the rect's max
+	// coordinate on the perpendicular axis). Coverage from equal-height neighbours and
+	// from occluder spans on this edge is subtracted together (set difference is
+	// order-independent, so unioning then subtracting matches the old two-stage
+	// openSpans-then-occluder subtraction).
+	private static void edgeDownSpans(List<StandableRect> rects, List<OccluderSpan> occluders,
+			StandableRect r, boolean alongX, boolean maxSide, List<DownSkirtSpan> out) {
+		double lo = alongX ? r.minX() : r.minZ();
+		double hi = alongX ? r.maxX() : r.maxZ();
+		double line = alongX ? (maxSide ? r.maxZ() : r.minZ()) : (maxSide ? r.maxX() : r.minX());
+
+		List<double[]> covered = new ArrayList<>();
+		for (StandableRect nb : rects) {
+			if (nb == r || Math.abs(nb.topY() - r.topY()) > EPS) {
+				continue;
+			}
+			boolean abuts;
+			double clo;
+			double chi;
+			if (alongX) {
+				abuts = Math.abs((maxSide ? nb.minZ() - r.maxZ() : nb.maxZ() - r.minZ())) < EPS;
+				clo = Math.max(nb.minX(), r.minX());
+				chi = Math.min(nb.maxX(), r.maxX());
+			} else {
+				abuts = Math.abs((maxSide ? nb.minX() - r.maxX() : nb.maxX() - r.minX())) < EPS;
+				clo = Math.max(nb.minZ(), r.minZ());
+				chi = Math.min(nb.maxZ(), r.maxZ());
+			}
+			if (abuts && chi - clo > EPS) {
+				covered.add(new double[] {clo, chi});
+			}
+		}
+		for (OccluderSpan s : occluders) {
+			if (s.alongX() != alongX || s.positiveSide() != maxSide) {
+				continue;
+			}
+			if (Math.abs(s.line() - line) > EPS || Math.abs(s.baseY() - r.topY()) > EPS) {
+				continue;
+			}
+			double clo = Math.max(s.lo(), lo);
+			double chi = Math.min(s.hi(), hi);
+			if (chi - clo > EPS) {
+				covered.add(new double[] {clo, chi});
+			}
+		}
+
+		for (double[] iv : subtractIntervals(lo, hi, covered)) {
+			out.add(new DownSkirtSpan(alongX, maxSide, line, iv[0], iv[1], r.topY()));
+		}
+	}
+
+	// [lo,hi] minus the union of covered intervals, as the remaining open sub-spans
+	// (left-to-right sweep over the sorted intervals). The double-precision twin of
+	// the old render-side subtractSpans.
+	private static List<double[]> subtractIntervals(double lo, double hi, List<double[]> covered) {
+		covered.sort(Comparator.comparingDouble(c -> c[0]));
+		List<double[]> out = new ArrayList<>();
+		double cur = lo;
+		for (double[] c : covered) {
+			if (c[0] > cur + EPS) {
+				out.add(new double[] {cur, Math.min(c[0], hi)});
+			}
+			cur = Math.max(cur, c[1]);
+			if (cur >= hi - EPS) {
+				break;
+			}
+		}
+		if (hi - cur > EPS) {
+			out.add(new double[] {cur, hi});
+		}
+		return out;
 	}
 
 	// World-reading wrapper (client thread): for each reached surface, gather the
