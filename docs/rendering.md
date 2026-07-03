@@ -214,6 +214,22 @@ through-walls, depth-on `SKIRT` occluded).
   merged rect doesn't smear the ramp across its length — the interior stays one
   fully-colored quad, only the ≤1-block outer strips fade. Window-boundary edges keep
   their skirts; the grey alone signals "increase the radius / re-center".
+- **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
+  leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **through-walls
+  vertical beam** from the cliff-edge top `T`, so it reads even when the rim is behind
+  terrain: it is drawn in the depth-off `FILLED` layer (the same route as the
+  crouch-gated tops), rising a fixed world height (`BEAM_HEIGHT`), solid-ish at the
+  base and fading out toward the top, in a distinct red. Benign drops keep their
+  ordinary down-skirt and get **no** beam. A hole beam is drawn through the shared
+  `vertex` choke point, so a beam in the **grey ring** is blended toward grey — signalling
+  "raise the radius". Spans at the **very outermost edge** (`>= ringEnd`) are suppressed
+  entirely (`isAtOuterEdge`) — they are radius-cutoff artifacts, not real geometry.
+  The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
+  `holeSubSpans`, published as `HoleSpan`) and `emit` just draws them (`emitHoles`).
+  Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
+  an edge and emits a beam only over the unreached sub-intervals. **Step 3 draws one
+  beam per hole edge-span** (a long rim is a picket fence for now); Step 4 coalesces to
+  one beam per hole region and tunes the look.
 
 ## `26.1.2` rendering API names (verified against the resolved jars)
 
@@ -233,11 +249,14 @@ through-walls, depth-on `SKIRT` occluded).
   ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
   (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
   (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** down-skirt
-  spans (`emitDownSkirts`, from `DownSkirtSpan`) and **upward occluder skirts**
-  (`emitOccluders`, the side-based interior nudge, the four debug styles +
-  `cycleOccluderStyle`) — `emit` no longer computes any edge spans per frame — the
-  height-gradient color (`heightColor`), the level-identity reset, `volatile`
-  snapshot/occluder/down-skirt/profile/crouch/style handoff, and the
+  spans (`emitDownSkirts`, from `DownSkirtSpan`; suppressed at the outermost edge via
+  `isAtOuterEdge`), **upward occluder skirts** (`emitOccluders`, the side-based interior
+  nudge, the four debug styles + `cycleOccluderStyle`), and the **through-walls hole
+  beams** (`emitHoles`, from `HoleSpan`, into the depth-off `FILLED` layer; also
+  suppressed at the outermost edge) — `emit` no longer computes any edge spans per
+  frame — the height-gradient color (`heightColor`, violet→orange ramp, red reserved for
+  holes), the level-identity reset,
+  `volatile` snapshot/occluder/down-skirt/hole/profile/crouch/style handoff, and the
   double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
@@ -258,9 +277,13 @@ through-walls, depth-on `SKIRT` occluded).
   **compute-side occluder-span classification** (`computeOccluders` /
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
   `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
-  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan` — the drop-edge
-  pass the Milestone 5 hole classifier `classifyDrop` shares), and the
-  extraction-thread-only (non-thread-safe) contract.
+  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **Milestone 5
+  hole classification** (`classifyDrop` — pure: BENIGN iff a reached surface lies
+  strictly below the rim under the fall footprint, else HOLE; no world scan, no raw-box
+  checks — reachability is reached-set membership — and `computeHoles` / `holeSubSpans` /
+  `fallFootprint`; subdivided at reached-rect boundaries and published as `HoleSpan`),
+  and the extraction-thread-only
+  (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
 - `WorldOverlayManager.java`: the two-layer setup (depth-off `FILLED` tops +
   depth-on `SKIRT`) and per-layer buffer/GPU handoff, the through-walls debug

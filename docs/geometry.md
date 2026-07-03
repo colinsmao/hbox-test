@@ -171,33 +171,42 @@ classification builds on this in **Milestone 5** (below): the flood still only p
 Milestone 5 does not change reachability; it **reads the flood output** to label the
 **drop edges** of the selection (the `openSpans` edges that are neither equal-height
 merge seams nor wall/ceiling up-skirts). One pure predicate,
-`SurfaceSelection.classifyDrop`, classifies each drop sub-span into a **taxonomy of
-three**, mirroring the pure shape of `occluderSpansForRect`/`wallOccluder` (the caller
-pre-gathers the collision boxes below the fall footprint, so the classifier itself
-touches no world):
+`SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span into a
+**taxonomy of two**. The rule is trivial: **is there a reached surface strictly below
+the edge that overlaps the fall footprint?**
 
-1. **HOLE** — a mob leaving the edge is trapped. It falls onto the **topmost**
-   collision box strictly below the surface top `T` that overlaps the fall footprint
-   (down is free); it is a hole iff that landing is **not in the reached set** — either
-   the *void* (no landing at all before the world floor) or a surface the flood never
-   reached. Escapability is decided against the **whole reached set** (which already
-   encodes roundabout escapes), not a local `reach` probe, so a deep-but-escapable drop
-   is *not* a hole. It is decided by the **topmost** landing, not "any reached surface
-   somewhere below": a mob landing on an unescapable **ledge** that happens to sit above
-   a reached floor is stuck on the ledge — a hole.
-2. **BENIGN** — the topmost landing **is** in the reached set (however deep, including
-   roundabout). Carries the **fall distance** `T − landing.topY`, which Step 5 splits
-   into *tall* (a lighter warning marker) vs *minor* (the ordinary down-skirt).
-3. **CUTOFF** — the edge lies in the radius **grey ring** (`|edgeLine − perpCenter| >=
-   ringStart`, the same ring `publish` derives): the selection is incomplete there, so
-   the span is **never** a hole or warning (raising the radius until the real landing is
-   reached resolves it).
+- **BENIGN** — yes: the mob falls onto reachable ground (a surface the flood already
+  reached for this entity — width, occlusion, reach all accounted for). Fall distance =
+  `T − landing.topY` (to the **topmost** such surface), for Step 5's tall/minor split.
+- **HOLE** — no: void (nothing below at all) or a drop onto unreached ground the mob
+  cannot escape from. Carries fall distance 0.
+
+No world scanning, no raw-box checks, no within-reach concept. Reachability is purely
+**reached-set membership** — the flood already computed it. Step B (pending) will add a
+**ledge check**: when a reached floor exists below, scan the world for standable surfaces
+between the edge and the floor (via `exposeBox`), and reclassify as HOLE if one is found
+(the mob gets trapped on the ledge).
+
+There is **no CUTOFF class**: near the radius the selection is incomplete, but a drop
+there is still classified normally — a genuine deep drop reads HOLE. The **outermost edge**
+of the selection (at `ringEnd`) is suppressed entirely render-side: skirts and hole beams
+there are artifacts of the radius cutoff. Interior border uncertainty is a render concern:
+a hole beam in the grey ring is blended toward grey by the same distance falloff that
+greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
 Consistent with the [representation](#representation-rectdouble-space) rule, this is all
-**rect/double** work: the landing is found by an overlap test on box footprints, the
-"is it reached" test is a coplanar positive-area overlap against the reached
-`StandableRect`s (mirroring `coversAnySeed`), and nothing new is created down in the
-hole — the marker is drawn at the rim (see [`rendering.md`](rendering.md)).
+**rect/double** work: the reached-surface test is a positive-area XZ overlap against the
+flood's `StandableRect`s (mirroring `coversAnySeed`), and nothing new is created down in
+the hole — the marker is drawn at the rim (see [`rendering.md`](rendering.md)).
+
+The candidate drop spans are the compute-side `DownSkirtSpan`s (every genuine drop
+edge). `computeHoles` walks them once per select: for each it builds the **fall
+footprint** — a one-block band just beyond the rim, on the drop side — and checks the
+reached set (no world read). Because **one edge can span reached and unreached ground**,
+it does **not** classify the whole edge at once: `holeSubSpans` subdivides the edge at
+reached-rect boundaries into homogeneous sub-spans, classifies each via `classifyDrop`,
+and publishes the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans
+keep their ordinary down-skirt.
 
 ## Entity profiles (size + headroom)
 

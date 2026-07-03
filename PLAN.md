@@ -52,15 +52,44 @@ compute-side, per-merged-rect edge pass this all belongs in (see Cost and struct
 
 ### Classification of a drop sub-span
 
-- **Hole** — the topmost surface below the fall spot is not in the reached set (or there
-  is no landing at all → void). The mob falls in and cannot climb back. Rendered as a
-  through-walls beam.
-- **Benign** — the topmost surface below (the actual landing) is in the reached set
-  (however deep, including roundabout), split by fall distance `T − landing.topY`:
+- **Benign (a) — reversible step**: a within-reach step off the rim (`fall <= reach`,
+  raw collision), reversible so never a trap *even onto unreached ground* (flat ground /
+  gentle steps, incl. just past the radius).
+- **Benign (b) — reachable below**: otherwise, a **reached** surface below the rim under
+  the fall footprint (the mob falls onto reachable ground — a roundabout escape the flood
+  already found). Split by fall distance `T − landing.topY`:
   - **tall** → a lighter warning marker;
   - **minor** → the down-skirt, nothing special.
-- **Cutoff** — the sub-span sits at the radius boundary where the selection is
-  incomplete (already greyed by the ring); never a hole or warning.
+- **Hole** — neither: no reversible step and nothing reachable below (the *void*, or a
+  drop onto unreached ground). Rendered as a through-walls beam.
+
+> **Design change (Step 3 validation).** Two bugs drove a taxonomy revision:
+> **(1)** a single drop edge can span several landings (part a safe step, part a trap),
+> so the classifier is applied to **homogeneous sub-spans** — `holeSubSpans` subdivides
+> each edge at landing-box / reached-rect boundaries, classifies each piece, and beams
+> only the trap pieces. **(2)** The old **Cutoff** class (suppress any beam at the radius
+> boundary) was dropped: it only caught the outward edge (perpendicular test), leaving
+> sideways corner beams drawn red, and suppressing entirely hid real border drops.
+> Instead border uncertainty is a **render** concern — a hole near the ring is drawn
+> **grey** by the existing distance blend (`vertex`), signalling "raise the radius". The
+> new **within-reach-is-benign** rule is what stops flat/gentle borders from beaming at
+> all, so grey beams appear only for genuinely hole-like border drops.
+>
+> **Design change (bugs 3 + 4: false cliffs, then missing pits — reachability *is* the
+> flood).** Bug 3: landing on the topmost **raw** box gave **false cliffs** for a wide
+> hitbox, which falls *past* narrow / buried / low-headroom tops it can't stand on. A
+> first fix re-derived the topmost **standable** surface by re-running `exposeBox`
+> against a locally-scanned occluder index (`gatherStandableBelow`/`exposeStandable`) —
+> but that **reinvented what the flood already computes** and (bug 4) regressed basic
+> **2-deep pits**. Both are dropped. The insight: *"can the mob get back?" is exactly
+> membership in the flood's reached set*, which already accounts for width/occlusion/
+> reach. `classifyDrop` now takes only the shallow **within-reach step boxes** (raw, for
+> the reversible-step rule (a)) and the **reached set** (for rule (b)); `gatherWithinReach`
+> replaces the deep standable scan. Trade-off: an *unreached ledge above a reached floor*
+> now reads benign (a reached floor is below it) — a niche trap we accept in exchange for
+> correctly detecting ordinary pits and never false-flagging a reachable drop. Rule (a)
+> (a flat same-level continuation is a zero-fall reversible step) is what keeps flat
+> borders from beaming.
 
 ### The hole marker: a through-walls vertical beam
 
@@ -109,20 +138,22 @@ Stage-gating).
 
 ### Step 1 — The classifier (all detection)
 
-Add one pure classifier to `SurfaceSelection`. Given a drop sub-span (edge line,
-`[lo,hi]`, base `T`), the full `List<StandableRect>` reached set, the collision surfaces
-below the fall footprint (pre-gathered by the caller so the classifier stays pure —
-mirroring how `occluderSpansForRect` takes pre-gathered candidate boxes), and the
-ring/cutoff bounds (seed center + radius + `halfW`, how the grey ring is already derived),
-return `CUTOFF`, `HOLE`, or `BENIGN` plus the fall distance. Logic: find the **topmost**
-collision surface strictly below `T` overlapping the fall footprint (the actual landing);
-no landing before the world floor → `HOLE` (void); landing not in the reached set →
-`HOLE` (trap); landing in the reached set → `BENIGN`, fall distance `T − landing.topY`
-(for Step 5). No `reach` cap on depth. Unit tests cover: a deep-but-roundabout-reachable
-drop → BENIGN (assert fall distance); a void/isolated drop → HOLE; a boundary drop →
-CUTOFF; and an **unescapable ledge sitting above a reached floor → HOLE** (the mob lands
-on the ledge and is stuck, so the *topmost* landing decides it, not "any reached surface
-below"). Document the taxonomy in [`docs/geometry.md`](docs/geometry.md).
+Add one pure classifier to `SurfaceSelection`. Given a **homogeneous** drop sub-span
+(edge line, `[lo,hi]`, base `T`), the `reach`, the **within-reach step boxes** below the
+fall footprint (raw collision with top in `[T − reach, T]`, pre-gathered so the
+classifier stays pure — mirroring how `occluderSpansForRect` takes pre-gathered candidate
+boxes), and the full `List<StandableRect>` reached set, return `HOLE` or `BENIGN` plus the
+fall distance. Logic: **(a)** a within-reach step box under the footprint → `BENIGN`
+(reversible, safe even onto unreached ground); else **(b)** a **reached** surface below
+`T` under the footprint → `BENIGN` (roundabout escape), fall distance to the topmost such;
+else → `HOLE` (void or a drop onto unreached ground). Reachability is *reached-set
+membership*, not re-derived. Unit tests cover: a within-reach step onto an unreached
+surface → BENIGN; a same-level continuation → BENIGN (fall 0); a deep-but-roundabout-
+reachable drop → BENIGN (assert fall distance); a void / deep-isolated drop → HOLE; a
+2-deep isolated pit → HOLE (bug-4 regression guard); and an unreached ledge above a
+reached floor → BENIGN (the accepted simplification — see the design-change note). Border
+uncertainty is handled render-side (grey), not by the classifier. Document the taxonomy in
+[`docs/geometry.md`](docs/geometry.md).
 
 - Commit: classifier + tests + `geometry.md` taxonomy. Tests: code only — the classifier
   is pure (the downward world scan is the caller's job in Step 3), so it has zero in-world
@@ -153,26 +184,36 @@ shared pass that holes plug into (Step 3) now exists.
 
 ### Step 3 — Holes: computeHoles + HoleSpan + through-walls beam (first visible)
 
-Extend the Step 2 pass: for each drop edge, do a read-only downward first-hit scan below
-the fall footprint to find the landing (gathered in the same collision sweep as the
-occluder boxes), classify via Step 1, and publish HOLE spans as `List<HoleSpan>` next to
-the down-skirt/occluder spans (carrying the fall distance for Step 5). In `emit`, draw
-the through-walls beam from each hole edge; benign and cutoff edges keep the Step 2
-down-skirt. Cutoff correctness is validated here.
+Extend the Step 2 pass: for each drop edge, do a **shallow** read-only scan below the
+fall footprint for within-reach step boxes (`gatherWithinReach`), classify via Step 1
+(reversible step, else reached surface below, else hole), and publish HOLE spans as
+`List<HoleSpan>` next to the down-skirt/occluder spans (carrying the fall distance for
+Step 5). In `emit`, draw the through-walls beam from each hole edge; benign edges keep the
+Step 2 down-skirt. A single edge that spans several verdicts is **subdivided**
+(`holeSubSpans`) and beamed only over its trap pieces. Border behaviour (grey, not
+suppressed) is validated here.
 
 - Commit: `HoleSpan` + hole classification folded into the unified pass (incl. the
-  downward landing scan) + beam draw. Tests: code — the fused landing gather/classification
-  where pure-testable; in-game — the checklist below.
+  shallow within-reach scan + per-verdict subdivision) + beam draw. Tests: code — the pure
+  classifier (`classifyDrop`) and the subdivision (`holeSubSpans`); in-game — below.
 - In-game checklist (same cross-cutting as Step 2):
-  - [ ] Edge over the void / an isolated pit floor → **beam at the rim**, visible
-    **through an intervening wall**.
+  - [ ] Edge over the void → **beam at the rim**, visible **through an intervening wall**.
+  - [ ] A **basic 2-deep isolated pit** (floor unreached, no way down within reach) →
+    **beam** (bug-4 regression guard).
   - [ ] A deep (`>= 2`) roundabout-reachable drop (a lower floor reached via stairs
     elsewhere) → **no beam** (benign).
-  - [ ] An unescapable ledge sitting above a reached floor → **beam** (the mob lands on
-    the ledge and is stuck, even though a reached floor sits lower).
-  - [ ] A shallow reached trench → **no beam**.
-  - [ ] A selection stopped by the **radius** → grey ring, **no beam** at the cutoff;
-    raising the radius until the real landing is reached removes any transient beam.
+  - [ ] A shallow reached trench / flat ground / a one-block step down → **no beam** (a
+    within-reach step is reversible).
+  - [ ] **Heterogeneous edge** (part over a safe step, part over a pit) → beam over the
+    **pit portion only**, not the whole edge nor none of it (bug 1).
+  - [ ] A selection stopped by the **radius**: a genuine deep drop at the boundary → a
+    **grey** beam (uncertain), *not* suppressed and *not* confident red; flat/gentle
+    ground at the boundary → **no beam**; raising the radius until reachable ground below
+    is reached removes any transient beam (bug 2).
+  - [ ] **Non-point hitbox** (Player / Ravager): walking varied but reachable terrain
+    (steps under walls, dilation-cut ledges, roundabout lower floors) shows **no false
+    cliffs** — beams only over genuine unescapable drops, same as Point (bug 3); and basic
+    pits are still beamed for wide hitboxes too (bug 4).
   - [ ] Point / Player / Ravager all behave; no double-marking with occluder up-skirts.
 
 ### Step 4 — One beam per hole region
@@ -187,7 +228,7 @@ height/width/color.
   - [ ] A long straight cliff → a small number of beams (not one per merged rect edge).
   - [ ] An L-shaped / wrapping hole rim → one beam per hole.
   - [ ] Beam height is a sensible fixed world height (not scene-dependent).
-  - [ ] Regression: Step 3 hole / benign / cutoff split unchanged.
+  - [ ] Regression: Step 3 hole / benign split (incl. grey border beams) unchanged.
 
 ### Step 5 — Warning marker for tall benign drops
 

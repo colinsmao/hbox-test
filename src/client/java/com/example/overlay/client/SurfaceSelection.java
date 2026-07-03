@@ -142,6 +142,11 @@ public final class SurfaceSelection {
 	// hole classification can share this same drop-edge pass. Replaced each select.
 	private List<DownSkirtSpan> downSkirts = List.of();
 
+	// Hole spans for the last select: drop sub-spans with no reached surface below
+	// (void, or unreached ground). Marked by a through-walls beam at the rim.
+	// Replaced wholesale each select.
+	private List<HoleSpan> holes = List.of();
+
 	/**
 	 * Replace the selection with the merged standable surfaces reachable from the
 	 * surfaces of {@code start}, within a spatial window of half-extent
@@ -159,6 +164,7 @@ public final class SurfaceSelection {
 					: selectEager(level, start, radius, profile);
 			occluders = computeOccluders(level, result, profile);
 			downSkirts = computeDownSkirts(result, occluders);
+			holes = computeHoles(level, result, downSkirts, profile);
 			return;
 		}
 
@@ -189,6 +195,7 @@ public final class SurfaceSelection {
 		result = LAZY ? lazyRects : eager;
 		occluders = computeOccluders(level, result, profile);
 		downSkirts = computeDownSkirts(result, occluders);
+		holes = computeHoles(level, result, downSkirts, profile);
 	}
 
 	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
@@ -286,6 +293,7 @@ public final class SurfaceSelection {
 		result = List.of();
 		occluders = List.of();
 		downSkirts = List.of();
+		holes = List.of();
 	}
 
 	/** Immutable snapshot of the reached surfaces (height-tinted at draw time). */
@@ -301,6 +309,11 @@ public final class SurfaceSelection {
 	/** Immutable snapshot of the downward drop-skirt spans for the reached set. */
 	public List<DownSkirtSpan> allDownSkirts() {
 		return downSkirts;
+	}
+
+	/** Immutable snapshot of the hole spans (through-walls beam markers) for the reached set. */
+	public List<HoleSpan> allHoles() {
+		return holes;
 	}
 
 	// BFS over merged rects: an edge exists iff footprints share an edge with
@@ -702,92 +715,43 @@ public final class SurfaceSelection {
 
 	// --- Milestone 5: drop-edge hole classification (pure) ---
 
-	// The three classes a drop sub-span falls into. CUTOFF: the edge sits in the
-	// radius grey ring, where the selection is incomplete — never a hole/warning.
-	// HOLE: a mob leaving the edge is trapped (falls into the void, or onto a
-	// topmost landing that is not in the reached set). BENIGN: it lands on a reached
-	// surface (however deep / roundabout); the fall distance splits minor from tall
-	// in Step 5.
 	enum DropClass {
-		CUTOFF, HOLE, BENIGN
+		HOLE, BENIGN
 	}
 
-	// A drop sub-span's classification plus its fall distance (T - landing top),
-	// meaningful only for BENIGN (0 otherwise).
 	record DropClassification(DropClass kind, double fallDistance) {
 	}
 
 	/**
-	 * Classify one drop sub-span of a surface edge. <b>Pure:</b> the caller
-	 * pre-gathers {@code boxesBelow} (every collision box below the fall footprint,
-	 * down to the world floor), mirroring how {@link #occluderSpansForRect} takes
-	 * pre-gathered candidate boxes — the downward world scan is the caller's job
-	 * (Step 3), so this stays unit-testable with synthetic boxes.
+	 * Classify one drop sub-span. Pure: given the fall footprint and the flood's
+	 * reached set, returns HOLE or BENIGN.
 	 *
-	 * <p>A mob leaving the edge falls onto the <b>topmost</b> collision box strictly
-	 * below the surface top {@code topY} that overlaps {@code fallFootprint} (down is
-	 * free; escapability is decided against the whole reached set, not a local reach
-	 * probe). That topmost landing decides:
-	 * <ul>
-	 * <li>no landing at all (void before the world floor) &rarr; {@link DropClass#HOLE};
-	 * <li>landing not in the reached set &rarr; {@link DropClass#HOLE} (a trap — this is
-	 *     why the <b>topmost</b> landing decides: an unescapable ledge sitting above a
-	 *     reached floor is a hole, since the mob is stuck on the ledge);
-	 * <li>landing in the reached set &rarr; {@link DropClass#BENIGN}, fall distance
-	 *     {@code topY - landing.yMax} (however deep, incl. roundabout escapes the flood
-	 *     already encodes).
-	 * </ul>
-	 * A span whose edge lies in the radius grey ring
-	 * ({@code |edgeLine - perpCenter| >= ringStart}) is {@link DropClass#CUTOFF}
-	 * regardless: the selection is incomplete there, so it is never a hole/warning
-	 * (raising the radius until the real landing is reached resolves it). {@code
-	 * perpCenter} is the seed-center coordinate perpendicular to the edge (Z for an
-	 * X-running edge, else X); {@code ringStart} is the inner edge of the grey band
-	 * ({@code ringEnd - 1}), as {@code publish} derives it.
+	 * <p>The rule: is there a reached surface below {@code topY} that overlaps
+	 * {@code fallFootprint}? If yes &rarr; BENIGN (the mob lands on reachable
+	 * ground; fall distance = topY &minus; landing). If no &rarr; HOLE (void, or
+	 * unreached ground the mob cannot escape from).
+	 *
+	 * <p>Step B will add a ledge check between the edge and the reached floor.
 	 */
 	static DropClassification classifyDrop(Rect fallFootprint, double topY,
-			double edgeLine, double perpCenter, double ringStart,
-			List<WorldBox> boxesBelow, List<StandableRect> reached) {
-		if (Math.abs(edgeLine - perpCenter) >= ringStart - EPS) {
-			return new DropClassification(DropClass.CUTOFF, 0.0);
-		}
-		WorldBox landing = null;
-		for (WorldBox b : boxesBelow) {
-			// Strictly below the surface we are leaving, and under the fall spot.
-			if (b.yMax() >= topY - EPS || !overlapsXZ(fallFootprint, b)) {
+			List<StandableRect> reached) {
+		StandableRect landing = null;
+		for (StandableRect r : reached) {
+			if (r.topY() >= topY - EPS) {
 				continue;
 			}
-			if (landing == null || b.yMax() > landing.yMax()) {
-				landing = b;
+			if (Math.min(r.maxX(), fallFootprint.maxX()) - Math.max(r.minX(), fallFootprint.minX()) <= EPS
+					|| Math.min(r.maxZ(), fallFootprint.maxZ()) - Math.max(r.minZ(), fallFootprint.minZ()) <= EPS) {
+				continue;
+			}
+			if (landing == null || r.topY() > landing.topY()) {
+				landing = r;
 			}
 		}
-		if (landing == null) {
-			return new DropClassification(DropClass.HOLE, 0.0);
-		}
-		double landY = landing.yMax();
-		if (reachedCovers(reached, fallFootprint, landY)) {
-			return new DropClassification(DropClass.BENIGN, topY - landY);
+		if (landing != null) {
+			return new DropClassification(DropClass.BENIGN, topY - landing.topY());
 		}
 		return new DropClassification(DropClass.HOLE, 0.0);
-	}
-
-	// True iff the box footprint overlaps the fall footprint with positive area.
-	private static boolean overlapsXZ(Rect fp, WorldBox b) {
-		return Math.min(fp.maxX(), b.maxX()) - Math.max(fp.minX(), b.minX()) > EPS
-			&& Math.min(fp.maxZ(), b.maxZ()) - Math.max(fp.minZ(), b.minZ()) > EPS;
-	}
-
-	// True iff some reached surface coplanar with height landY covers the fall
-	// footprint with positive area — i.e. the topmost landing is in the reached set.
-	private static boolean reachedCovers(List<StandableRect> reached, Rect fp, double landY) {
-		for (StandableRect r : reached) {
-			if (Math.abs(r.topY() - landY) <= EPS
-					&& Math.min(r.maxX(), fp.maxX()) - Math.max(r.minX(), fp.minX()) > EPS
-					&& Math.min(r.maxZ(), fp.maxZ()) - Math.max(r.minZ(), fp.minZ()) > EPS) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	// Compute the downward drop-skirt spans of the whole reached set, once per
@@ -882,6 +846,139 @@ public final class SurfaceSelection {
 		}
 		return out;
 	}
+
+	// How far beyond the rim (in blocks) the fall footprint probes for a landing.
+	// One block off the cliff edge is where a mob leaving the edge drops.
+	private static final double FALL_PROBE = 1.0;
+
+	// Classify each drop span and return the hole sub-spans (through-walls beam
+	// candidates). For each drop span, builds the fall footprint and checks for a
+	// reached surface below it. No world scan: reachability is the flood's reached
+	// set. Because one edge can span several verdicts (part over reached ground, part
+	// over void), the span is SUBDIVIDED at reached-rect boundaries into homogeneous
+	// sub-spans; each is classified and contiguous HOLE pieces are coalesced. Runs once
+	// per select (not per frame). Border uncertainty is left to the render-side grey
+	// ring (a hole whose rim is in the ring is drawn grey), so this does no ring math.
+	private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
+			List<DownSkirtSpan> drops, EntityProfile profile) {
+		if (drops.isEmpty()) {
+			return List.of();
+		}
+		List<HoleSpan> out = new ArrayList<>();
+		for (DownSkirtSpan sp : drops) {
+			Rect band = fallFootprint(sp);
+			holeSubSpans(sp, band, rects, out);
+		}
+		return out;
+	}
+
+	// Pure: subdivide one drop span into homogeneous sub-spans (at reached-rect
+	// boundaries), classify each via classifyDrop, and append the contiguous HOLE
+	// pieces (coalesced) as HoleSpans. A single edge can span reached and unreached
+	// ground, so classifying the whole edge at once mislabels it. Package-private for
+	// unit tests (synthetic reached rects, no world).
+	static void holeSubSpans(DownSkirtSpan sp, Rect band,
+			List<StandableRect> reached, List<HoleSpan> out) {
+		double topY = sp.baseY();
+		double[] cuts = spanBreakpoints(sp, band, reached);
+		double holeLo = Double.NaN;
+		double holeHi = 0.0;
+		double holeFall = 0.0;
+		for (int i = 0; i + 1 < cuts.length; i++) {
+			double a = cuts[i];
+			double b = cuts[i + 1];
+			if (b - a <= EPS) {
+				continue;
+			}
+			Rect subFp = subBand(sp, band, a, b);
+			DropClassification c = classifyDrop(subFp, topY, reached);
+			if (c.kind() != DropClass.HOLE) {
+				continue;
+			}
+			if (Double.isNaN(holeLo)) {
+				holeLo = a;
+				holeHi = b;
+				holeFall = c.fallDistance();
+			} else if (a <= holeHi + EPS) {
+				holeHi = b;
+				holeFall = Math.max(holeFall, c.fallDistance());
+			} else {
+				out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall));
+				holeLo = a;
+				holeHi = b;
+				holeFall = c.fallDistance();
+			}
+		}
+		if (!Double.isNaN(holeLo)) {
+			out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall));
+		}
+	}
+
+	// Breakpoints along a drop span's varying axis where its classification can
+	// change: the span ends, integer block boundaries, and the varying-axis edges of
+	// every reached rect whose fixed axis overlaps the fall footprint. Splitting here
+	// makes each sub-span homogeneous (uniform "reached below or not"), so classifyDrop
+	// is exact on it. Duplicates collapse to zero-width sub-spans (skipped by caller).
+	private static double[] spanBreakpoints(DownSkirtSpan sp, Rect band,
+			List<StandableRect> rects) {
+		double lo = sp.lo();
+		double hi = sp.hi();
+		List<Double> cuts = new ArrayList<>();
+		cuts.add(lo);
+		cuts.add(hi);
+		for (int k = (int) Math.floor(lo) + 1; k <= (int) Math.ceil(hi) - 1; k++) {
+			addCut(cuts, k, lo, hi);
+		}
+		for (StandableRect r : rects) {
+			if (fixedAxisOverlaps(sp, band, r)) {
+				addCut(cuts, sp.alongX() ? r.minX() : r.minZ(), lo, hi);
+				addCut(cuts, sp.alongX() ? r.maxX() : r.maxZ(), lo, hi);
+			}
+		}
+		double[] arr = new double[cuts.size()];
+		for (int i = 0; i < arr.length; i++) {
+			arr[i] = cuts.get(i);
+		}
+		Arrays.sort(arr);
+		return arr;
+	}
+
+	private static void addCut(List<Double> cuts, double c, double lo, double hi) {
+		if (c > lo + EPS && c < hi - EPS) {
+			cuts.add(c);
+		}
+	}
+
+	// True iff rect r overlaps the fall footprint band on the FIXED axis (Z for an
+	// X-running span, else X) — i.e. r could be the landing under some sub-span.
+	private static boolean fixedAxisOverlaps(DownSkirtSpan sp, Rect band, StandableRect r) {
+		if (sp.alongX()) {
+			return Math.min(r.maxZ(), band.maxZ()) - Math.max(r.minZ(), band.minZ()) > EPS;
+		}
+		return Math.min(r.maxX(), band.maxX()) - Math.max(r.minX(), band.minX()) > EPS;
+	}
+
+	// The fall footprint band clipped to the varying-axis sub-interval [a,b].
+	private static Rect subBand(DownSkirtSpan sp, Rect band, double a, double b) {
+		if (sp.alongX()) {
+			return new Rect(a, band.minZ(), b, band.maxZ());
+		}
+		return new Rect(band.minX(), a, band.maxX(), b);
+	}
+
+	// The fall footprint of a drop span: a FALL_PROBE-deep band just beyond the rim
+	// (on the drop side), along the span's [lo,hi]. maxSide drops toward +axis.
+	static Rect fallFootprint(DownSkirtSpan sp) {
+		if (sp.alongX()) {
+			double zNear = sp.maxSide() ? sp.line() : sp.line() - FALL_PROBE;
+			double zFar = sp.maxSide() ? sp.line() + FALL_PROBE : sp.line();
+			return new Rect(sp.lo(), zNear, sp.hi(), zFar);
+		}
+		double xNear = sp.maxSide() ? sp.line() : sp.line() - FALL_PROBE;
+		double xFar = sp.maxSide() ? sp.line() + FALL_PROBE : sp.line();
+		return new Rect(xNear, sp.lo(), xFar, sp.hi());
+	}
+
 
 	// World-reading wrapper (client thread): for each reached surface, gather the
 	// collision boxes near its dilated edges (and, with headroom, above its interior)
