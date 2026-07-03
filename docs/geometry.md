@@ -171,21 +171,27 @@ classification builds on this in **Milestone 5** (below): the flood still only p
 Milestone 5 does not change reachability; it **reads the flood output** to label the
 **drop edges** of the selection (the `openSpans` edges that are neither equal-height
 merge seams nor wall/ceiling up-skirts). One pure predicate,
-`SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span into a
-**taxonomy of two**. The rule is trivial: **is there a reached surface strictly below
-the edge that overlaps the fall footprint?**
+`SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
+`BENIGN` in two steps:
 
-- **BENIGN** — yes: the mob falls onto reachable ground (a surface the flood already
-  reached for this entity — width, occlusion, reach all accounted for). Fall distance =
-  `T − landing.topY` (to the **topmost** such surface), for Step 5's tall/minor split.
-- **HOLE** — no: void (nothing below at all) or a drop onto unreached ground the mob
-  cannot escape from. Carries fall distance 0.
+1. **Is there a reached surface strictly below the edge, under the fall footprint?** If
+   **no** &rarr; `HOLE` (the void, or unreached ground the mob cannot climb out of). This
+   is the trivial definition of a hole: *not reachable*. Reachability is exactly
+   **reached-set membership** — the flood already computed it for this entity (width,
+   occlusion, reach all accounted for), so nothing is re-derived here.
+2. **If yes** (a reached floor at `landY`), **is there a standable ledge between the edge
+   and that floor?** A ledge is a dilated standable surface with top strictly in
+   `(landY, T)` overlapping the footprint. If one exists &rarr; `HOLE` (the mob lands on
+   the ledge and is trapped above the reachable floor). Otherwise &rarr; `BENIGN`, fall
+   distance `T − landY`.
 
-No world scanning, no raw-box checks, no within-reach concept. Reachability is purely
-**reached-set membership** — the flood already computed it. Step B (pending) will add a
-**ledge check**: when a reached floor exists below, scan the world for standable surfaces
-between the edge and the floor (via `exposeBox`), and reclassify as HOLE if one is found
-(the mob gets trapped on the ledge).
+Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
+world read: `gatherLedges` scans collision boxes in the `(landY, T)` band over the
+footprint's columns and runs each through the **same `exposeBox`** the flood uses (dilate
+by `W/2`, cut by occluders) — so a box the entity cannot actually stand on (too narrow
+after dilation, or occluded) is correctly *not* a ledge, and a wide hitbox is handled the
+same way the flood handles it. This is why it is not a reinvention: the ledge test reuses
+the flood's own standability, it does not re-implement it.
 
 There is **no CUTOFF class**: near the radius the selection is incomplete, but a drop
 there is still classified normally — a genuine deep drop reads HOLE. The **outermost edge**
@@ -194,19 +200,15 @@ there are artifacts of the radius cutoff. Interior border uncertainty is a rende
 a hole beam in the grey ring is blended toward grey by the same distance falloff that
 greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
-Consistent with the [representation](#representation-rectdouble-space) rule, this is all
-**rect/double** work: the reached-surface test is a positive-area XZ overlap against the
-flood's `StandableRect`s (mirroring `coversAnySeed`), and nothing new is created down in
-the hole — the marker is drawn at the rim (see [`rendering.md`](rendering.md)).
-
 The candidate drop spans are the compute-side `DownSkirtSpan`s (every genuine drop
 edge). `computeHoles` walks them once per select: for each it builds the **fall
-footprint** — a one-block band just beyond the rim, on the drop side — and checks the
-reached set (no world read). Because **one edge can span reached and unreached ground**,
-it does **not** classify the whole edge at once: `holeSubSpans` subdivides the edge at
-reached-rect boundaries into homogeneous sub-spans, classifies each via `classifyDrop`,
-and publishes the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans
-keep their ordinary down-skirt.
+footprint** (a one-block band just beyond the rim, on the drop side), gathers ledges, and
+classifies. Because **one edge can span reached and unreached ground**, it does **not**
+classify the whole edge at once: `holeSubSpans` subdivides the edge at reached-rect
+boundaries into homogeneous sub-spans, classifies each via `classifyDrop`, and publishes
+the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
+ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
+(a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
 ## Entity profiles (size + headroom)
 

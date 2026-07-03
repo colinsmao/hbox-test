@@ -227,9 +227,9 @@ through-walls, depth-on `SKIRT` occluded).
   The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
   `holeSubSpans`, published as `HoleSpan`) and `emit` just draws them (`emitHoles`).
   Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
-  an edge and emits a beam only over the unreached sub-intervals. **Step 3 draws one
-  beam per hole edge-span** (a long rim is a picket fence for now); Step 4 coalesces to
-  one beam per hole region and tunes the look.
+  an edge and emits a beam only over the unreached sub-intervals. One beam is drawn per
+  hole edge-span, so a long dangerous rim reads as a row of beams clearly marking every
+  unsafe edge (deliberately not coalesced into one beam per region).
 
 ## `26.1.2` rendering API names (verified against the resolved jars)
 
@@ -278,10 +278,11 @@ through-walls, depth-on `SKIRT` occluded).
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
   `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
   `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **Milestone 5
-  hole classification** (`classifyDrop` — pure: BENIGN iff a reached surface lies
-  strictly below the rim under the fall footprint, else HOLE; no world scan, no raw-box
-  checks — reachability is reached-set membership — and `computeHoles` / `holeSubSpans` /
-  `fallFootprint`; subdivided at reached-rect boundaries and published as `HoleSpan`),
+  hole classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
+  strictly below the rim under the fall footprint, and then HOLE anyway if a standable
+  **ledge** sits between the rim and that floor; reachability is reached-set membership,
+  the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` / `holeSubSpans`
+  / `fallFootprint`; subdivided at reached-rect boundaries and published as `HoleSpan`),
   and the extraction-thread-only
   (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**

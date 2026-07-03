@@ -15,8 +15,7 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–4.5 merged; **Milestone 5 (reachability / hole detection) in
-progress** (plan in [`PLAN.md`](../PLAN.md)). The repo is a client-only Fabric
+Milestones 1–5 merged. The repo is a client-only Fabric
 Gradle project generated from `FabricMC/fabric-example-mod` and trimmed to
 client-only (see **Repository layout** below). `./gradlew build` passes (produces
 `build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
@@ -51,6 +50,17 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   the old buried test exactly. `EntityProfile` now carries `height`. The first unit
   tests in the repo (pure geometry: rect ops, edge classification, headroom predicate)
   land here behind `./gradlew test`.
+- **Milestone 5 — hole detection:** the **drop edges** of the selection are classified
+  into *benign* drops (keep their down-skirt) and **holes** (a mob leaving the edge is
+  trapped), the latter marked by a **through-walls vertical beam** at the rim. A drop is
+  a hole unless a **reached** surface lies below it (reachability = flood membership,
+  never re-derived) *and* no standable **ledge** sits between the rim and that floor
+  (the ledge scan reuses `exposeBox`). Classification is compute-side (`classifyDrop` /
+  `computeHoles` / `holeSubSpans` / `gatherLedges`, published as `HoleSpan`); a single
+  edge is subdivided so only its unsafe portion beams. Height coloring uses a
+  violet→orange ramp (red is reserved for hole beams), and skirts/beams at the very
+  outermost radius edge are suppressed as cutoff artifacts. The geometry/algorithm lives
+  in [`geometry.md`](geometry.md).
 
 ## Repository layout
 
@@ -76,7 +86,9 @@ it.
   │   ├── EntityProfile.java               # entity size/height/reach profiles (Point/Player/Ravager)
   │   ├── StandableRect.java               # world-space standable rectangle
   │   ├── OccluderSpan.java                # upward (wall/ceiling) skirt span (compute-side)
-  │   ├── SurfaceSelection.java            # size-aware surface compute: dilation + headroom + lazy flood
+  │   ├── DownSkirtSpan.java               # downward drop-edge skirt span (compute-side)
+  │   ├── HoleSpan.java                     # hole (unescapable drop) beam span (compute-side)
+  │   ├── SurfaceSelection.java            # size-aware surface compute: dilation + headroom + lazy flood + hole classification
   │   └── widgets/
   │       ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
   │       └── CollisionSurfaceOverlay.java  # standable-surface selection widget + drawing
@@ -131,9 +143,15 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
 4. **Headroom:** with Player/Ravager selected, a floor under a low ceiling (gap
    `< H`) is **not** painted (its lost headroom shows as an upward skirt marking the
    ceiling), while a tall-enough tunnel paints; Point is unchanged from Milestone 4.
-5. No errors on world load/unload or window resize; the selection clears on
+5. **Holes:** an edge over the void or an unreachable pit raises a through-walls red
+   beam at the rim; a drop onto reachable ground (even deep / roundabout via stairs
+   elsewhere) does **not**; an edge over a floor that is only reachable by landing on an
+   intermediate ledge does (the ledge would trap the mob). A long dangerous rim shows a
+   row of beams. Tops are colored violet (low) → orange (high), never red. Skirts and
+   beams at the very outermost radius edge are not drawn.
+6. No errors on world load/unload or window resize; the selection clears on
    leaving/changing the world.
-6. The mod does nothing on a dedicated server.
+7. The mod does nothing on a dedicated server.
 
 ## Manual install into a real launcher
 
@@ -178,3 +196,9 @@ these incremental:
   shipped in 4.5 for A/B'ing the upward-marker look, but no single style was ever
   chosen and the toggle dropped-or-kept. This is purely appearance, so it is
   deferred to a later appearance-focused milestone; see [`rendering.md`](rendering.md).
+- **Fall-damage / tall-drop warning (Milestone 5 extension).** Every benign drop
+  already carries its fall distance (`T − landY` from `classifyDrop`). A drop onto
+  reachable ground that is nonetheless tall enough to hurt (fall-damage threshold, or a
+  configurable height) could get a distinct lighter warning marker — a shorter/dimmer
+  beam or a tinted rim — separate from the red hole beam. Deferred (the current
+  benign/hole split is enough); the fall distance is plumbed and ready.
