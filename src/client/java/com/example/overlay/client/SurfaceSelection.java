@@ -685,6 +685,96 @@ public final class SurfaceSelection {
 		return out;
 	}
 
+	// --- Milestone 5: drop-edge hole classification (pure) ---
+
+	// The three classes a drop sub-span falls into. CUTOFF: the edge sits in the
+	// radius grey ring, where the selection is incomplete — never a hole/warning.
+	// HOLE: a mob leaving the edge is trapped (falls into the void, or onto a
+	// topmost landing that is not in the reached set). BENIGN: it lands on a reached
+	// surface (however deep / roundabout); the fall distance splits minor from tall
+	// in Step 5.
+	enum DropClass {
+		CUTOFF, HOLE, BENIGN
+	}
+
+	// A drop sub-span's classification plus its fall distance (T - landing top),
+	// meaningful only for BENIGN (0 otherwise).
+	record DropClassification(DropClass kind, double fallDistance) {
+	}
+
+	/**
+	 * Classify one drop sub-span of a surface edge. <b>Pure:</b> the caller
+	 * pre-gathers {@code boxesBelow} (every collision box below the fall footprint,
+	 * down to the world floor), mirroring how {@link #occluderSpansForRect} takes
+	 * pre-gathered candidate boxes — the downward world scan is the caller's job
+	 * (Step 3), so this stays unit-testable with synthetic boxes.
+	 *
+	 * <p>A mob leaving the edge falls onto the <b>topmost</b> collision box strictly
+	 * below the surface top {@code topY} that overlaps {@code fallFootprint} (down is
+	 * free; escapability is decided against the whole reached set, not a local reach
+	 * probe). That topmost landing decides:
+	 * <ul>
+	 * <li>no landing at all (void before the world floor) &rarr; {@link DropClass#HOLE};
+	 * <li>landing not in the reached set &rarr; {@link DropClass#HOLE} (a trap — this is
+	 *     why the <b>topmost</b> landing decides: an unescapable ledge sitting above a
+	 *     reached floor is a hole, since the mob is stuck on the ledge);
+	 * <li>landing in the reached set &rarr; {@link DropClass#BENIGN}, fall distance
+	 *     {@code topY - landing.yMax} (however deep, incl. roundabout escapes the flood
+	 *     already encodes).
+	 * </ul>
+	 * A span whose edge lies in the radius grey ring
+	 * ({@code |edgeLine - perpCenter| >= ringStart}) is {@link DropClass#CUTOFF}
+	 * regardless: the selection is incomplete there, so it is never a hole/warning
+	 * (raising the radius until the real landing is reached resolves it). {@code
+	 * perpCenter} is the seed-center coordinate perpendicular to the edge (Z for an
+	 * X-running edge, else X); {@code ringStart} is the inner edge of the grey band
+	 * ({@code ringEnd - 1}), as {@code publish} derives it.
+	 */
+	static DropClassification classifyDrop(Rect fallFootprint, double topY,
+			double edgeLine, double perpCenter, double ringStart,
+			List<WorldBox> boxesBelow, List<StandableRect> reached) {
+		if (Math.abs(edgeLine - perpCenter) >= ringStart - EPS) {
+			return new DropClassification(DropClass.CUTOFF, 0.0);
+		}
+		WorldBox landing = null;
+		for (WorldBox b : boxesBelow) {
+			// Strictly below the surface we are leaving, and under the fall spot.
+			if (b.yMax() >= topY - EPS || !overlapsXZ(fallFootprint, b)) {
+				continue;
+			}
+			if (landing == null || b.yMax() > landing.yMax()) {
+				landing = b;
+			}
+		}
+		if (landing == null) {
+			return new DropClassification(DropClass.HOLE, 0.0);
+		}
+		double landY = landing.yMax();
+		if (reachedCovers(reached, fallFootprint, landY)) {
+			return new DropClassification(DropClass.BENIGN, topY - landY);
+		}
+		return new DropClassification(DropClass.HOLE, 0.0);
+	}
+
+	// True iff the box footprint overlaps the fall footprint with positive area.
+	private static boolean overlapsXZ(Rect fp, WorldBox b) {
+		return Math.min(fp.maxX(), b.maxX()) - Math.max(fp.minX(), b.minX()) > EPS
+			&& Math.min(fp.maxZ(), b.maxZ()) - Math.max(fp.minZ(), b.minZ()) > EPS;
+	}
+
+	// True iff some reached surface coplanar with height landY covers the fall
+	// footprint with positive area — i.e. the topmost landing is in the reached set.
+	private static boolean reachedCovers(List<StandableRect> reached, Rect fp, double landY) {
+		for (StandableRect r : reached) {
+			if (Math.abs(r.topY() - landY) <= EPS
+					&& Math.min(r.maxX(), fp.maxX()) - Math.max(r.minX(), fp.minX()) > EPS
+					&& Math.min(r.maxZ(), fp.maxZ()) - Math.max(r.minZ(), fp.minZ()) > EPS) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// World-reading wrapper (client thread): for each reached surface, gather the
 	// collision boxes near its dilated edges (and, with headroom, above its interior)
 	// and classify the upward (occluder) skirt spans via the pure

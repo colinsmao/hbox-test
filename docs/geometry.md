@@ -163,9 +163,41 @@ trench is reachable and its floor *is* painted (not a hole); to see the width ru
 need a gap that is **deep (`>= 2`) or over the void**. **Entity-height headroom** is
 now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
 so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
-classification is still deferred to a later milestone — this stage paints *coverage*,
-framed as "a `g > W` gap leaves a hole in the standable coverage", not "the entity
-falls in".
+classification builds on this in **Milestone 5** (below): the flood still only paints
+*coverage*, and a separate predicate reads that coverage to label each drop edge.
+
+## Hole classification (Milestone 5)
+
+Milestone 5 does not change reachability; it **reads the flood output** to label the
+**drop edges** of the selection (the `openSpans` edges that are neither equal-height
+merge seams nor wall/ceiling up-skirts). One pure predicate,
+`SurfaceSelection.classifyDrop`, classifies each drop sub-span into a **taxonomy of
+three**, mirroring the pure shape of `occluderSpansForRect`/`wallOccluder` (the caller
+pre-gathers the collision boxes below the fall footprint, so the classifier itself
+touches no world):
+
+1. **HOLE** — a mob leaving the edge is trapped. It falls onto the **topmost**
+   collision box strictly below the surface top `T` that overlaps the fall footprint
+   (down is free); it is a hole iff that landing is **not in the reached set** — either
+   the *void* (no landing at all before the world floor) or a surface the flood never
+   reached. Escapability is decided against the **whole reached set** (which already
+   encodes roundabout escapes), not a local `reach` probe, so a deep-but-escapable drop
+   is *not* a hole. It is decided by the **topmost** landing, not "any reached surface
+   somewhere below": a mob landing on an unescapable **ledge** that happens to sit above
+   a reached floor is stuck on the ledge — a hole.
+2. **BENIGN** — the topmost landing **is** in the reached set (however deep, including
+   roundabout). Carries the **fall distance** `T − landing.topY`, which Step 5 splits
+   into *tall* (a lighter warning marker) vs *minor* (the ordinary down-skirt).
+3. **CUTOFF** — the edge lies in the radius **grey ring** (`|edgeLine − perpCenter| >=
+   ringStart`, the same ring `publish` derives): the selection is incomplete there, so
+   the span is **never** a hole or warning (raising the radius until the real landing is
+   reached resolves it).
+
+Consistent with the [representation](#representation-rectdouble-space) rule, this is all
+**rect/double** work: the landing is found by an overlap test on box footprints, the
+"is it reached" test is a coplanar positive-area overlap against the reached
+`StandableRect`s (mirroring `coversAnySeed`), and nothing new is created down in the
+hole — the marker is drawn at the rim (see [`rendering.md`](rendering.md)).
 
 ## Entity profiles (size + headroom)
 
