@@ -1,10 +1,10 @@
 package com.example.overlay.client.widgets;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
+import com.example.overlay.client.DownSkirtSpan;
 import com.example.overlay.client.EntityProfile;
+import com.example.overlay.client.HoleSpan;
 import com.example.overlay.client.OccluderSpan;
 import com.example.overlay.client.OverlayManager;
 import com.example.overlay.client.StandableRect;
@@ -72,9 +72,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final float BORDER_ALPHA = 1.0f;
 	private static final float BORDER_THICKNESS = 0.045f;
 
-	// Height coloring: map each surface's topY across the selection's height range
-	// to a hue ramp from blue (lowest) to red (highest) so elevation/drops read.
-	private static final float HUE_LOW = 0.66f;
+	// Height coloring: hue ramp from violet (lowest) through blue, green, yellow to
+	// orange (highest). Red is reserved for hole beams and never reached by this ramp.
+	private static final float HUE_LOW = 0.75f;   // violet (lowest surfaces)
+	private static final float HUE_HIGH = 0.08f;  // orange (highest surfaces)
 	private static final float SATURATION = 0.9f;
 	private static final float VALUE = 1.0f;
 	// Height range below which the selection is treated as flat (single color).
@@ -93,10 +94,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// z-fight. Kept tiny so the gap from the top edge stays invisible and skirts
 	// don't visibly overlap neighbours.
 	private static final double SKIRT_OFFSET = 0.002;
-	// Edge-coincidence tolerance for the skirt-diff (which edge sub-spans abut an
-	// equal-height neighbour). Merged rects share exact slab-boundary coords, so a
-	// small epsilon is ample.
-	private static final double SKIRT_EPS = 1.0e-6;
 
 	// Upward (occluder) skirts: drawn where a surface edge borders a wall/ceiling
 	// (the compute-side OccluderSpans), solid at the surface top and fading to
@@ -114,6 +111,18 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final double OCC_TINY_HEIGHT = 0.15;
 	private static final double OCC_HALF_HEIGHT = 0.5;
 	private static final double OCC_BOLD_HEIGHT = 0.1;
+
+	// Hole beam: a through-walls vertical marker rising from the cliff-edge top of a
+	// hole span (drawn in the depth-off FILLED layer so it reads through terrain).
+	// Solid-ish red at the base, fading out toward a fixed world height so it doesn't
+	// read as a hard wall. Per-edge for now (Step 3); Step 4 coalesces to one beam per
+	// hole region and tunes this look.
+	private static final float BEAM_HEIGHT = 4.0f;
+	private static final float BEAM_R = 0.95f;
+	private static final float BEAM_G = 0.15f;
+	private static final float BEAM_B = 0.1f;
+	private static final float BEAM_ALPHA_BASE = 0.85f;
+	private static final float BEAM_ALPHA_TOP = 0.05f;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
@@ -162,6 +171,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Upward (occluder) skirt spans, published with the snapshot (compute-side, since
 	// they read collision boxes). Read per-frame in emit. See SurfaceSelection.
 	private volatile List<OccluderSpan> occluderSnapshot = List.of();
+	// Downward drop-skirt spans, published with the snapshot (compute-side, once per
+	// select — was a per-frame openSpans scan). Read per-frame in emit. See
+	// SurfaceSelection.computeDownSkirts.
+	private volatile List<DownSkirtSpan> downSkirtSnapshot = List.of();
+	// Hole spans (through-walls beam markers), published with the snapshot
+	// (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
+	// See SurfaceSelection.computeHoles.
+	private volatile List<HoleSpan> holeSnapshot = List.of();
 	// Debug A/B style for the occluder markers (tiny / half-block / full / bold-line),
 	// incremented by a standalone keybind (cycleOccluderStyle, client thread), read in
 	// emit (render thread). A render-thread-only choice, so it does not touch the
@@ -200,6 +217,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			lastLevel = level;
 			snapshot = List.of();
 			occluderSnapshot = List.of();
+			downSkirtSnapshot = List.of();
+			holeSnapshot = List.of();
 		}
 
 		holdingStick = player != null && player.getMainHandItem().is(Items.STICK);
@@ -212,6 +231,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private void publish() {
 		snapshot = cache.allRects();
 		occluderSnapshot = cache.allOccluders();
+		downSkirtSnapshot = cache.allDownSkirts();
+		holeSnapshot = cache.allHoles();
 		// The cutoff ring sits one block inside the window's outer painted extent:
 		// the far edge of the outermost column (seed ± radius), grown by the
 		// entity half-width, measured (Chebyshev) from the seed block center.
@@ -336,8 +357,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 		float skirtDepth = (float) (profile.reach() + SKIRT_MARGIN);
 
-		float o = (float) SKIRT_OFFSET;
-
 		for (StandableRect rect : rects) {
 			// Tops/borders draw at the TRUE rect bounds, so adjacent surfaces tile
 			// exactly instead of overlapping (overlapping translucent quads
@@ -375,42 +394,109 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 				quad(fillBuffer, positionMatrix, maxX - bx, maxX, minZ, maxZ, y, r, g, b, BORDER_ALPHA);
 			}
 
-			// Vertical (square) skirts into the depth-tested layer, pushed out by a
-			// tiny SKIRT_OFFSET so they clear the coplanar terrain side face without
-			// z-fighting. Skirt-diff: each edge is skirted only over the sub-spans
-			// NOT shared with an equal-height neighbour — the greedy merge splits a
-			// holed/L-shaped level into several rects, and a skirt on such an internal
-			// (partly-shared) edge reads as a false interior wall (depth can't hide it
-			// where it overhangs air near a hole). True drop/boundary edges keep their
-			// skirts; the window-boundary edge does too (grey ring signals the cutoff).
-			float sMinX = minX - o;
-			float sMinZ = minZ - o;
-			float sMaxX = maxX + o;
-			float sMaxZ = maxZ + o;
-			float sr = r * SKIRT_SHADE;
-			float sg = g * SKIRT_SHADE;
-			float sb = b * SKIRT_SHADE;
-			float yBot = y - skirtDepth;
-			// Downward drop skirts: each edge's open span MINUS the wall/ceiling
-			// sub-spans (occluder spans), which get an upward skirt instead, so a
-			// wall edge isn't double-skirted.
-			for (float[] sp : downSpans(rects, rect, EDGE_MIN_Z)) {
-				fadedSkirt(skirtBuffer, positionMatrix, sp[0] - o, sMinZ, sp[1] + o, sMinZ, y, yBot, sr, sg, sb);
-			}
-			for (float[] sp : downSpans(rects, rect, EDGE_MAX_Z)) {
-				fadedSkirt(skirtBuffer, positionMatrix, sp[0] - o, sMaxZ, sp[1] + o, sMaxZ, y, yBot, sr, sg, sb);
-			}
-			for (float[] sp : downSpans(rects, rect, EDGE_MIN_X)) {
-				fadedSkirt(skirtBuffer, positionMatrix, sMinX, sp[0] - o, sMinX, sp[1] + o, y, yBot, sr, sg, sb);
-			}
-			for (float[] sp : downSpans(rects, rect, EDGE_MAX_X)) {
-				fadedSkirt(skirtBuffer, positionMatrix, sMaxX, sp[0] - o, sMaxX, sp[1] + o, y, yBot, sr, sg, sb);
-			}
 		}
+
+		// Downward drop skirts: now published compute-side (openSpans minus the
+		// wall/ceiling occluder sub-spans, so a wall edge is not double-skirted),
+		// drawn once per span into the depth-tested layer, pushed out by a tiny
+		// SKIRT_OFFSET so they clear the coplanar terrain face without z-fighting.
+		// Each span carries its edge line, [lo,hi], side, and base height; the height
+		// color, the fade, and the depth are derived here the same as before.
+		emitDownSkirts(skirtBuffer, positionMatrix, minTopY, maxTopY, skirtDepth);
 
 		// Upward (occluder) skirts: drawn once per published span, into the same
 		// depth-tested layer, in the active debug style.
 		emitOccluders(skirtBuffer, positionMatrix, minTopY, maxTopY, skirtDepth);
+
+		// Hole beams: through-walls markers at each hole rim, into the depth-off
+		// FILLED layer so they read even behind terrain.
+		emitHoles(fillBuffer, positionMatrix);
+	}
+
+	// Draw a through-walls vertical beam rising from each hole span's rim (baseY),
+	// clamped to a fixed world height, solid-ish at the base and fading out at the
+	// top. Into the depth-off FILLED buffer so it is visible behind terrain.
+	private void emitHoles(BufferBuilder fillBuffer, Matrix4fc positionMatrix) {
+		List<HoleSpan> spans = holeSnapshot;
+		if (spans.isEmpty()) {
+			return;
+		}
+		for (HoleSpan h : spans) {
+			if (isAtOuterEdge(h.alongX(), h.maxSide(), h.line(), h.lo(), h.hi())) {
+				continue;
+			}
+			float base = (float) h.baseY();
+			float top = base + BEAM_HEIGHT;
+			float xa;
+			float za;
+			float xb;
+			float zb;
+			if (h.alongX()) {
+				xa = (float) h.lo();
+				xb = (float) h.hi();
+				za = (float) h.line();
+				zb = (float) h.line();
+			} else {
+				za = (float) h.lo();
+				zb = (float) h.hi();
+				xa = (float) h.line();
+				xb = (float) h.line();
+			}
+			vQuad(fillBuffer, positionMatrix, xa, za, xb, zb, top, base,
+				BEAM_R, BEAM_G, BEAM_B, BEAM_ALPHA_TOP, BEAM_ALPHA_BASE);
+		}
+	}
+
+	// True if a span sits at the very outermost edge of the selection (at or past
+	// ringEnd on the Chebyshev metric). Skirts and holes there are suppressed: they
+	// are artifacts of the radius cutoff, not real geometry.
+	private boolean isAtOuterEdge(boolean alongX, boolean maxSide, double line, double lo, double hi) {
+		double perpDist = alongX
+			? Math.abs(line - ringCenterZ)
+			: Math.abs(line - ringCenterX);
+		if (perpDist >= ringEnd - FLAT_EPS) {
+			return true;
+		}
+		double varyLo = alongX
+			? Math.abs(lo - ringCenterX)
+			: Math.abs(lo - ringCenterZ);
+		double varyHi = alongX
+			? Math.abs(hi - ringCenterX)
+			: Math.abs(hi - ringCenterZ);
+		return Math.min(varyLo, varyHi) >= ringEnd - FLAT_EPS;
+	}
+
+	// Draw every published downward drop-skirt span: solid over its top half, fading
+	// to transparent over the bottom half (so a deep drop doesn't read as a hard
+	// floating wall), height-colored and shaded like the surface it hangs from.
+	private void emitDownSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
+			double minTopY, double maxTopY, float skirtDepth) {
+		List<DownSkirtSpan> spans = downSkirtSnapshot;
+		if (spans.isEmpty()) {
+			return;
+		}
+		float o = (float) SKIRT_OFFSET;
+		for (DownSkirtSpan sp : spans) {
+			if (isAtOuterEdge(sp.alongX(), sp.maxSide(), sp.line(), sp.lo(), sp.hi())) {
+				continue;
+			}
+			float[] rgb = heightColor(sp.baseY(), minTopY, maxTopY);
+			float sr = rgb[0] * SKIRT_SHADE;
+			float sg = rgb[1] * SKIRT_SHADE;
+			float sb = rgb[2] * SKIRT_SHADE;
+			float yTop = (float) sp.baseY() + (float) Y_OFFSET;
+			float yBot = yTop - skirtDepth;
+			float push = sp.maxSide() ? o : -o;
+			if (sp.alongX()) {
+				float z = (float) sp.line() + push;
+				fadedSkirt(skirtBuffer, positionMatrix,
+					(float) sp.lo() - o, z, (float) sp.hi() + o, z, yTop, yBot, sr, sg, sb);
+			} else {
+				float x = (float) sp.line() + push;
+				fadedSkirt(skirtBuffer, positionMatrix,
+					x, (float) sp.lo() - o, x, (float) sp.hi() + o, yTop, yBot, sr, sg, sb);
+			}
+		}
 	}
 
 	// Draw every published upward (occluder) skirt span in the active debug style.
@@ -475,129 +561,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 					r, g, b, 0.0f, UP_SKIRT_ALPHA);
 			}
 		}
-	}
-
-	// The downward-skirt sub-spans of one rect edge: openSpans (equal-height
-	// neighbour suppressed) MINUS the upward (occluder) sub-spans on that edge, so a
-	// wall/ceiling edge gets an upward skirt (emitOccluders) instead of a downward one.
-	private List<float[]> downSpans(List<StandableRect> rects, StandableRect r, int edge) {
-		List<float[]> open = openSpans(rects, r, edge);
-		List<double[]> up = upIntervalsOnEdge(r, edge);
-		if (up.isEmpty()) {
-			return open;
-		}
-		List<float[]> out = new ArrayList<>();
-		for (float[] sp : open) {
-			List<double[]> covered = new ArrayList<>(up);
-			out.addAll(subtractSpans(sp[0], sp[1], covered));
-		}
-		return out;
-	}
-
-	// The occluder (upward) sub-spans lying on one rect edge, as [lo,hi] intervals on
-	// the edge's varying axis (X for the Z edges, Z for the X edges), clipped to the
-	// edge. Matches the published spans by orientation, side, edge line, and base
-	// height (the surface top).
-	private List<double[]> upIntervalsOnEdge(StandableRect r, int edge) {
-		boolean alongX = edge < EDGE_MIN_X;
-		boolean positiveSide = edge == EDGE_MAX_Z || edge == EDGE_MAX_X;
-		double line = switch (edge) {
-			case EDGE_MIN_Z -> r.minZ();
-			case EDGE_MAX_Z -> r.maxZ();
-			case EDGE_MIN_X -> r.minX();
-			default -> r.maxX();
-		};
-		double rangeLo = alongX ? r.minX() : r.minZ();
-		double rangeHi = alongX ? r.maxX() : r.maxZ();
-		List<double[]> out = new ArrayList<>();
-		for (OccluderSpan span : occluderSnapshot) {
-			if (span.alongX() != alongX || span.positiveSide() != positiveSide) {
-				continue;
-			}
-			if (Math.abs(span.line() - line) > SKIRT_EPS || Math.abs(span.baseY() - r.topY()) > SKIRT_EPS) {
-				continue;
-			}
-			double lo = Math.max(span.lo(), rangeLo);
-			double hi = Math.min(span.hi(), rangeHi);
-			if (hi - lo > SKIRT_EPS) {
-				out.add(new double[] {lo, hi});
-			}
-		}
-		return out;
-	}
-
-	// Edge selectors for openSpans: the four sides of a rect.
-	private static final int EDGE_MIN_Z = 0;
-	private static final int EDGE_MAX_Z = 1;
-	private static final int EDGE_MIN_X = 2;
-	private static final int EDGE_MAX_X = 3;
-
-	// The sub-spans of one rect edge that should drop a skirt: the edge's full
-	// extent minus the parts covered by an equal-height neighbour abutting across
-	// it (an internal edge of a continuous level the greedy merge happened to split
-	// — not a real drop). Returns [lo,hi] pairs along the edge's varying axis (X for
-	// the Z edges, Z for the X edges) in true world coords. O(n) over the reached
-	// set per edge; n is the merged-rect count, so cheap enough per frame, and the
-	// same diff feeds the future hole/surface overlay.
-	private static List<float[]> openSpans(List<StandableRect> rects, StandableRect r, int edge) {
-		double lo = edge < EDGE_MIN_X ? r.minX() : r.minZ();
-		double hi = edge < EDGE_MIN_X ? r.maxX() : r.maxZ();
-		List<double[]> covered = new ArrayList<>();
-		for (StandableRect nb : rects) {
-			if (nb == r || Math.abs(nb.topY() - r.topY()) > SKIRT_EPS) {
-				continue;
-			}
-			boolean abuts = false;
-			double clo = 0.0;
-			double chi = 0.0;
-			switch (edge) {
-				case EDGE_MIN_Z -> {
-					abuts = Math.abs(nb.maxZ() - r.minZ()) < SKIRT_EPS;
-					clo = Math.max(nb.minX(), r.minX());
-					chi = Math.min(nb.maxX(), r.maxX());
-				}
-				case EDGE_MAX_Z -> {
-					abuts = Math.abs(nb.minZ() - r.maxZ()) < SKIRT_EPS;
-					clo = Math.max(nb.minX(), r.minX());
-					chi = Math.min(nb.maxX(), r.maxX());
-				}
-				case EDGE_MIN_X -> {
-					abuts = Math.abs(nb.maxX() - r.minX()) < SKIRT_EPS;
-					clo = Math.max(nb.minZ(), r.minZ());
-					chi = Math.min(nb.maxZ(), r.maxZ());
-				}
-				default -> {
-					abuts = Math.abs(nb.minX() - r.maxX()) < SKIRT_EPS;
-					clo = Math.max(nb.minZ(), r.minZ());
-					chi = Math.min(nb.maxZ(), r.maxZ());
-				}
-			}
-			if (abuts && chi - clo > SKIRT_EPS) {
-				covered.add(new double[] {clo, chi});
-			}
-		}
-		return subtractSpans(lo, hi, covered);
-	}
-
-	// [lo,hi] minus the union of the covered intervals, as the remaining open
-	// sub-spans (sweep left to right over the sorted intervals).
-	private static List<float[]> subtractSpans(double lo, double hi, List<double[]> covered) {
-		covered.sort(Comparator.comparingDouble(c -> c[0]));
-		List<float[]> out = new ArrayList<>();
-		double cur = lo;
-		for (double[] c : covered) {
-			if (c[0] > cur + SKIRT_EPS) {
-				out.add(new float[] {(float) cur, (float) Math.min(c[0], hi)});
-			}
-			cur = Math.max(cur, c[1]);
-			if (cur >= hi - SKIRT_EPS) {
-				break;
-			}
-		}
-		if (hi - cur > SKIRT_EPS) {
-			out.add(new float[] {(float) cur, (float) hi});
-		}
-		return out;
 	}
 
 	// One flat axis-aligned quad over [x0,x1] x [z0,z1] at height y, emitted with
@@ -699,12 +662,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		vertex(buffer, matrix, xa, yBot, za, r, g, b, aBot);
 	}
 
-	// Map a surface height to RGB: a hue ramp from blue (lowest) to red (highest)
-	// across the selection's [minTopY, maxTopY]; a flat selection -> single color.
+	// Map a surface height to RGB: a hue ramp from violet (lowest) to orange
+	// (highest) across the selection's [minTopY, maxTopY]; never reaches red.
 	private static float[] heightColor(double topY, double minTopY, double maxTopY) {
 		double range = maxTopY - minTopY;
 		float t = range < FLAT_EPS ? 0.5f : (float) ((topY - minTopY) / range);
-		float hue = HUE_LOW * (1.0f - t);
+		float hue = HUE_LOW + (HUE_HIGH - HUE_LOW) * t;
 		return hsvToRgb(hue, SATURATION, VALUE);
 	}
 

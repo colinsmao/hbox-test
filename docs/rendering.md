@@ -110,7 +110,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   selects the entity the flood/dilation/headroom use. Three ship, cycled in order
   **Point** (`width 0`, `height 0`, default — reproduces the zero-width point-walker)
   → **Player** (`0.6`, `1.8`) → **Ravager** (`1.95`, `2.2`); `reach` (default `1.0`)
-  is the single symmetric step threshold. **No keybind for the cycle:** it rides the
+  is the single step threshold. **No keybind for the cycle:** it rides the
   use-key dispatch — **sneak + right-click at nothing** clears *and* advances the
   profile, then pings the HUD with the new name. The `profile` field is `volatile`
   (read in `emit`); `width` drives dilation and `height` drives headroom (see
@@ -157,15 +157,21 @@ through-walls, depth-on `SKIRT` occluded).
   nudged out by a tiny `SKIRT_OFFSET` (0.002, square) to dodge z-fighting the coplanar
   terrain face (`Y_OFFSET` is likewise 0.002). *A trapezoidal/dilated skirt was tried
   and rejected — splaying clipped the block's upper edge and re-introduced overlap.*
-- **Skirt-diff (`openSpans` / `subtractSpans`).** Any rectangle partition of a holed /
-  L-shaped level has *internal* edges between equal-height pieces; a skirt there is a
-  **false interior wall** (and depth-testing can't hide it where it overhangs air near
-  a hole). So each edge is skirted only over the sub-spans **not** covered by an
-  equal-height neighbour abutting across it (a per-edge 1-D interval subtraction,
-  `O(n)` per edge). Partial sharing is handled (a big rect's edge shared with a sliver
-  over only part of its length skirts just the unshared remainder); true drops / hole
-  outlines / unshared remainders keep their skirts. Reusable for the future
-  hole/surface overlay.
+- **Skirt-diff, computed compute-side (`computeDownSkirts` / `DownSkirtSpan`).** Any
+  rectangle partition of a holed / L-shaped level has *internal* edges between
+  equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
+  can't hide it where it overhangs air near a hole). So each edge is skirted only over
+  the sub-spans **not** covered by an equal-height neighbour abutting across it (a
+  per-edge 1-D interval subtraction), **and** minus the wall/ceiling occluder sub-spans
+  on that edge (they get an upward skirt instead). Partial sharing is handled (a big
+  rect's edge shared with a sliver over only part of its length skirts just the unshared
+  remainder); true drops / hole outlines / unshared remainders keep their skirts. This
+  used to run **render-side every frame** (`openSpans`, an `O(n²)` scan over the merged
+  rects per frame — a real hitch on large/bumpy selections); as of **Milestone 5 Step 2**
+  it is computed **compute-side once per select** (`SurfaceSelection.computeDownSkirts`)
+  and published as `DownSkirtSpan`s (edge orientation, side, line, `[lo,hi]`, base `T`),
+  which `emit` just draws. This is the shared drop-edge pass the hole classifier plugs
+  into (a drop span is a hole candidate).
 - **Upward (occluder) skirts — wall-vs-drop classification (Milestone 4.5).** A
   surface edge bordering a **wall** (a box rising above the surface) or a **ceiling**
   (an overhang within the entity's headroom) is *not* a drop, so a downward skirt
@@ -174,11 +180,12 @@ through-walls, depth-on `SKIRT` occluded).
   marker top (every height fades out at the top). Because the wall/drop split needs
   collision-box data the render thread may not query, the classification is done
   **compute-side** (`SurfaceSelection.computeOccluders`, once per stick action) and
-  published as `OccluderSpan`s in the snapshot. The minimal snapshot shape is kept:
-  the render-side `openSpans` still produces the *downward* skirts, then `emit`
-  **subtracts** the occluder sub-spans on each edge (`downSpans` / `upIntervalsOnEdge`)
-  so an edge is never double-skirted, and draws the published occluder spans as upward
-  skirts (`emitOccluders`). Each span carries its orientation, **side** (so the
+  published as `OccluderSpan`s in the snapshot. As of **Milestone 5 Step 2** the
+  *downward* skirts are computed compute-side too (`computeDownSkirts`, above) with the
+  occluder sub-spans already subtracted, so an edge is never double-skirted; `emit`
+  simply draws the published down spans (`emitDownSkirts`) and the published occluder
+  spans as upward skirts (`emitOccluders`). Each span carries its orientation, **side**
+  (so the
   skirt is nudged toward the surface interior to dodge z-fighting the wall face, and
   opposite-side edges at one coordinate aren't merged), the dilated edge line, the
   `[lo,hi]` interval, the base height `T`, and the occluder top. The marker sits at
@@ -192,7 +199,10 @@ through-walls, depth-on `SKIRT` occluded).
   scroll/use handlers) increments a `volatile` style index (tiny / half-block / full /
   bold-line, wrapping). It is a pure render-thread choice, so it does **not** touch the
   published spans or re-flood. The `full` style clamps to `reach + SKIRT_MARGIN` so a
-  tall wall isn't a giant curtain.
+  tall wall isn't a giant curtain. **Deferred:** no single baseline style was ever
+  chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
+  later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
+  toggle and the four styles stay as-is until then.
 - **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last block
   before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius cutoff
   reads differently from a true boundary (a selection stopped by a real drop ends
@@ -204,6 +214,22 @@ through-walls, depth-on `SKIRT` occluded).
   merged rect doesn't smear the ramp across its length — the interior stays one
   fully-colored quad, only the ≤1-block outer strips fade. Window-boundary edges keep
   their skirts; the grey alone signals "increase the radius / re-center".
+- **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
+  leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **through-walls
+  vertical beam** from the cliff-edge top `T`, so it reads even when the rim is behind
+  terrain: it is drawn in the depth-off `FILLED` layer (the same route as the
+  crouch-gated tops), rising a fixed world height (`BEAM_HEIGHT`), solid-ish at the
+  base and fading out toward the top, in a distinct red. Benign drops keep their
+  ordinary down-skirt and get **no** beam. A hole beam is drawn through the shared
+  `vertex` choke point, so a beam in the **grey ring** is blended toward grey — signalling
+  "raise the radius". Spans at the **very outermost edge** (`>= ringEnd`) are suppressed
+  entirely (`isAtOuterEdge`) — they are radius-cutoff artifacts, not real geometry.
+  The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
+  `holeSubSpans`, published as `HoleSpan`) and `emit` just draws them (`emitHoles`).
+  Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
+  an edge and emits a beam only over the unreached sub-intervals. One beam is drawn per
+  hole edge-span, so a long dangerous rim reads as a row of beams clearly marking every
+  unsafe edge (deliberately not coalesced into one beam per region).
 
 ## `26.1.2` rendering API names (verified against the resolved jars)
 
@@ -222,12 +248,16 @@ through-walls, depth-on `SKIRT` occluded).
   publish-on-action snapshot, the crouch-gated through-walls top + borders, the
   ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
   (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
-  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), the **upward occluder skirts**
-  (`emitOccluders`, the `downSpans`/`upIntervalsOnEdge` down-skirt subtraction, the
-  side-based interior nudge, the four debug styles + `cycleOccluderStyle`), the
-  height-gradient color (`heightColor`), the level-identity reset, `volatile`
-  snapshot/occluder/profile/crouch/style handoff, and the double-sided-winding
-  requirement.
+  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** down-skirt
+  spans (`emitDownSkirts`, from `DownSkirtSpan`; suppressed at the outermost edge via
+  `isAtOuterEdge`), **upward occluder skirts** (`emitOccluders`, the side-based interior
+  nudge, the four debug styles + `cycleOccluderStyle`), and the **through-walls hole
+  beams** (`emitHoles`, from `HoleSpan`, into the depth-off `FILLED` layer; also
+  suppressed at the outermost edge) — `emit` no longer computes any edge spans per
+  frame — the height-gradient color (`heightColor`, violet→orange ramp, red reserved for
+  holes), the level-identity reset,
+  `volatile` snapshot/occluder/down-skirt/hole/profile/crouch/style handoff, and the
+  double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `OverlayClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
@@ -246,7 +276,15 @@ through-walls, depth-on `SKIRT` occluded).
   strip-merge, the `footprintAdjacent` edge test + profile-`reach` gate, the
   **compute-side occluder-span classification** (`computeOccluders` /
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
-  `OccluderSpan`), and the extraction-thread-only (non-thread-safe) contract.
+  `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
+  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **Milestone 5
+  hole classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
+  strictly below the rim under the fall footprint, and then HOLE anyway if a standable
+  **ledge** sits between the rim and that floor; reachability is reached-set membership,
+  the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` / `holeSubSpans`
+  / `fallFootprint`; subdivided at reached-rect boundaries and published as `HoleSpan`),
+  and the extraction-thread-only
+  (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
 - `WorldOverlayManager.java`: the two-layer setup (depth-off `FILLED` tops +
   depth-on `SKIRT`) and per-layer buffer/GPU handoff, the through-walls debug

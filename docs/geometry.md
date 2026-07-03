@@ -59,7 +59,7 @@ defined by four rules:
    reached iff it connects to an already-reached surface by **one geometric
    adjacency rule**: the footprints share an edge with positive overlap (or overlap
    with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach` (the
-   profile's single symmetric step threshold). This subsumes the old same-block /
+   profile's single step threshold). This subsumes the old same-block /
    own-column / neighbour-column special cases: a glass pane on a block connects to
    that block's exposed ring because their footprints abut at the hole edges — no
    special case.
@@ -152,20 +152,63 @@ volume — a large win in caves / against walls, and asymptotically on open grou
 Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
 first factor; lazy-Y trims the second — orthogonal, and they compose.
 
-## Reachability model (current scope)
+## Reachability model
 
-Reach is a **single symmetric threshold** (`profile.reach()`, default `1.0`): a step
-up or down of `<= reach` connects, anything deeper does not. Because the threshold is
-symmetric the flood is **reversibly reachable**, so there is no "unreturnable space" —
-anything not connected to the seed is simply **unreachable** (a hole/gap), modulo the
-radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
+Reach is a **single threshold** (`profile.reach()`, default `1.0`): two surfaces
+connect when their height difference is `<= reach`, anything deeper does not.
+Reachability is plain yes/no — a location is reachable from the seed or it is not —
+so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
+the radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
 trench is reachable and its floor *is* painted (not a hole); to see the width rule you
 need a gap that is **deep (`>= 2`) or over the void**. **Entity-height headroom** is
 now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
 so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
-classification is still deferred to a later milestone — this stage paints *coverage*,
-framed as "a `g > W` gap leaves a hole in the standable coverage", not "the entity
-falls in".
+classification builds on this in **Milestone 5** (below): the flood still only paints
+*coverage*, and a separate predicate reads that coverage to label each drop edge.
+
+## Hole classification (Milestone 5)
+
+Milestone 5 does not change reachability; it **reads the flood output** to label the
+**drop edges** of the selection (the `openSpans` edges that are neither equal-height
+merge seams nor wall/ceiling up-skirts). One pure predicate,
+`SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
+`BENIGN` in two steps:
+
+1. **Is there a reached surface strictly below the edge, under the fall footprint?** If
+   **no** &rarr; `HOLE` (the void, or unreached ground the mob cannot climb out of). This
+   is the trivial definition of a hole: *not reachable*. Reachability is exactly
+   **reached-set membership** — the flood already computed it for this entity (width,
+   occlusion, reach all accounted for), so nothing is re-derived here.
+2. **If yes** (a reached floor at `landY`), **is there a standable ledge between the edge
+   and that floor?** A ledge is a dilated standable surface with top strictly in
+   `(landY, T)` overlapping the footprint. If one exists &rarr; `HOLE` (the mob lands on
+   the ledge and is trapped above the reachable floor). Otherwise &rarr; `BENIGN`, fall
+   distance `T − landY`.
+
+Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
+world read: `gatherLedges` scans collision boxes in the `(landY, T)` band over the
+footprint's columns and runs each through the **same `exposeBox`** the flood uses (dilate
+by `W/2`, cut by occluders) — so a box the entity cannot actually stand on (too narrow
+after dilation, or occluded) is correctly *not* a ledge, and a wide hitbox is handled the
+same way the flood handles it. This is why it is not a reinvention: the ledge test reuses
+the flood's own standability, it does not re-implement it.
+
+There is **no CUTOFF class**: near the radius the selection is incomplete, but a drop
+there is still classified normally — a genuine deep drop reads HOLE. The **outermost edge**
+of the selection (at `ringEnd`) is suppressed entirely render-side: skirts and hole beams
+there are artifacts of the radius cutoff. Interior border uncertainty is a render concern:
+a hole beam in the grey ring is blended toward grey by the same distance falloff that
+greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
+
+The candidate drop spans are the compute-side `DownSkirtSpan`s (every genuine drop
+edge). `computeHoles` walks them once per select: for each it builds the **fall
+footprint** (a one-block band just beyond the rim, on the drop side), gathers ledges, and
+classifies. Because **one edge can span reached and unreached ground**, it does **not**
+classify the whole edge at once: `holeSubSpans` subdivides the edge at reached-rect
+boundaries into homogeneous sub-spans, classifies each via `classifyDrop`, and publishes
+the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
+ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
+(a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
 ## Entity profiles (size + headroom)
 
@@ -178,8 +221,8 @@ for. Three ship, cycled Point → Player → Ravager:
 | Player  | 0.6       | 1.8        | 1.0   |
 | Ravager | 1.95      | 2.2        | 1.0   |
 
-`W` drives dilation (above); `H` drives headroom (rule 1); `reach` is the symmetric
-step threshold (and sets the downward-skirt depth + the upward-skirt clamp). Heights
+`W` drives dilation (above); `H` drives headroom (rule 1); `reach` is the step
+threshold (and sets the downward-skirt depth + the upward-skirt clamp). Heights
 are the vanilla hitbox heights — doubles, not `1/16`-aligned, consistent with the
 rect-space model. **Point keeps `H = 0`** so it stays the pure point-walker and the
 eager-vs-lazy oracle baseline.

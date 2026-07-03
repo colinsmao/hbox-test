@@ -53,7 +53,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * <li><b>Flood</b> the merged-rect graph from the seed rect(s) by <b>geometric
  *     adjacency</b>: two rects are connected iff their footprints share an edge
  *     with positive overlap ({@link #footprintAdjacent}) and their heights are
- *     within the active {@link EntityProfile}'s symmetric {@code reach}. This one
+ *     within the active {@link EntityProfile}'s {@code reach}. This one
  *     test subsumes the old same-block / own-column / 4-neighbor-column cases: a
  *     glass pane on a block connects to that block's exposed ring because their
  *     footprints abut at the hole edges, no special case needed. A dilated perch
@@ -135,6 +135,18 @@ public final class SurfaceSelection {
 	// boxes), published alongside result. Replaced wholesale each select.
 	private List<OccluderSpan> occluders = List.of();
 
+	// Downward drop-skirt spans for the last select: each merged-rect edge minus its
+	// equal-height merge seams (openSpans) minus the occluder sub-spans above. Once a
+	// per-frame O(n^2) render-side scan; now computed compute-side once per select
+	// (behavior-preserving) so emit just draws published spans, and so Milestone 5's
+	// hole classification can share this same drop-edge pass. Replaced each select.
+	private List<DownSkirtSpan> downSkirts = List.of();
+
+	// Hole spans for the last select: drop sub-spans with no reached surface below
+	// (void, or unreached ground). Marked by a through-walls beam at the rim.
+	// Replaced wholesale each select.
+	private List<HoleSpan> holes = List.of();
+
 	/**
 	 * Replace the selection with the merged standable surfaces reachable from the
 	 * surfaces of {@code start}, within a spatial window of half-extent
@@ -151,6 +163,8 @@ public final class SurfaceSelection {
 			result = LAZY ? selectLazy(level, start, radius, profile)
 					: selectEager(level, start, radius, profile);
 			occluders = computeOccluders(level, result, profile);
+			downSkirts = computeDownSkirts(result, occluders);
+			holes = computeHoles(level, result, downSkirts, profile);
 			return;
 		}
 
@@ -180,6 +194,8 @@ public final class SurfaceSelection {
 		}
 		result = LAZY ? lazyRects : eager;
 		occluders = computeOccluders(level, result, profile);
+		downSkirts = computeDownSkirts(result, occluders);
+		holes = computeHoles(level, result, downSkirts, profile);
 	}
 
 	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
@@ -276,6 +292,8 @@ public final class SurfaceSelection {
 	public void clear() {
 		result = List.of();
 		occluders = List.of();
+		downSkirts = List.of();
+		holes = List.of();
 	}
 
 	/** Immutable snapshot of the reached surfaces (height-tinted at draw time). */
@@ -288,9 +306,19 @@ public final class SurfaceSelection {
 		return occluders;
 	}
 
+	/** Immutable snapshot of the downward drop-skirt spans for the reached set. */
+	public List<DownSkirtSpan> allDownSkirts() {
+		return downSkirts;
+	}
+
+	/** Immutable snapshot of the hole spans (through-walls beam markers) for the reached set. */
+	public List<HoleSpan> allHoles() {
+		return holes;
+	}
+
 	// BFS over merged rects: an edge exists iff footprints share an edge with
 	// positive overlap and the height difference is within reach (a single
-	// symmetric threshold). Seeds are the merged rects that cover a seed surface.
+	// threshold). Seeds are the merged rects that cover a seed surface.
 	private static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
 		int n = rects.size();
 		boolean[] visited = new boolean[n];
@@ -683,6 +711,368 @@ public final class SurfaceSelection {
 				head.line(), lo, hi, head.baseY(), top));
 		}
 		return out;
+	}
+
+	// --- Milestone 5: drop-edge hole classification (pure) ---
+
+	enum DropClass {
+		HOLE, BENIGN
+	}
+
+	record DropClassification(DropClass kind, double fallDistance) {
+	}
+
+	/**
+	 * Classify one drop sub-span. Pure: given the fall footprint, the flood's
+	 * reached set, and any intermediate standable ledges between the edge and the
+	 * reached floor, returns HOLE or BENIGN.
+	 *
+	 * <ol>
+	 * <li>Find the topmost reached surface strictly below {@code topY} that
+	 *     overlaps the footprint. If none &rarr; HOLE (void / unreached ground).
+	 * <li>If a reached floor exists at {@code landY}: check whether any surface in
+	 *     {@code ledges} (dilated standable surfaces with top in {@code (landY,
+	 *     topY)}) overlaps the footprint. If yes &rarr; HOLE (entity lands on the
+	 *     ledge and is trapped). If no &rarr; BENIGN (fall distance = topY &minus;
+	 *     landY).
+	 * </ol>
+	 */
+	static DropClassification classifyDrop(Rect fallFootprint, double topY,
+			List<StandableRect> reached, List<StandableRect> ledges) {
+		StandableRect landing = null;
+		for (StandableRect r : reached) {
+			if (r.topY() >= topY - EPS) {
+				continue;
+			}
+			if (Math.min(r.maxX(), fallFootprint.maxX()) - Math.max(r.minX(), fallFootprint.minX()) <= EPS
+					|| Math.min(r.maxZ(), fallFootprint.maxZ()) - Math.max(r.minZ(), fallFootprint.minZ()) <= EPS) {
+				continue;
+			}
+			if (landing == null || r.topY() > landing.topY()) {
+				landing = r;
+			}
+		}
+		if (landing == null) {
+			return new DropClassification(DropClass.HOLE, 0.0);
+		}
+		double landY = landing.topY();
+		for (StandableRect ledge : ledges) {
+			if (ledge.topY() <= landY + EPS || ledge.topY() >= topY - EPS) {
+				continue;
+			}
+			if (Math.min(ledge.maxX(), fallFootprint.maxX()) - Math.max(ledge.minX(), fallFootprint.minX()) <= EPS
+					|| Math.min(ledge.maxZ(), fallFootprint.maxZ()) - Math.max(ledge.minZ(), fallFootprint.minZ()) <= EPS) {
+				continue;
+			}
+			return new DropClassification(DropClass.HOLE, topY - ledge.topY());
+		}
+		return new DropClassification(DropClass.BENIGN, topY - landY);
+	}
+
+	// Compute the downward drop-skirt spans of the whole reached set, once per
+	// select. For each merged rect edge: the edge minus the parts covered by an
+	// equal-height neighbour abutting across it (a merge seam, not a drop) minus the
+	// occluder (wall/ceiling) sub-spans on that edge (they get an upward skirt), the
+	// leftover being the genuine drop sub-spans. This replaces the old per-frame
+	// render-side scan (openSpans/upIntervalsOnEdge, O(n^2) every frame) with one
+	// compute-side pass; the result must be pixel-identical. Package-private for unit
+	// tests (synthetic rects, no world).
+	static List<DownSkirtSpan> computeDownSkirts(List<StandableRect> rects, List<OccluderSpan> occluders) {
+		List<DownSkirtSpan> out = new ArrayList<>();
+		for (StandableRect r : rects) {
+			edgeDownSpans(rects, occluders, r, true, false, out);  // -Z edge
+			edgeDownSpans(rects, occluders, r, true, true, out);   // +Z edge
+			edgeDownSpans(rects, occluders, r, false, false, out); // -X edge
+			edgeDownSpans(rects, occluders, r, false, true, out);  // +X edge
+		}
+		return out;
+	}
+
+	// Append the drop sub-spans of one rect edge (see computeDownSkirts). alongX: the
+	// edge runs along X at a fixed Z; maxSide: the +axis edge (line = the rect's max
+	// coordinate on the perpendicular axis). Coverage from equal-height neighbours and
+	// from occluder spans on this edge is subtracted together (set difference is
+	// order-independent, so unioning then subtracting matches the old two-stage
+	// openSpans-then-occluder subtraction).
+	private static void edgeDownSpans(List<StandableRect> rects, List<OccluderSpan> occluders,
+			StandableRect r, boolean alongX, boolean maxSide, List<DownSkirtSpan> out) {
+		double lo = alongX ? r.minX() : r.minZ();
+		double hi = alongX ? r.maxX() : r.maxZ();
+		double line = alongX ? (maxSide ? r.maxZ() : r.minZ()) : (maxSide ? r.maxX() : r.minX());
+
+		List<double[]> covered = new ArrayList<>();
+		for (StandableRect nb : rects) {
+			if (nb == r || Math.abs(nb.topY() - r.topY()) > EPS) {
+				continue;
+			}
+			boolean abuts;
+			double clo;
+			double chi;
+			if (alongX) {
+				abuts = Math.abs((maxSide ? nb.minZ() - r.maxZ() : nb.maxZ() - r.minZ())) < EPS;
+				clo = Math.max(nb.minX(), r.minX());
+				chi = Math.min(nb.maxX(), r.maxX());
+			} else {
+				abuts = Math.abs((maxSide ? nb.minX() - r.maxX() : nb.maxX() - r.minX())) < EPS;
+				clo = Math.max(nb.minZ(), r.minZ());
+				chi = Math.min(nb.maxZ(), r.maxZ());
+			}
+			if (abuts && chi - clo > EPS) {
+				covered.add(new double[] {clo, chi});
+			}
+		}
+		for (OccluderSpan s : occluders) {
+			if (s.alongX() != alongX || s.positiveSide() != maxSide) {
+				continue;
+			}
+			if (Math.abs(s.line() - line) > EPS || Math.abs(s.baseY() - r.topY()) > EPS) {
+				continue;
+			}
+			double clo = Math.max(s.lo(), lo);
+			double chi = Math.min(s.hi(), hi);
+			if (chi - clo > EPS) {
+				covered.add(new double[] {clo, chi});
+			}
+		}
+
+		for (double[] iv : subtractIntervals(lo, hi, covered)) {
+			out.add(new DownSkirtSpan(alongX, maxSide, line, iv[0], iv[1], r.topY()));
+		}
+	}
+
+	// [lo,hi] minus the union of covered intervals, as the remaining open sub-spans
+	// (left-to-right sweep over the sorted intervals). The double-precision twin of
+	// the old render-side subtractSpans.
+	private static List<double[]> subtractIntervals(double lo, double hi, List<double[]> covered) {
+		covered.sort(Comparator.comparingDouble(c -> c[0]));
+		List<double[]> out = new ArrayList<>();
+		double cur = lo;
+		for (double[] c : covered) {
+			if (c[0] > cur + EPS) {
+				out.add(new double[] {cur, Math.min(c[0], hi)});
+			}
+			cur = Math.max(cur, c[1]);
+			if (cur >= hi - EPS) {
+				break;
+			}
+		}
+		if (hi - cur > EPS) {
+			out.add(new double[] {cur, hi});
+		}
+		return out;
+	}
+
+	// How far beyond the rim (in blocks) the fall footprint probes for a landing.
+	// One block off the cliff edge is where a mob leaving the edge drops.
+	private static final double FALL_PROBE = 1.0;
+
+	// Classify each drop span and return the hole sub-spans (through-walls beam
+	// candidates). For each drop span: (1) check if a reached surface exists below
+	// under the fall footprint, (2) if yes, scan the world between topY and landY for
+	// intermediate standable surfaces (ledges) via exposeBox — if any overlap the
+	// footprint, the entity gets trapped on the ledge -> HOLE. Because one edge can
+	// span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
+	// homogeneous sub-spans. Runs once per select (not per frame).
+	private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
+			List<DownSkirtSpan> drops, EntityProfile profile) {
+		if (drops.isEmpty()) {
+			return List.of();
+		}
+		double halfW = profile.width() / 2.0;
+		double height = profile.height();
+		List<HoleSpan> out = new ArrayList<>();
+		List<StandableRect> ledges = new ArrayList<>();
+		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+		for (DownSkirtSpan sp : drops) {
+			Rect band = fallFootprint(sp);
+			ledges.clear();
+			gatherLedges(level, cursor, band, sp.baseY(), rects, halfW, height, ledges);
+			holeSubSpans(sp, band, rects, ledges, out);
+		}
+		return out;
+	}
+
+	// Pure: subdivide one drop span into homogeneous sub-spans (at reached-rect
+	// boundaries), classify each via classifyDrop (with ledge check), and append the
+	// contiguous HOLE pieces (coalesced) as HoleSpans. A single edge can span reached
+	// and unreached ground, so classifying the whole edge at once mislabels it.
+	// Package-private for unit tests (synthetic reached rects / ledges, no world).
+	static void holeSubSpans(DownSkirtSpan sp, Rect band,
+			List<StandableRect> reached, List<StandableRect> ledges, List<HoleSpan> out) {
+		double topY = sp.baseY();
+		double[] cuts = spanBreakpoints(sp, band, reached);
+		double holeLo = Double.NaN;
+		double holeHi = 0.0;
+		double holeFall = 0.0;
+		for (int i = 0; i + 1 < cuts.length; i++) {
+			double a = cuts[i];
+			double b = cuts[i + 1];
+			if (b - a <= EPS) {
+				continue;
+			}
+			Rect subFp = subBand(sp, band, a, b);
+			DropClassification c = classifyDrop(subFp, topY, reached, ledges);
+			if (c.kind() != DropClass.HOLE) {
+				continue;
+			}
+			if (Double.isNaN(holeLo)) {
+				holeLo = a;
+				holeHi = b;
+				holeFall = c.fallDistance();
+			} else if (a <= holeHi + EPS) {
+				holeHi = b;
+				holeFall = Math.max(holeFall, c.fallDistance());
+			} else {
+				out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall));
+				holeLo = a;
+				holeHi = b;
+				holeFall = c.fallDistance();
+			}
+		}
+		if (!Double.isNaN(holeLo)) {
+			out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall));
+		}
+	}
+
+	// Breakpoints along a drop span's varying axis where its classification can
+	// change: the span ends, integer block boundaries, and the varying-axis edges of
+	// every reached rect whose fixed axis overlaps the fall footprint. Splitting here
+	// makes each sub-span homogeneous (uniform "reached below or not"), so classifyDrop
+	// is exact on it. Duplicates collapse to zero-width sub-spans (skipped by caller).
+	private static double[] spanBreakpoints(DownSkirtSpan sp, Rect band,
+			List<StandableRect> rects) {
+		double lo = sp.lo();
+		double hi = sp.hi();
+		List<Double> cuts = new ArrayList<>();
+		cuts.add(lo);
+		cuts.add(hi);
+		for (int k = (int) Math.floor(lo) + 1; k <= (int) Math.ceil(hi) - 1; k++) {
+			addCut(cuts, k, lo, hi);
+		}
+		for (StandableRect r : rects) {
+			if (fixedAxisOverlaps(sp, band, r)) {
+				addCut(cuts, sp.alongX() ? r.minX() : r.minZ(), lo, hi);
+				addCut(cuts, sp.alongX() ? r.maxX() : r.maxZ(), lo, hi);
+			}
+		}
+		double[] arr = new double[cuts.size()];
+		for (int i = 0; i < arr.length; i++) {
+			arr[i] = cuts.get(i);
+		}
+		Arrays.sort(arr);
+		return arr;
+	}
+
+	private static void addCut(List<Double> cuts, double c, double lo, double hi) {
+		if (c > lo + EPS && c < hi - EPS) {
+			cuts.add(c);
+		}
+	}
+
+	// True iff rect r overlaps the fall footprint band on the FIXED axis (Z for an
+	// X-running span, else X) — i.e. r could be the landing under some sub-span.
+	private static boolean fixedAxisOverlaps(DownSkirtSpan sp, Rect band, StandableRect r) {
+		if (sp.alongX()) {
+			return Math.min(r.maxZ(), band.maxZ()) - Math.max(r.minZ(), band.minZ()) > EPS;
+		}
+		return Math.min(r.maxX(), band.maxX()) - Math.max(r.minX(), band.minX()) > EPS;
+	}
+
+	// The fall footprint band clipped to the varying-axis sub-interval [a,b].
+	private static Rect subBand(DownSkirtSpan sp, Rect band, double a, double b) {
+		if (sp.alongX()) {
+			return new Rect(a, band.minZ(), b, band.maxZ());
+		}
+		return new Rect(band.minX(), a, band.maxX(), b);
+	}
+
+	// The fall footprint of a drop span: a FALL_PROBE-deep band just beyond the rim
+	// (on the drop side), along the span's [lo,hi]. maxSide drops toward +axis.
+	static Rect fallFootprint(DownSkirtSpan sp) {
+		if (sp.alongX()) {
+			double zNear = sp.maxSide() ? sp.line() : sp.line() - FALL_PROBE;
+			double zFar = sp.maxSide() ? sp.line() + FALL_PROBE : sp.line();
+			return new Rect(sp.lo(), zNear, sp.hi(), zFar);
+		}
+		double xNear = sp.maxSide() ? sp.line() : sp.line() - FALL_PROBE;
+		double xFar = sp.maxSide() ? sp.line() + FALL_PROBE : sp.line();
+		return new Rect(xNear, sp.lo(), xFar, sp.hi());
+	}
+
+
+	// Scan the world for standable surfaces (via exposeBox) between landY and topY that
+	// overlap the fall footprint — intermediate ledges that would trap the entity. For
+	// each block column overlapping fp, scan rows in (landY, topY), gather collision
+	// boxes, build a local occluder index, and call exposeBox on each candidate whose
+	// top is strictly between landY and topY. Appends exposed StandableRects to out.
+	// Only called when a reached floor exists below (landY is known).
+	private static void gatherLedges(Level level, BlockPos.MutableBlockPos cursor,
+			Rect fp, double topY, List<StandableRect> reached, double halfW, double height,
+			List<StandableRect> out) {
+		// Find landY: the topmost reached surface below topY overlapping the footprint.
+		double landY = Double.NEGATIVE_INFINITY;
+		for (StandableRect r : reached) {
+			if (r.topY() >= topY - EPS) {
+				continue;
+			}
+			if (Math.min(r.maxX(), fp.maxX()) - Math.max(r.minX(), fp.minX()) <= EPS
+					|| Math.min(r.maxZ(), fp.maxZ()) - Math.max(r.minZ(), fp.minZ()) <= EPS) {
+				continue;
+			}
+			if (r.topY() > landY) {
+				landY = r.topY();
+			}
+		}
+		if (landY == Double.NEGATIVE_INFINITY) {
+			return;
+		}
+		// Scan block columns overlapping the footprint in the Y band (landY, topY).
+		int xLo = (int) Math.floor(fp.minX());
+		int xHi = (int) Math.ceil(fp.maxX()) - 1;
+		int zLo = (int) Math.floor(fp.minZ());
+		int zHi = (int) Math.ceil(fp.maxZ()) - 1;
+		int yLo = (int) Math.floor(landY);
+		int yHi = (int) Math.ceil(topY);
+		// Gather all boxes in the band (used both as candidates and as occluders).
+		Map<ColKey, List<WorldBox>> index = new HashMap<>();
+		List<WorldBox> candidates = new ArrayList<>();
+		for (int x = xLo - (int) Math.ceil(halfW); x <= xHi + (int) Math.ceil(halfW) + 1; x++) {
+			for (int z = zLo - (int) Math.ceil(halfW); z <= zHi + (int) Math.ceil(halfW) + 1; z++) {
+				for (int y = yLo; y <= yHi; y++) {
+					cursor.set(x, y, z);
+					VoxelShape shape = level.getBlockState(cursor)
+						.getCollisionShape(level, cursor, CollisionContext.empty());
+					if (shape.isEmpty()) {
+						continue;
+					}
+					for (AABB box : shape.toAabbs()) {
+						WorldBox wb = new WorldBox(x, y, z,
+							x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
+							y + box.minY, y + box.maxY);
+						index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>()).add(wb);
+						double top = wb.yMax();
+						if (top > landY + EPS && top < topY - EPS) {
+							candidates.add(wb);
+						}
+					}
+				}
+			}
+		}
+		// exposeBox each candidate and collect fragments overlapping the footprint.
+		List<StandableRect> exposed = new ArrayList<>();
+		for (WorldBox cand : candidates) {
+			exposed.clear();
+			exposeBox(cand, index, halfW, height, exposed);
+			for (StandableRect s : exposed) {
+				if (s.topY() <= landY + EPS || s.topY() >= topY - EPS) {
+					continue;
+				}
+				if (Math.min(s.maxX(), fp.maxX()) - Math.max(s.minX(), fp.minX()) > EPS
+						&& Math.min(s.maxZ(), fp.maxZ()) - Math.max(s.minZ(), fp.minZ()) > EPS) {
+					out.add(s);
+				}
+			}
+		}
 	}
 
 	// World-reading wrapper (client thread): for each reached surface, gather the
