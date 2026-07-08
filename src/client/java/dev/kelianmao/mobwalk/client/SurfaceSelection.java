@@ -12,11 +12,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import dev.kelianmao.mobwalk.MobWalk;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -88,9 +91,20 @@ public final class SurfaceSelection {
 	// demand; yMin/yMax drive the spans-above occlusion test. bx/by/bz are the
 	// source block (the window/cube membership test runs on these, exactly like
 	// the eager pass, so lazy and eager agree on which boxes are nodes vs occluders).
+	// blockCollisionTop / blockOutlineTop are the SOURCE BLOCK's whole-shape tops
+	// (collision vs visible/outline, world Y), carried so exposeBox can raise a
+	// standable top to the visible face for render-taller-than-collide blocks (soul
+	// sand, mud) without touching any walkability math (see exposeBox / StandableRect).
 	// Package-private for unit tests (synthetic boxes feed the classifier/headroom).
 	record WorldBox(int bx, int by, int bz,
-			double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
+			double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
+			double blockCollisionTop, double blockOutlineTop) {
+		// Boxes gathered as occluders/ledges only never become a drawn top, so they
+		// default both block tops to yMax (visualTopY then never raises off yMax).
+		WorldBox(int bx, int by, int bz,
+				double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
+			this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, yMax, yMax);
+		}
 	}
 
 	// A dilated standable surface tagged with its source cell, the lazy flood's
@@ -114,6 +128,18 @@ public final class SurfaceSelection {
 	// Tolerance for the double coordinate compares (box edges are multiples of
 	// 1/16). Used to drop subtraction slivers and to test edge adjacency/overlap.
 	private static final double EPS = 1.0e-6;
+
+	// Per-BlockState memo of the block's outline (visible) top, relative to the block
+	// origin (i.e. state.getShape().max(Y)); NaN means "no separate outline, don't
+	// raise". Populated lazily the first time each distinct state is seen, so the
+	// visible-top read (getShape) is paid at most once per block STATE rather than per
+	// block instance — no full-block heuristic, so a modded/future block that renders
+	// taller than it collides is caught automatically the first time it appears. The
+	// property is treated as position-independent (keyed by state only); the handful of
+	// context-dependent blocks never have a neighbour-varying TOP raise, so caching the
+	// first-seen value is safe in practice. Static so the memo survives across selects;
+	// only ever touched on the client thread, ConcurrentHashMap purely for safety.
+	private static final Map<BlockState, Double> OUTLINE_TOP_REL = new ConcurrentHashMap<>();
 
 	// Flood path selection (Stage 4.5). LAZY picks the production path: the lazy,
 	// output-sensitive flood (exposes columns on demand) vs the eager window scan.
@@ -157,11 +183,17 @@ public final class SurfaceSelection {
 	 * (output-sensitive, on-demand column exposure) per {@link #LAZY}. With
 	 * {@link #PROFILE_FLOOD} on, both run and are compared (coverage oracle) and
 	 * timed; see the field docs.
+	 *
+	 * <p>{@code computeVisualTop} controls whether the extra visible/outline-top read
+	 * (for render-taller-than-collide blocks; see {@code exposeBox}) is done. It is a
+	 * per-block cost paid only for blocks colliding below a full cube, so it is off
+	 * unless the render toggle wants it — flipping the toggle re-runs {@code select}.
 	 */
-	public void select(Level level, BlockPos start, int radius, EntityProfile profile) {
+	public void select(Level level, BlockPos start, int radius, EntityProfile profile,
+			boolean computeVisualTop) {
 		if (!PROFILE_FLOOD) {
-			result = LAZY ? selectLazy(level, start, radius, profile)
-					: selectEager(level, start, radius, profile);
+			result = LAZY ? selectLazy(level, start, radius, profile, computeVisualTop)
+					: selectEager(level, start, radius, profile, computeVisualTop);
 			occluders = computeOccluders(level, result, profile);
 			downSkirts = computeDownSkirts(result, occluders);
 			holes = computeHoles(level, result, downSkirts, profile);
@@ -169,9 +201,9 @@ public final class SurfaceSelection {
 		}
 
 		long t0 = System.nanoTime();
-		List<StandableRect> eager = selectEager(level, start, radius, profile);
+		List<StandableRect> eager = selectEager(level, start, radius, profile, computeVisualTop);
 		long t1 = System.nanoTime();
-		LazyFlood lazy = new LazyFlood(level, start, radius, profile);
+		LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop);
 		List<StandableRect> lazyRects = lazy.run();
 		long t2 = System.nanoTime();
 
@@ -201,7 +233,8 @@ public final class SurfaceSelection {
 	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
 	// path's correctness oracle). Enumerates every collision box in the
 	// window+margin cube, dilates all, merges, then floods the merged graph.
-	private List<StandableRect> selectEager(Level level, BlockPos start, int radius, EntityProfile profile) {
+	private List<StandableRect> selectEager(Level level, BlockPos start, int radius,
+			EntityProfile profile, boolean computeVisualTop) {
 		double reach = profile.reach();
 		double halfW = profile.width() / 2.0;
 		double height = profile.height();
@@ -238,15 +271,19 @@ public final class SurfaceSelection {
 				List<WorldBox> column = null;
 				for (int y = yLo; y <= yHi; y++) {
 					cursor.set(x, y, z);
-					VoxelShape shape = level.getBlockState(cursor).getCollisionShape(level, cursor, CollisionContext.empty());
+					BlockState state = level.getBlockState(cursor);
+					VoxelShape shape = state.getCollisionShape(level, cursor, CollisionContext.empty());
 					if (shape.isEmpty()) {
 						continue;
 					}
+					double blockCollisionTop = y + shape.max(Direction.Axis.Y);
+					double blockOutlineTop = visibleTop(level, cursor, state, blockCollisionTop, computeVisualTop);
 					boolean yInWindow = y >= oy - radius && y <= oy + radius;
 					for (AABB box : shape.toAabbs()) {
 						WorldBox wb = new WorldBox(x, y, z,
 							x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
-							y + box.minY, y + box.maxY);
+							y + box.minY, y + box.maxY,
+							blockCollisionTop, blockOutlineTop);
 						if (column == null) {
 							column = index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>());
 						}
@@ -285,8 +322,9 @@ public final class SurfaceSelection {
 	}
 
 	// The lazy, output-sensitive flood (Stage 4.5 production path). See LazyFlood.
-	private List<StandableRect> selectLazy(Level level, BlockPos start, int radius, EntityProfile profile) {
-		return new LazyFlood(level, start, radius, profile).run();
+	private List<StandableRect> selectLazy(Level level, BlockPos start, int radius,
+			EntityProfile profile, boolean computeVisualTop) {
+		return new LazyFlood(level, start, radius, profile, computeVisualTop).run();
 	}
 
 	public void clear() {
@@ -409,8 +447,15 @@ public final class SurfaceSelection {
 			}
 
 			List<Rect> rects = new ArrayList<>();
+			// A coplanar group shares one collision topY; carry the group's max
+			// visible top so a raised block (soul sand) still draws on its face after
+			// merging with equal-collision-top neighbours. Mixed visible tops in one
+			// group are rare (equal collision top, different render height) and the
+			// max keeps the raised block visible rather than re-burying it.
+			double groupVisualTop = topY;
 			for (StandableRect r : sorted.subList(i, j)) {
 				rects.add(new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ()));
+				groupVisualTop = Math.max(groupVisualTop, r.visualTopY());
 			}
 			rects = union(rects);
 			int before;
@@ -421,7 +466,7 @@ public final class SurfaceSelection {
 			} while (rects.size() < before);
 
 			for (Rect r : rects) {
-				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY));
+				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY, groupVisualTop));
 			}
 			i = j;
 		}
@@ -554,6 +599,16 @@ public final class SurfaceSelection {
 	static void exposeBox(WorldBox target, Map<ColKey, List<WorldBox>> index, double halfW,
 			double height, List<StandableRect> out) {
 		double topY = target.yMax();
+		// Draw-only raise (Milestone 6): if this box IS the source block's topmost
+		// collision surface and the block renders taller than it collides (soul sand,
+		// mud), expose the visible/outline top so the marker is drawn on the face you
+		// see rather than buried. Gating on "topmost collision surface" leaves stair
+		// treads / bottom slabs / fence tops untouched; everything else keeps
+		// visualTopY == topY. Nothing but rendering reads visualTopY.
+		double visualTopY = (Math.abs(topY - target.blockCollisionTop()) <= EPS
+				&& target.blockOutlineTop() > topY + EPS)
+			? target.blockOutlineTop()
+			: topY;
 		Rect base = new Rect(
 			target.minX() - halfW, target.minZ() - halfW,
 			target.maxX() + halfW, target.maxZ() + halfW);
@@ -588,8 +643,35 @@ public final class SurfaceSelection {
 		}
 
 		for (Rect exposed : subtractRects(base, occluders)) {
-			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(), topY));
+			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(), topY, visualTopY));
 		}
+	}
+
+	// The source block's visible top (world Y), used to raise a standable surface to
+	// the face you actually see for render-taller-than-collide blocks (soul sand, mud,
+	// cactus, honey, and any modded/future block with the same property). No heuristic:
+	// EVERY block state is checked, but the outline shape (getShape) is read at most
+	// once per distinct BlockState and memoized in OUTLINE_TOP_REL, so the per-block
+	// cost is a map lookup. Returns the collision top unchanged when the toggle is off
+	// or the state has no separate outline (NaN memo). The exposeBox raise rule then
+	// decides whether to actually lift (only its block's topmost collision surface, and
+	// only when the outline is strictly higher), so a fence (outline 1.0 < collision
+	// 1.5) is returned here but not raised there.
+	private static double visibleTop(Level level, BlockPos pos, BlockState state,
+			double blockCollisionTop, boolean computeVisualTop) {
+		if (!computeVisualTop) {
+			return blockCollisionTop;
+		}
+		Double outlineRel = OUTLINE_TOP_REL.get(state);
+		if (outlineRel == null) {
+			VoxelShape outline = state.getShape(level, pos, CollisionContext.empty());
+			outlineRel = outline.isEmpty() ? Double.NaN : outline.max(Direction.Axis.Y);
+			OUTLINE_TOP_REL.put(state, outlineRel);
+		}
+		if (Double.isNaN(outlineRel)) {
+			return blockCollisionTop;
+		}
+		return pos.getY() + outlineRel;
 	}
 
 	// {cxLo, cxHi, czLo, czHi}: the columns an occluder box must lie in to possibly
@@ -640,6 +722,7 @@ public final class SurfaceSelection {
 	static void occluderSpansForRect(StandableRect r, List<WorldBox> candidates,
 			double halfW, double height, List<OccluderSpan> out) {
 		double topY = r.topY();
+		double visualTopY = r.visualTopY();
 		for (WorldBox b : candidates) {
 			if (!wallOccluder(b, topY, height)) {
 				continue;
@@ -654,20 +737,20 @@ public final class SurfaceSelection {
 			double zHi = Math.min(oMaxZ, r.maxZ());
 			if (zHi - zLo > EPS) {
 				if (Math.abs(oMinX - r.maxX()) < EPS) {
-					out.add(new OccluderSpan(false, true, r.maxX(), zLo, zHi, topY, top));
+					out.add(new OccluderSpan(false, true, r.maxX(), zLo, zHi, topY, top, visualTopY));
 				}
 				if (Math.abs(oMaxX - r.minX()) < EPS) {
-					out.add(new OccluderSpan(false, false, r.minX(), zLo, zHi, topY, top));
+					out.add(new OccluderSpan(false, false, r.minX(), zLo, zHi, topY, top, visualTopY));
 				}
 			}
 			double xLo = Math.max(oMinX, r.minX());
 			double xHi = Math.min(oMaxX, r.maxX());
 			if (xHi - xLo > EPS) {
 				if (Math.abs(oMinZ - r.maxZ()) < EPS) {
-					out.add(new OccluderSpan(true, true, r.maxZ(), xLo, xHi, topY, top));
+					out.add(new OccluderSpan(true, true, r.maxZ(), xLo, xHi, topY, top, visualTopY));
 				}
 				if (Math.abs(oMaxZ - r.minZ()) < EPS) {
-					out.add(new OccluderSpan(true, false, r.minZ(), xLo, xHi, topY, top));
+					out.add(new OccluderSpan(true, false, r.minZ(), xLo, xHi, topY, top, visualTopY));
 				}
 			}
 		}
@@ -694,21 +777,26 @@ public final class SurfaceSelection {
 			double lo = head.lo();
 			double hi = head.hi();
 			double top = head.topY();
+			// baseY is fixed per group (grouped on it); the visible base can differ
+			// when a raised block abuts a flush one, so take the max like top.
+			double visualBase = head.visualBaseY();
 			for (int i = 1; i < group.size(); i++) {
 				OccluderSpan s = group.get(i);
 				if (s.lo() <= hi + EPS) {
 					hi = Math.max(hi, s.hi());
 					top = Math.max(top, s.topY());
+					visualBase = Math.max(visualBase, s.visualBaseY());
 				} else {
 					out.add(new OccluderSpan(head.alongX(), head.positiveSide(),
-						head.line(), lo, hi, head.baseY(), top));
+						head.line(), lo, hi, head.baseY(), top, visualBase));
 					lo = s.lo();
 					hi = s.hi();
 					top = s.topY();
+					visualBase = s.visualBaseY();
 				}
 			}
 			out.add(new OccluderSpan(head.alongX(), head.positiveSide(),
-				head.line(), lo, hi, head.baseY(), top));
+				head.line(), lo, hi, head.baseY(), top, visualBase));
 		}
 		return out;
 	}
@@ -836,7 +924,7 @@ public final class SurfaceSelection {
 		}
 
 		for (double[] iv : subtractIntervals(lo, hi, covered)) {
-			out.add(new DownSkirtSpan(alongX, maxSide, line, iv[0], iv[1], r.topY()));
+			out.add(new DownSkirtSpan(alongX, maxSide, line, iv[0], iv[1], r.topY(), r.visualTopY()));
 		}
 	}
 
@@ -923,14 +1011,14 @@ public final class SurfaceSelection {
 				holeHi = b;
 				holeFall = Math.max(holeFall, c.fallDistance());
 			} else {
-				out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall));
+				out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall, sp.visualBaseY()));
 				holeLo = a;
 				holeHi = b;
 				holeFall = c.fallDistance();
 			}
 		}
 		if (!Double.isNaN(holeLo)) {
-			out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall));
+			out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall, sp.visualBaseY()));
 		}
 	}
 
@@ -1215,6 +1303,8 @@ public final class SurfaceSelection {
 		private final double reach;
 		// Chebyshev neighbour-search radius in cells = floor(W)+1 (see class doc).
 		private final int neighbour;
+		// Whether to pay the visible/outline-top read (render toggle; see visibleTop).
+		private final boolean computeVisualTop;
 		private final int yLo;
 		private final int yHi;
 		// Per-column collision boxes found so far (the occluder index), and which
@@ -1231,7 +1321,8 @@ public final class SurfaceSelection {
 		private int columnsExposed = 0;
 		private int rowsScanned = 0;
 
-		LazyFlood(Level level, BlockPos start, int radius, EntityProfile profile) {
+		LazyFlood(Level level, BlockPos start, int radius, EntityProfile profile,
+				boolean computeVisualTop) {
 			this.level = level;
 			BlockPos origin = start.immutable();
 			this.ox = origin.getX();
@@ -1242,6 +1333,7 @@ public final class SurfaceSelection {
 			this.height = profile.height();
 			this.reach = profile.reach();
 			this.neighbour = (int) Math.floor(profile.width()) + 1;
+			this.computeVisualTop = computeVisualTop;
 			this.yLo = Math.max(oy - radius - 1, level.getMinY());
 			this.yHi = Math.min(oy + radius + 1, level.getMaxY());
 		}
@@ -1378,14 +1470,18 @@ public final class SurfaceSelection {
 				bits.set(bit);
 				rowsScanned++;
 				cursor.set(cx, y, cz);
-				VoxelShape shape = level.getBlockState(cursor).getCollisionShape(level, cursor, CollisionContext.empty());
+				BlockState state = level.getBlockState(cursor);
+				VoxelShape shape = state.getCollisionShape(level, cursor, CollisionContext.empty());
 				if (shape.isEmpty()) {
 					continue;
 				}
+				double blockCollisionTop = y + shape.max(Direction.Axis.Y);
+				double blockOutlineTop = visibleTop(level, cursor, state, blockCollisionTop, computeVisualTop);
 				for (AABB box : shape.toAabbs()) {
 					column.add(new WorldBox(cx, y, cz,
 						cx + box.minX, cz + box.minZ, cx + box.maxX, cz + box.maxZ,
-						y + box.minY, y + box.maxY));
+						y + box.minY, y + box.maxY,
+						blockCollisionTop, blockOutlineTop));
 				}
 			}
 		}

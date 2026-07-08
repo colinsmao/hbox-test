@@ -26,7 +26,16 @@ package dev.kelianmao.mobwalk.client;
  * @param hi      end of the drop sub-span on its varying axis (true coords).
  * @param baseY   the surface top {@code T} (the skirt's solid top; the fade and the
  *                skirt depth are render details derived from this and the profile).
+ * @param visualBaseY the source rect's visible-face top (draw-only): where the skirt
+ *                hangs from when the renderer draws on the visible face; equals
+ *                {@code baseY} except for render-taller-than-collide blocks. See
+ *                {@link StandableRect}.
  */
 public record DownSkirtSpan(boolean alongX, boolean maxSide, double line,
-		double lo, double hi, double baseY) {
+		double lo, double hi, double baseY, double visualBaseY) {
+	/** A span whose visible base coincides with its collision base (the common case). */
+	public DownSkirtSpan(boolean alongX, boolean maxSide, double line,
+			double lo, double hi, double baseY) {
+		this(alongX, maxSide, line, lo, hi, baseY, baseY);
+	}
 }

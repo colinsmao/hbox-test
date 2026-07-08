@@ -187,6 +187,15 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// published spans.
 	private volatile int occluderStyle = OCC_STYLE_TINY;
 
+	// Draw standable tops on the block's VISIBLE face (visualTopY) rather than its
+	// collision top, so render-taller-than-collide blocks (soul sand, mud) aren't
+	// buried. Default on (the fix). The visible-top read is a per-block compute cost
+	// (SurfaceSelection.visibleTop), so it is only paid when this is on — the flag is
+	// passed into select(), and toggling it re-floods from lastSeed (Step 2b). Read on
+	// the client thread (select calls), so plain (client-thread-only) is enough, but
+	// kept volatile for symmetry with the other render toggles.
+	private volatile boolean useVisualTop = true;
+
 	// Outer-ring greying: surfaces within the last block before the flood-radius
 	// cutoff are blended toward grey to signal "increase the radius or re-center".
 	// A selection bounded by a real drop stops short of the radius, so it never
@@ -294,7 +303,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, selectionRadius, profile);
+			cache.select(level, start, selectionRadius, profile, useVisualTop);
 			lastSeed = start;
 		} else {
 			// Right-click at nothing clears. Sneaking also advances the profile and
@@ -333,7 +342,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			selectionRadius = updated;
 			Level level = Minecraft.getInstance().level;
 			if (level != null && lastSeed != null) {
-				cache.select(level, lastSeed, selectionRadius, profile);
+				cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
 				publish();
 			}
 		}
