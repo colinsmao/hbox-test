@@ -61,6 +61,19 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   violet→orange ramp (red is reserved for hole beams), and skirts/beams at the very
   outermost radius edge are suppressed as cutoff artifacts. The geometry/algorithm lives
   in [`geometry.md`](geometry.md).
+- **Milestone 6 — polish + fidelity fixes (in progress):** a bundle of correctness
+  fixes. (1) **Grey cutoff ring** now spans a **2-block buffer** — the outermost block
+  ring is solid grey and the next ring in fades — so an incomplete selection reads more
+  clearly (see [`rendering.md`](rendering.md)). (2) **Visible-face surface height:**
+  blocks that render taller than they collide (soul sand, mud, cactus, honey) draw their
+  standable top on the **visible face** instead of buried at the collision height. The
+  visible top is gathered compute-side (memoized per `BlockState`) and baked into each
+  rect's `visualTopY`; a standalone key (default **V**) toggles it against the true
+  collision height (default **on**), re-flooding on toggle. Walkability math is
+  unchanged — this only moves where the paint is drawn. See "Visible-face top vs
+  collision top" in [`geometry.md`](geometry.md) and the surface-height toggle in
+  [`rendering.md`](rendering.md). (Remaining for this milestone: surfaces drawn through
+  water.)
 
 ## Repository layout
 
@@ -149,9 +162,15 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    intermediate ledge does (the ledge would trap the mob). A long dangerous rim shows a
    row of beams. Tops are colored violet (low) → orange (high), never red. Skirts and
    beams at the very outermost radius edge are not drawn.
-6. No errors on world load/unload or window resize; the selection clears on
+6. **Surface height (V):** on a **soul sand / mud** block (renders full-height but
+   collides at 15/16), the standable top draws on the **visible top face** by default;
+   pressing **V** drops it to the true collision height (buried inside the block) and the
+   HUD reads `surface: collision`, pressing again restores `surface: visible`; ordinary
+   full blocks / slabs / stairs look identical in both modes, and the height colors don't
+   shift when toggling.
+7. No errors on world load/unload or window resize; the selection clears on
    leaving/changing the world.
-7. The mod does nothing on a dedicated server.
+8. The mod does nothing on a dedicated server.
 
 ## Manual install into a real launcher
 

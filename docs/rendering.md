@@ -203,6 +203,23 @@ through-walls, depth-on `SKIRT` occluded).
   chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
   later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
   toggle and the four styles stay as-is until then.
+- **Surface-height toggle (visible face vs collision top; default `V`).** Blocks that
+  render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
+  their standable top *buried* at the collision height. A standalone key (default `V`,
+  registered in `MobWalkClient`) flips `useVisualTop` (default **on** — the fix). It is
+  a **compute-side** flag, not a per-draw one: it is passed into `select`, where the
+  visible top is gathered (gated on it, memoized per `BlockState` — see
+  [`geometry.md`](geometry.md) "Visible-face top vs collision top") and **baked into
+  each rect's `visualTopY` / span `visualBaseY`**. `emit` then *always* draws the top
+  fill, borders, and the up/down/hole skirts at that baked render height — no per-draw
+  branch — and it equals the collision top when the mode is off (the raise isn't
+  computed then). The height-gradient **color stays keyed on the collision `topY`**, so
+  the palette doesn't shift when toggling. Because the flag gates the compute,
+  `toggleVisualTop()` **re-floods** from the last seed (cheap: toggling is rare) and
+  pings the HUD (`surface: visible` / `surface: collision`). All walkability math is
+  unaffected (collision-top only); this is purely where the paint is drawn. Session-only
+  this milestone (resets to on at relaunch; a persisted setting lands with the Milestone
+  7 config).
 - **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last **two
   blocks** before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius
   cutoff reads differently from a true boundary (a selection stopped by a real drop

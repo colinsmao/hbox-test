@@ -48,6 +48,31 @@ public final class MobWalkClient implements ClientModInitializer {
 			}
 		});
 
+		// Standalone key (default V): toggles whether standable tops are drawn on the
+		// block's visible face (soul sand, mud, ...) or at their true collision height.
+		// Unlike the occluder-style key this re-floods (the visible top is gathered
+		// compute-side and gated on the flag), so it goes through the overlay's
+		// toggleVisualTop(); toggling is rare, so the recompute is a non-issue.
+		KeyMapping surfaceHeightKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+			"key.mobwalk.surface_height",
+			InputConstants.Type.KEYSYM,
+			GLFW.GLFW_KEY_V,
+			KeyMapping.Category.MISC));
+		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			boolean toggled = false;
+			boolean visible = false;
+			while (surfaceHeightKey.consumeClick()) {
+				CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+				if (collision != null) {
+					visible = collision.toggleVisualTop();
+					toggled = true;
+				}
+			}
+			if (toggled) {
+				OverlayManager.radiusIndicator().showProfile("surface: " + (visible ? "visible" : "collision"));
+			}
+		});
+
 		// Shift+scroll while holding the stick adjusts the flood radius (and shows
 		// the indicator) instead of switching the hotbar slot; returning false
 		// cancels the vanilla slot change. Plain scroll is left untouched.

@@ -40,7 +40,12 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * block fully grey) to signal "increase the
  * radius or re-center" — a selection bounded by a real drop stops short of the
  * radius and stays height-colored, so a radius cutoff reads differently from a
- * true boundary. Each edge drops a <b>depth-tested vertical skirt</b> so the
+ * true boundary. By default tops (and their skirts/beams) draw on each block's
+ * <b>visible face</b> ({@code visualTopY}) so blocks that render taller than they
+ * collide (soul sand, mud) aren't buried; a standalone key (default {@code V})
+ * toggles this against the true collision height ({@link #toggleVisualTop}), which
+ * re-floods since the visible top is gathered compute-side. Each edge drops a
+ * <b>depth-tested vertical skirt</b> so the
  * selection reads as a 3D mesh and a real drop reads as an open wall, but
  * <b>skirt-diffed</b>: the parts of an edge shared with an equal-height neighbour
  * (an internal edge of a continuous level the greedy merge split) are skipped, so
@@ -187,13 +192,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// published spans.
 	private volatile int occluderStyle = OCC_STYLE_TINY;
 
-	// Draw standable tops on the block's VISIBLE face (visualTopY) rather than its
+	// Whether standable tops render on the block's VISIBLE face rather than the
 	// collision top, so render-taller-than-collide blocks (soul sand, mud) aren't
-	// buried. Default on (the fix). The visible-top read is a per-block compute cost
-	// (SurfaceSelection.visibleTop), so it is only paid when this is on — the flag is
-	// passed into select(), and toggling it re-floods from lastSeed (Step 2b). Read on
-	// the client thread (select calls), so plain (client-thread-only) is enough, but
-	// kept volatile for symmetry with the other render toggles.
+	// buried. Default on (the fix). This is a COMPUTE-side flag, not a per-draw one: it
+	// is passed into select() (the visible top is gathered there, gated on it — see
+	// SurfaceSelection.visibleTop) and the chosen height is baked into each rect's
+	// visualTopY, which emit always draws. Toggling therefore re-floods from lastSeed
+	// (toggleVisualTop). Touched only on the client thread (select/toggle); emit no
+	// longer reads it, so volatile is just belt-and-suspenders.
 	private volatile boolean useVisualTop = true;
 
 	// Outer-ring greying: surfaces within the last block before the flood-radius
@@ -358,6 +364,22 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		return next;
 	}
 
+	// Flip the visible-face-top render mode (soul sand / mud drawn on the face you see
+	// vs at their true collision top) and re-flood from the last seed. Unlike the pure
+	// render-side cycleOccluderStyle, this MUST recompute: the visible top is gathered
+	// compute-side and gated on this flag (see SurfaceSelection.visibleTop), so the
+	// snapshot has to be rebuilt. Toggling is rare, so the re-flood cost is a non-issue.
+	// Returns the new state for the on-screen ping.
+	public boolean toggleVisualTop() {
+		useVisualTop = !useVisualTop;
+		Level level = Minecraft.getInstance().level;
+		if (level != null && lastSeed != null) {
+			cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+			publish();
+		}
+		return useVisualTop;
+	}
+
 	@Override
 	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer) {
 		List<StandableRect> rects = snapshot;
@@ -384,7 +406,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float minZ = (float) rect.minZ();
 			float maxX = (float) rect.maxX();
 			float maxZ = (float) rect.maxZ();
-			float y = (float) rect.topY() + (float) Y_OFFSET;
+			// Draw at the rect's render height (visualTopY): the block's visible face,
+			// baked in at flood time. It equals the collision topY when the visible-face
+			// mode is off (the raise isn't computed then — see SurfaceSelection.visibleTop)
+			// or for the vast majority of blocks, so emit never branches on the mode. The
+			// height COLOR below stays keyed on the collision topY (palette stable).
+			float y = (float) rect.visualTopY() + (float) Y_OFFSET;
 
 			float[] rgb = heightColor(rect.topY(), minTopY, maxTopY);
 			float r = rgb[0];
@@ -443,7 +470,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			if (isAtOuterEdge(h.alongX(), h.maxSide(), h.line(), h.lo(), h.hi())) {
 				continue;
 			}
-			float base = (float) h.baseY();
+			// Rise from the rim's render height (visualBaseY).
+			float base = (float) h.visualBaseY();
 			float top = base + BEAM_HEIGHT;
 			float xa;
 			float za;
@@ -502,7 +530,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float sr = rgb[0] * SKIRT_SHADE;
 			float sg = rgb[1] * SKIRT_SHADE;
 			float sb = rgb[2] * SKIRT_SHADE;
-			float yTop = (float) sp.baseY() + (float) Y_OFFSET;
+			// Hang from the rect's render height (visualBaseY); color still keyed on the
+			// collision baseY (palette stable across the mode toggle).
+			float yTop = (float) sp.visualBaseY() + (float) Y_OFFSET;
 			float yBot = yTop - skirtDepth;
 			float push = sp.maxSide() ? o : -o;
 			if (sp.alongX()) {
@@ -529,8 +559,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		int style = occluderStyle;
 		float o = (float) SKIRT_OFFSET;
 		for (OccluderSpan span : spans) {
-			float base = (float) span.baseY();
-			float available = (float) (span.topY() - span.baseY());
+			// Rise from the rect's render height (visualBaseY); the wall top (span.topY)
+			// is unchanged, so the marker just starts a touch higher.
+			float base = (float) span.visualBaseY();
+			float available = (float) (span.topY()) - base;
 			if (available <= 0.0f) {
 				continue;
 			}
