@@ -1,21 +1,21 @@
 {
 	"schemaVersion": 1,
-	"id": "overlay",
+	"id": "mobwalk",
 	"version": "${version}",
-	"name": "Graphics Overlay",
-	"description": "A minimal client-side graphics overlay mod that draws a HUD element.",
+	"name": "MobWalk",
+	"description": "A client-side mod that overlays where a chosen mob hitbox can walk, showing standable surfaces, drops, and reachable holes.",
 	"authors": [
-		"Me!"
+		"kelianmao"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://modrinth.com/mod/mobwalk",
+		"sources": "https://github.com/kelianmao/mobwalk"
 	},
 	"license": "CC0-1.0",
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"com.example.overlay.client.OverlayClient"
+			"dev.kelianmao.mobwalk.client.MobWalkClient"
 		]
 	},
 	"depends": {

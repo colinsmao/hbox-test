@@ -116,7 +116,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   (read in `emit`); `width` drives dilation and `height` drives headroom (see
   `geometry.md`). (The separate occluder-style debug key above is unrelated to the
   profile cycle.)
-- **Adjustable flood radius (shift+scroll).** `OverlayClient` registers
+- **Adjustable flood radius (shift+scroll).** `MobWalkClient` registers
   `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook — no mixin)
   and, **only while holding the stick and sneaking**, changes the radius by the scroll
   direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
@@ -195,7 +195,7 @@ through-walls, depth-on `SKIRT` occluded).
   hole candidates.
 - **Occluder-marker debug style (`cycleOccluderStyle` + a keybind).** The final
   upward-marker look is being A/B'd in-game: a **standalone keybind** (default `K`,
-  registered in `OverlayClient` via `KeyMappingHelper`, **not** tied to the
+  registered in `MobWalkClient` via `KeyMappingHelper`, **not** tied to the
   scroll/use handlers) increments a `volatile` style index (tiny / half-block / full /
   bold-line, wrapping). It is a pure render-thread choice, so it does **not** touch the
   published spans or re-flood. The `full` style clamps to `reach + SKIRT_MARGIN` so a
@@ -260,7 +260,7 @@ through-walls, depth-on `SKIRT` occluded).
   double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
-- `OverlayClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
+- `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the world overlay's radius and the HUD indicator — and the
   standalone occluder-style debug keybind (`KeyMappingHelper.registerKeyMapping`,

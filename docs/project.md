@@ -18,7 +18,7 @@ frameworks so more overlay widgets are easy to add.
 Milestones 1–5 merged. The repo is a client-only Fabric
 Gradle project generated from `FabricMC/fabric-example-mod` and trimmed to
 client-only (see **Repository layout** below). `./gradlew build` passes (produces
-`build/libs/graphics-overlay-1.0.0.jar`). Rendering details live in
+`build/libs/mobwalk-1.0.0.jar`). Rendering details live in
 [`rendering.md`](rendering.md).
 
 - **Milestone 1 — minimal working mod (HUD):** a HUD overlay framework
@@ -66,7 +66,7 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
 
 Client-only Fabric mod. Loom's `splitEnvironmentSourceSets()` keeps client code
 in the `client` source set so it can never load on a dedicated server; only the
-shared `OverlayMod` (mod id + logger) lives in `main` so both source sets share
+shared `MobWalk` (mod id + logger) lives in `main` so both source sets share
 it.
 
 ```
@@ -74,11 +74,11 @@ it.
 ├── build.gradle / gradle.properties / settings.gradle
 ├── gradlew / gradlew.bat / gradle/wrapper/...
 └── src
-  ├── main/java/com/example/overlay/
-  │   └── OverlayMod.java                  # shared constants (MOD_ID, logger)
+  ├── main/java/dev/kelianmao/mobwalk/
+  │   └── MobWalk.java                     # shared constants (MOD_ID, logger)
   ├── main/resources/fabric.mod.json       # client-only; single client entrypoint
-  ├── client/java/com/example/overlay/client/
-  │   ├── OverlayClient.java               # ClientModInitializer entrypoint (+ debug keybind)
+  ├── client/java/dev/kelianmao/mobwalk/client/
+  │   ├── MobWalkClient.java               # ClientModInitializer entrypoint (+ debug keybind)
   │   ├── Overlay.java                     # HUD widget interface
   │   ├── OverlayManager.java              # HUD registry + render dispatch
   │   ├── WorldOverlay.java                # in-world widget interface
@@ -92,11 +92,11 @@ it.
   │   └── widgets/
   │       ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
   │       └── CollisionSurfaceOverlay.java  # standable-surface selection widget + drawing
-  └── test/java/com/example/overlay/client/ # pure-logic unit tests (fabric-loader-junit)
+  └── test/java/dev/kelianmao/mobwalk/client/ # pure-logic unit tests (fabric-loader-junit)
 ```
 
 `fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`
-entrypoint (`com.example.overlay.client.OverlayClient`), and depends on
+entrypoint (`dev.kelianmao.mobwalk.client.MobWalkClient`), and depends on
 `fabricloader >=0.19.2`, `minecraft ~26.1.2`, `java >=25`, and `fabric-api`.
 
 ## Target versions
@@ -155,12 +155,12 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
 
 ## Manual install into a real launcher
 
-1. `./gradlew build`, then grab `build/libs/graphics-overlay-1.0.0.jar` (ignore
+1. `./gradlew build`, then grab `build/libs/mobwalk-1.0.0.jar` (ignore
    any `*-sources.jar`).
 2. Install **Fabric Loader** for Minecraft `26.1.2` via the official installer
    (<https://fabricmc.net/use/installer/>).
 3. Download **Fabric API** `0.149.1+26.1.2` from Modrinth/CurseForge.
-4. Drop both the Fabric API jar and the `graphics-overlay` jar into the `mods/`
+4. Drop both the Fabric API jar and the `mobwalk` jar into the `mods/`
    folder of the relevant `.minecraft` profile, then launch that Fabric profile.
 
 ## Subsystem guides

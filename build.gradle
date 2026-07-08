@@ -22,7 +22,7 @@ loom {
 	splitEnvironmentSourceSets()
 
 	mods {
-		"overlay" {
+		"mobwalk" {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}

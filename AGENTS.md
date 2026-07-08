@@ -205,5 +205,5 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   pass is a consolidation, not a recollection.
 - **Comments explain intent, not narration.** Don't add comments that merely
   restate what the code does; explain non-obvious intent, trade-offs, or constraints.
-- **Package base** is `com.example.overlay` (mod id `overlay`). If the user provides
-  a real maven group / mod id / author, update the docs and code consistently.
+- **Package base** is `dev.kelianmao.mobwalk` (mod id `mobwalk`). If the user provides
+ a real maven group / mod id / author, update the docs and code consistently.

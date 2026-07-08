@@ -1,0 +1,97 @@
+package dev.kelianmao.mobwalk.client;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+
+/**
+ * Milestone 5 Step 2: the compute-side down-skirt extraction
+ * ({@code SurfaceSelection.computeDownSkirts}) reproduces the old render-side
+ * {@code openSpans}-minus-occluders logic on synthetic rects (no world). Behavior
+ * must be pixel-identical, so these assert the exact drop sub-spans a rect edge
+ * yields: a lone rect skirts all four edges fully; an equal-height merge seam is
+ * suppressed (partial coverage leaves the unshared remainder); and a wall/ceiling
+ * occluder sub-span on an edge is subtracted (it gets an upward skirt instead).
+ */
+final class DownSkirtComputeTest {
+	private static final double EPS = 1.0e-6;
+
+	private static DownSkirtSpan find(List<DownSkirtSpan> spans, boolean alongX, boolean maxSide, double line) {
+		DownSkirtSpan found = null;
+		for (DownSkirtSpan s : spans) {
+			if (s.alongX() == alongX && s.maxSide() == maxSide && Math.abs(s.line() - line) < EPS) {
+				assertTrue(found == null, "expected a single span per edge in these fixtures");
+				found = s;
+			}
+		}
+		return found;
+	}
+
+	@Test
+	void loneRectSkirtsAllFourEdgesFully() {
+		StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
+		List<DownSkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of());
+		assertEquals(4, spans.size());
+		// -Z / +Z edges run along X over [0,1]; -X / +X edges run along Z over [0,1].
+		DownSkirtSpan minZ = find(spans, true, false, 0.0);
+		DownSkirtSpan maxZ = find(spans, true, true, 1.0);
+		DownSkirtSpan minX = find(spans, false, false, 0.0);
+		DownSkirtSpan maxX = find(spans, false, true, 1.0);
+		for (DownSkirtSpan s : List.of(minZ, maxZ, minX, maxX)) {
+			assertEquals(0.0, s.lo(), EPS);
+			assertEquals(1.0, s.hi(), EPS);
+			assertEquals(64.0, s.baseY(), EPS);
+		}
+	}
+
+	@Test
+	void equalHeightSeamIsSuppressed() {
+		// Two coplanar rects abutting along X at x = 1 (a merge seam): the shared
+		// edge drops no skirt; the four outer edges do.
+		StandableRect left = new StandableRect(0, 0, 1, 1, 64.0);
+		StandableRect right = new StandableRect(1, 0, 2, 1, 64.0);
+		List<DownSkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(left, right), List.of());
+		// left's +X edge (x = 1) and right's -X edge (x = 1) are both fully shared.
+		assertTrue(find(spans, false, true, 1.0) == null, "left +X seam suppressed");
+		assertTrue(find(spans, false, false, 1.0) == null, "right -X seam suppressed");
+		// Outer edges survive: left -X at x = 0, right +X at x = 2.
+		assertTrue(find(spans, false, false, 0.0) != null);
+		assertTrue(find(spans, false, true, 2.0) != null);
+	}
+
+	@Test
+	void partialSeamLeavesUnsharedRemainder() {
+		// A big rect [0,2]x[0,1] and a sliver [2,3]x[0,0.4] abutting its +X edge over
+		// only z in [0,0.4]: the +X edge drops a skirt only over the unshared z [0.4,1].
+		StandableRect big = new StandableRect(0, 0, 2, 1, 64.0);
+		StandableRect sliver = new StandableRect(2, 0, 3, 0.4, 64.0);
+		List<DownSkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(big, sliver), List.of());
+		DownSkirtSpan plusX = find(spans, false, true, 2.0);
+		// Big's +X edge (x = 2) leftover after the [0,0.4] seam -> [0.4,1].
+		DownSkirtSpan remainder = null;
+		for (DownSkirtSpan s : spans) {
+			if (!s.alongX() && s.maxSide() && Math.abs(s.line() - 2.0) < EPS && s.baseY() == 64.0
+					&& s.lo() > 0.3) {
+				remainder = s;
+			}
+		}
+		assertTrue(remainder != null, "expected an unshared remainder on the +X edge");
+		assertEquals(0.4, remainder.lo(), EPS);
+		assertEquals(1.0, remainder.hi(), EPS);
+	}
+
+	@Test
+	void occluderSubSpanIsSubtracted() {
+		// A wall on the +X edge (an OccluderSpan over the full edge) turns that edge
+		// into an upward skirt, so no downward skirt is emitted there; the other three
+		// edges still drop.
+		StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
+		OccluderSpan wall = new OccluderSpan(false, true, 1.0, 0.0, 1.0, 64.0, 65.0);
+		List<DownSkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(wall));
+		assertTrue(find(spans, false, true, 1.0) == null, "+X edge is a wall, no down skirt");
+		assertEquals(3, spans.size());
+	}
+}
