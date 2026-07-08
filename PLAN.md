@@ -1,8 +1,6 @@
-# PLAN — MobWalk rebrand (Milestone 5.5) + settings (Milestone 6)
+# PLAN — Settings (Milestone 7)
 
-Executable plan for a follow-up agent. Two milestones, each its own branch/PR:
-the **rebrand** ships first (a package move touches every file, so it stays out of
-the settings diff), then the **settings** milestone builds on top.
+Executable plan for a follow-up agent.
 
 Per [`AGENTS.md`](AGENTS.md): each step below is one commit, validated in-game via
 `./gradlew runClient` before the next, with its docs updated **in the same commit**.
@@ -12,70 +10,12 @@ on world load/unload or window resize; the mod does nothing on a dedicated serve
 
 ## Branching / PRs
 
-- **Milestone 5.5 — rebrand** (Step 1): branch `cursor/rebrand-mobwalk-31f3`;
-  PR "Milestone 5.5: rebrand to MobWalk (dev.kelianmao.mobwalk)";
-  commit `Milestone 5.5: rebrand com.example.overlay → dev.kelianmao.mobwalk`.
-  Merge before starting settings.
-- **Milestone 6 — settings** (Steps 2–7): branch `cursor/mobwalk-settings-31f3`;
-  PR "Milestone 6: settings (config, hitbox library, ModMenu/Cloth screen)";
+- **Milestone 7 — settings** (Steps 2–7): branch `cursor/mobwalk-settings-31f3`;
+  PR "Milestone 7: settings (config, hitbox library, ModMenu/Cloth screen)";
   one commit per step.
 
-## Identity
 
-| Field | Value |
-| ----- | ----- |
-| maven group | `dev.kelianmao` |
-| mod id | `mobwalk` |
-| package base | `dev.kelianmao.mobwalk` |
-| display name | MobWalk |
-| jar / archives base | `mobwalk` (`mobwalk-1.0.0.jar`) |
-| config file | `config/mobwalk.json` |
-
-Name is free on Modrinth and CurseForge as of planning; claim the public slug at
-publish time (distribution is out of scope here). The two **mod-identity** classes
-are renamed to the product: `OverlayMod` → `MobWalk` (shared mod id/logger) and
-`OverlayClient` → `MobWalkClient` (client entrypoint). The **overlay-framework**
-class names (`OverlayManager` / `WorldOverlayManager` and the `*Overlay` / `*Span`
-types) are **kept** — they name the framework, not the product — so the rebrand is
-a package/id/metadata move plus those two identity renames, not a class-rename churn.
-
----
-
-# Milestone 5.5 — Rebrand
-
-## Step 1 — Rebrand to MobWalk
-
-**Scope:** replace the `com.example` / `overlay` / "example" placeholders with the
-MobWalk identity. Pure rename, zero behavior change.
-
-- `gradle.properties`: `maven_group=dev.kelianmao`, `archives_base_name=mobwalk`.
-- `settings.gradle`: `rootProject.name` if set.
-- Package move `com.example.overlay` → `dev.kelianmao.mobwalk` across `src/main`,
-  `src/client`, `src/test` (directories + `package`/`import` statements);
-  overlay-framework class names unchanged.
-- Rename the two mod-identity classes (files + declarations + all references):
-  `OverlayMod` → `MobWalk`, `OverlayClient` → `MobWalkClient`.
-- `MobWalk`: `MOD_ID = "mobwalk"`, logger name.
-- Keymapping translation key `key.overlay.occluder_style` (the K key) →
-  `key.mobwalk.occluder_style` (string rename only; K behaviour unchanged).
-- `fabric.mod.json`: `id` `mobwalk`, `name` "MobWalk", `description`, `authors`,
-  `contact`, client entrypoint FQCN `dev.kelianmao.mobwalk.client.MobWalkClient`.
-- Docs in commit: `AGENTS.md` "**Package base** is …" line → `dev.kelianmao.mobwalk`
-  (mod id `mobwalk`); `docs/project.md` repo-layout paths and jar name; any other
-  `com.example.overlay` references in `docs/*`.
-
-**Unit tests:** existing suite must still pass (compile + package refactor only).
-
-**In-game checklist:**
-1. `./gradlew build` and `./gradlew test` → pass.
-2. `runClient` → mod loads under id `mobwalk` / name "MobWalk" (visible in the mod
-   list); no errors.
-3. Regression: HUD readout, stick selection, radius scroll, K cycle, and profile
-   cycle all work exactly as before.
-
----
-
-# Milestone 6 — Settings
+# Milestone 7 — Settings
 
 The headline feature is a **user-editable hitbox/profile library** (built-in vanilla
 presets + custom hitboxes); the rest is a master toggle, flood defaults, keybinds,

@@ -32,12 +32,22 @@ package dev.kelianmao.mobwalk.client;
  *                     upward skirt rises from when the renderer draws on the visible
  *                     face; equals {@code baseY} except for render-taller-than-collide
  *                     blocks. See {@link StandableRect}.
+ * @param depth        the source rect's debug flood-distance tag (see
+ *                     {@link StandableRect}); an occluder skirt inherits its surface's
+ *                     depth so the two share a color band. {@code -1} = "no flood
+ *                     depth" (rendered grey).
  */
 public record OccluderSpan(boolean alongX, boolean positiveSide, double line,
-		double lo, double hi, double baseY, double topY, double visualBaseY) {
+		double lo, double hi, double baseY, double topY, double visualBaseY, int depth) {
+	/** A span with an explicit visible base but no flood depth ({@code depth = -1}). */
+	public OccluderSpan(boolean alongX, boolean positiveSide, double line,
+			double lo, double hi, double baseY, double topY, double visualBaseY) {
+		this(alongX, positiveSide, line, lo, hi, baseY, topY, visualBaseY, -1);
+	}
+
 	/** A span whose visible base coincides with its collision base (the common case). */
 	public OccluderSpan(boolean alongX, boolean positiveSide, double line,
 			double lo, double hi, double baseY, double topY) {
-		this(alongX, positiveSide, line, lo, hi, baseY, topY, baseY);
+		this(alongX, positiveSide, line, lo, hi, baseY, topY, baseY, -1);
 	}
 }

@@ -196,7 +196,7 @@ public final class SurfaceSelection {
 					: selectEager(level, start, radius, profile, computeVisualTop);
 			occluders = computeOccluders(level, result, profile);
 			downSkirts = computeDownSkirts(result, occluders);
-			holes = computeHoles(level, result, downSkirts, profile);
+			holes = computeHoles(level, result, downSkirts, profile, radius);
 			return;
 		}
 
@@ -227,7 +227,7 @@ public final class SurfaceSelection {
 		result = LAZY ? lazyRects : eager;
 		occluders = computeOccluders(level, result, profile);
 		downSkirts = computeDownSkirts(result, occluders);
-		holes = computeHoles(level, result, downSkirts, profile);
+		holes = computeHoles(level, result, downSkirts, profile, radius);
 	}
 
 	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
@@ -356,14 +356,18 @@ public final class SurfaceSelection {
 
 	// BFS over merged rects: an edge exists iff footprints share an edge with
 	// positive overlap and the height difference is within reach (a single
-	// threshold). Seeds are the merged rects that cover a seed surface.
+	// threshold). Seeds are the merged rects that cover a seed surface. Each
+	// reached rect is re-emitted carrying its BFS hop-count from the seed (0 =
+	// seed) as its debug flood-depth tag (see StandableRect.depth).
 	private static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
 		int n = rects.size();
 		boolean[] visited = new boolean[n];
+		int[] depth = new int[n];
 		Deque<Integer> queue = new ArrayDeque<>();
 		for (int i = 0; i < n; i++) {
 			if (coversAnySeed(rects.get(i), seeds)) {
 				visited[i] = true;
+				depth[i] = 0;
 				queue.addLast(i);
 			}
 		}
@@ -372,7 +376,7 @@ public final class SurfaceSelection {
 		while (!queue.isEmpty()) {
 			int i = queue.pollFirst();
 			StandableRect cur = rects.get(i);
-			out.add(cur);
+			out.add(withDepth(cur, depth[i]));
 			for (int j = 0; j < n; j++) {
 				if (visited[j]) {
 					continue;
@@ -380,9 +384,44 @@ public final class SurfaceSelection {
 				StandableRect other = rects.get(j);
 				if (Math.abs(other.topY() - cur.topY()) <= reach + EPS && footprintAdjacent(cur, other)) {
 					visited[j] = true;
+					depth[j] = depth[i] + 1;
 					queue.addLast(j);
 				}
 			}
+		}
+		return out;
+	}
+
+	// Copy of a rect carrying a debug flood-depth tag (see StandableRect.depth).
+	private static StandableRect withDepth(StandableRect r, int depth) {
+		return new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
+			r.topY(), r.visualTopY(), depth);
+	}
+
+	// For each merged rect, the min flood-depth over the raw (pre-merge) reached
+	// nodes it covers: same collision top (|dTopY| < EPS) and positive-area XZ
+	// overlap. Merge is area-preserving over the reached nodes, so every merged
+	// rect is covered by >= 1 node and thus gets a depth (never left at -1).
+	// Package-private for unit tests (synthetic rects, no world).
+	static int[] depthForMerged(List<StandableRect> merged, List<StandableRect> rawNodes, int[] rawDepths) {
+		int[] out = new int[merged.size()];
+		for (int i = 0; i < merged.size(); i++) {
+			StandableRect m = merged.get(i);
+			int best = -1;
+			for (int k = 0; k < rawNodes.size(); k++) {
+				StandableRect r = rawNodes.get(k);
+				if (Math.abs(r.topY() - m.topY()) > EPS) {
+					continue;
+				}
+				if (Math.min(r.maxX(), m.maxX()) - Math.max(r.minX(), m.minX()) <= EPS
+						|| Math.min(r.maxZ(), m.maxZ()) - Math.max(r.minZ(), m.minZ()) <= EPS) {
+					continue;
+				}
+				if (best < 0 || rawDepths[k] < best) {
+					best = rawDepths[k];
+				}
+			}
+			out[i] = best;
 		}
 		return out;
 	}
@@ -471,6 +510,104 @@ public final class SurfaceSelection {
 			i = j;
 		}
 		return out;
+	}
+
+	// Depth-aware variant of mergeCoplanar used by the lazy flood path. Splits
+	// raw nodes into inner (depth < limit) and frontier (depth >= limit), unions
+	// each independently, then subtracts the inner area from the frontier so the
+	// two tile cleanly with no overlap (inner has priority in the overlap zone
+	// where dilated surfaces grow into each other). Result: the frontier ring
+	// keeps its real depth and is never collapsed into the inner blob, so the
+	// renderer's depth-based perimeter suppression and grey-blend work correctly.
+	// Package-private for unit tests.
+	static List<StandableRect> mergeCoplanarSplitFrontier(
+			List<StandableRect> nodes, int[] nodeDepths, int limit) {
+		if (nodes.isEmpty()) {
+			return List.of();
+		}
+		List<StandableRect> sorted = new ArrayList<>(nodes);
+		int[] sortedDepths = new int[nodeDepths.length];
+		Integer[] idx = new Integer[nodes.size()];
+		for (int i = 0; i < idx.length; i++) {
+			idx[i] = i;
+		}
+		Arrays.sort(idx, Comparator.comparingDouble(a -> nodes.get(a).topY()));
+		for (int i = 0; i < idx.length; i++) {
+			sorted.set(i, nodes.get(idx[i]));
+			sortedDepths[i] = nodeDepths[idx[i]];
+		}
+
+		List<StandableRect> out = new ArrayList<>();
+		int i = 0;
+		while (i < sorted.size()) {
+			double topY = sorted.get(i).topY();
+			int j = i + 1;
+			while (j < sorted.size() && sorted.get(j).topY() - topY <= EPS) {
+				j++;
+			}
+
+			double groupVisualTop = topY;
+			List<Rect> innerRaw = new ArrayList<>();
+			List<Rect> frontierRaw = new ArrayList<>();
+			for (int k = i; k < j; k++) {
+				StandableRect r = sorted.get(k);
+				groupVisualTop = Math.max(groupVisualTop, r.visualTopY());
+				Rect rect = new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ());
+				if (sortedDepths[k] >= limit) {
+					frontierRaw.add(rect);
+				} else {
+					innerRaw.add(rect);
+				}
+			}
+
+			// Union + strip-merge inner nodes.
+			List<Rect> innerMerged = stripMerge(union(innerRaw));
+
+			// Subtract the merged inner area from each frontier node, then union
+			// + strip-merge the remnants. The subtraction removes the dilation
+			// overlap so inner and frontier tile cleanly (inner has priority).
+			List<Rect> frontierRemnants = new ArrayList<>();
+			for (Rect fr : frontierRaw) {
+				frontierRemnants.addAll(subtractRects(fr, innerMerged));
+			}
+			List<Rect> frontierMerged = stripMerge(union(frontierRemnants));
+
+			// Tag depths: inner rects get min covering depth, frontier rects
+			// get limit (they only overlap frontier raw nodes after subtraction).
+			for (Rect r : innerMerged) {
+				int best = -1;
+				for (int k = i; k < j; k++) {
+					StandableRect node = sorted.get(k);
+					if (Math.min(node.maxX(), r.maxX()) - Math.max(node.minX(), r.minX()) <= EPS
+							|| Math.min(node.maxZ(), r.maxZ()) - Math.max(node.minZ(), r.minZ()) <= EPS) {
+						continue;
+					}
+					if (best < 0 || sortedDepths[k] < best) {
+						best = sortedDepths[k];
+					}
+				}
+				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
+					topY, groupVisualTop, best));
+			}
+			for (Rect r : frontierMerged) {
+				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
+					topY, groupVisualTop, limit));
+			}
+			i = j;
+		}
+		return out;
+	}
+
+	// The X-then-Z greedy strip merge loop used by both mergeCoplanar and
+	// mergeCoplanarSplitFrontier (the split path runs it per bucket).
+	private static List<Rect> stripMerge(List<Rect> rects) {
+		int before;
+		do {
+			before = rects.size();
+			rects = mergeAlong(rects, true);
+			rects = mergeAlong(rects, false);
+		} while (rects.size() < before);
+		return rects;
 	}
 
 	// Re-cut a set of (possibly overlapping) coplanar rects into a non-overlapping
@@ -569,6 +706,18 @@ public final class SurfaceSelection {
 
 	private static SpanKey spanKey(double lo, double hi) {
 		return new SpanKey(Math.round(lo * 1024.0), Math.round(hi * 1024.0));
+	}
+
+	// Smaller of two debug flood-depths, treating -1 ("no depth") as absent so it
+	// never wins over a real depth (only two -1s yield -1).
+	private static int minDepth(int a, int b) {
+		if (a < 0) {
+			return b;
+		}
+		if (b < 0) {
+			return a;
+		}
+		return Math.min(a, b);
 	}
 
 	/**
@@ -723,6 +872,9 @@ public final class SurfaceSelection {
 			double halfW, double height, List<OccluderSpan> out) {
 		double topY = r.topY();
 		double visualTopY = r.visualTopY();
+		// The occluder skirt inherits its surface's flood-depth so the two share a
+		// color band in the debug depth-coloring (see StandableRect.depth).
+		int depth = r.depth();
 		for (WorldBox b : candidates) {
 			if (!wallOccluder(b, topY, height)) {
 				continue;
@@ -737,20 +889,20 @@ public final class SurfaceSelection {
 			double zHi = Math.min(oMaxZ, r.maxZ());
 			if (zHi - zLo > EPS) {
 				if (Math.abs(oMinX - r.maxX()) < EPS) {
-					out.add(new OccluderSpan(false, true, r.maxX(), zLo, zHi, topY, top, visualTopY));
+					out.add(new OccluderSpan(false, true, r.maxX(), zLo, zHi, topY, top, visualTopY, depth));
 				}
 				if (Math.abs(oMaxX - r.minX()) < EPS) {
-					out.add(new OccluderSpan(false, false, r.minX(), zLo, zHi, topY, top, visualTopY));
+					out.add(new OccluderSpan(false, false, r.minX(), zLo, zHi, topY, top, visualTopY, depth));
 				}
 			}
 			double xLo = Math.max(oMinX, r.minX());
 			double xHi = Math.min(oMaxX, r.maxX());
 			if (xHi - xLo > EPS) {
 				if (Math.abs(oMinZ - r.maxZ()) < EPS) {
-					out.add(new OccluderSpan(true, true, r.maxZ(), xLo, xHi, topY, top, visualTopY));
+					out.add(new OccluderSpan(true, true, r.maxZ(), xLo, xHi, topY, top, visualTopY, depth));
 				}
 				if (Math.abs(oMaxZ - r.minZ()) < EPS) {
-					out.add(new OccluderSpan(true, false, r.minZ(), xLo, xHi, topY, top, visualTopY));
+					out.add(new OccluderSpan(true, false, r.minZ(), xLo, xHi, topY, top, visualTopY, depth));
 				}
 			}
 		}
@@ -780,23 +932,29 @@ public final class SurfaceSelection {
 			// baseY is fixed per group (grouped on it); the visible base can differ
 			// when a raised block abuts a flush one, so take the max like top.
 			double visualBase = head.visualBaseY();
+			// Coalesced spans can come from different surfaces (same edge line/height,
+			// different depth); take the min so the merged marker reads as the nearest
+			// surface's band (mirrors the max-top handling above).
+			int depth = head.depth();
 			for (int i = 1; i < group.size(); i++) {
 				OccluderSpan s = group.get(i);
 				if (s.lo() <= hi + EPS) {
 					hi = Math.max(hi, s.hi());
 					top = Math.max(top, s.topY());
 					visualBase = Math.max(visualBase, s.visualBaseY());
+					depth = minDepth(depth, s.depth());
 				} else {
 					out.add(new OccluderSpan(head.alongX(), head.positiveSide(),
-						head.line(), lo, hi, head.baseY(), top, visualBase));
+						head.line(), lo, hi, head.baseY(), top, visualBase, depth));
 					lo = s.lo();
 					hi = s.hi();
 					top = s.topY();
 					visualBase = s.visualBaseY();
+					depth = s.depth();
 				}
 			}
 			out.add(new OccluderSpan(head.alongX(), head.positiveSide(),
-				head.line(), lo, hi, head.baseY(), top, visualBase));
+				head.line(), lo, hi, head.baseY(), top, visualBase, depth));
 		}
 		return out;
 	}
@@ -924,7 +1082,9 @@ public final class SurfaceSelection {
 		}
 
 		for (double[] iv : subtractIntervals(lo, hi, covered)) {
-			out.add(new DownSkirtSpan(alongX, maxSide, line, iv[0], iv[1], r.topY(), r.visualTopY()));
+			// The skirt inherits its surface's flood-depth so the two share a color
+			// band in the debug depth-coloring (see StandableRect.depth).
+			out.add(new DownSkirtSpan(alongX, maxSide, line, iv[0], iv[1], r.topY(), r.visualTopY(), r.depth()));
 		}
 	}
 
@@ -962,7 +1122,7 @@ public final class SurfaceSelection {
 	// span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
 	// homogeneous sub-spans. Runs once per select (not per frame).
 	private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
-			List<DownSkirtSpan> drops, EntityProfile profile) {
+			List<DownSkirtSpan> drops, EntityProfile profile, int depthLimit) {
 		if (drops.isEmpty()) {
 			return List.of();
 		}
@@ -972,6 +1132,9 @@ public final class SurfaceSelection {
 		List<StandableRect> ledges = new ArrayList<>();
 		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 		for (DownSkirtSpan sp : drops) {
+			if (sp.depth() >= depthLimit) {
+				continue;
+			}
 			Rect band = fallFootprint(sp);
 			ledges.clear();
 			gatherLedges(level, cursor, band, sp.baseY(), rects, halfW, height, ledges);
@@ -1286,11 +1449,14 @@ public final class SurfaceSelection {
 	 * enqueued iff it is unvisited,
 	 * {@link #footprintAdjacent}, and within {@code reach}.
 	 *
-	 * <p>Bounded by the same 3-D cube as eager: a box is a node iff its source
-	 * block is within Chebyshev {@code radius} in X/Z <b>and</b> {@code |by-oy| <=
-	 * radius}. The merge/union runs <b>after</b> the flood on the reached set only
-	 * (area-preserving, so connectivity is unchanged — {@code footprintAdjacent}
-	 * already treats overlap as connected). Result is set-equal to eager.
+	 * <p><b>Depth-bounded</b> (debug mode): the flood stops when BFS hop-count
+	 * exceeds {@code radius} (now interpreted as a max-depth limit, not a spatial
+	 * window). There is no spatial X/Z bound on which columns the flood can reach;
+	 * the depth limit itself provides termination. A generous Y band
+	 * ({@code oy ± radius + 2}) still constrains vertical scanning since each step
+	 * changes height by at most {@code reach}. The merge/union runs <b>after</b>
+	 * the flood on the reached set only (area-preserving, so connectivity is
+	 * unchanged — {@code footprintAdjacent} already treats overlap as connected).
 	 */
 	private static final class LazyFlood {
 		private final Level level;
@@ -1354,37 +1520,55 @@ public final class SurfaceSelection {
 			if (seeds.isEmpty()) {
 				return List.of();
 			}
-			Set<CellSurface> visited = new HashSet<>(seeds);
-			Deque<CellSurface> queue = new ArrayDeque<>(seeds);
+			// depth doubles as the visited set: a key is present iff visited, and its
+			// value is the BFS hop-count from the seed (0 = seed). FIFO queue + set on
+			// enqueue makes this the shortest surface-graph distance.
+			Map<CellSurface, Integer> depth = new HashMap<>();
+			Deque<CellSurface> queue = new ArrayDeque<>();
+			for (CellSurface seed : seeds) {
+				if (depth.putIfAbsent(seed, 0) == null) {
+					queue.addLast(seed);
+				}
+			}
+			// The reached raw (pre-merge) nodes and their depths, in lock-step; the
+			// merged output's per-rect depth is aggregated (min) from these.
 			List<StandableRect> reached = new ArrayList<>();
+			List<Integer> reachedDepths = new ArrayList<>();
 			while (!queue.isEmpty()) {
 				CellSurface s = queue.pollFirst();
+				int d = depth.get(s);
 				reached.add(s.rect());
+				reachedDepths.add(d);
+				// At the depth limit: emit this node but don't explore its neighbors.
+				if (d >= radius) {
+					continue;
+				}
 				double h = s.rect().topY();
 				for (int cx = s.cx() - neighbour; cx <= s.cx() + neighbour; cx++) {
-					if (Math.abs(cx - ox) > radius) {
-						continue;
-					}
 					for (int cz = s.cz() - neighbour; cz <= s.cz() + neighbour; cz++) {
-						if (Math.abs(cz - oz) > radius) {
-							continue;
-						}
 						// Only tops within a single step of h can connect, so scan
 						// just that height window of the neighbour column.
 						for (CellSurface t : collect(cx, cz, h - reach, h + reach)) {
-							if (visited.contains(t)) {
+							if (depth.containsKey(t)) {
 								continue;
 							}
 							if (footprintAdjacent(s.rect(), t.rect())) {
-								visited.add(t);
+								depth.put(t, d + 1);
 								queue.addLast(t);
 							}
 						}
 					}
 				}
 			}
-			// Merge/union the reached set for rendering (post-flood; area-preserving).
-			return mergeCoplanar(reached);
+			// Frontier-split merge: union inner and frontier separately, subtract
+			// inner from frontier (inner has priority in the dilation overlap),
+			// so the frontier ring keeps its real depth and is never collapsed
+			// into the inner blob.
+			int[] rawDepths = new int[reachedDepths.size()];
+			for (int i = 0; i < rawDepths.length; i++) {
+				rawDepths[i] = reachedDepths.get(i);
+			}
+			return mergeCoplanarSplitFrontier(reached, rawDepths, radius);
 		}
 
 		// Node surfaces of cell (cx,cz) whose top lies in [topLo,topHi] and whose

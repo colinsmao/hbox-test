@@ -16,11 +16,23 @@ package dev.kelianmao.mobwalk.client;
  * the face you actually see instead of buried inside the block; for every other
  * block it equals {@code topY}. Nothing but rendering reads it (see
  * {@code docs/geometry.md} "Visible-face top vs collision top").
+ *
+ * <p>{@code depth} is a <b>debug-only</b> flood-distance tag: the BFS hop-count
+ * from the seed at which this surface was reached (0 = seed), aggregated by min
+ * over the raw nodes a merged rect covers. {@code -1} means "no flood depth"
+ * (constructed outside the flood, or a test fixture); the renderer draws that
+ * grey. Nothing but the debug depth-coloring reads it.
  */
 public record StandableRect(double minX, double minZ, double maxX, double maxZ,
-		double topY, double visualTopY) {
+		double topY, double visualTopY, int depth) {
+	/** A rect with an explicit visible top but no flood depth ({@code depth = -1}). */
+	public StandableRect(double minX, double minZ, double maxX, double maxZ,
+			double topY, double visualTopY) {
+		this(minX, minZ, maxX, maxZ, topY, visualTopY, -1);
+	}
+
 	/** A rect whose visible top coincides with its collision top (the common case). */
 	public StandableRect(double minX, double minZ, double maxX, double maxZ, double topY) {
-		this(minX, minZ, maxX, maxZ, topY, topY);
+		this(minX, minZ, maxX, maxZ, topY, topY, -1);
 	}
 }
