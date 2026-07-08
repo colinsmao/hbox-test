@@ -160,13 +160,17 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   docs. Never lump distinct steps together, and never defer doc updates to the end.
   This cadence is also what makes the commit hook a per-step checkpoint: batching many
   steps into one commit defeats it.
+- **Never commit without explicit human approval.** This is absolute: the agent may
+  not `git commit` on its own initiative, self-approve the commit-gate hook, retry to
+  bypass it, or treat a green build/test as approval. Stage the change, surface the
+  checklist, and **wait for the human to say commit.**
 - **Don't commit until the step is confirmed in-game.** A green `./gradlew build` is
   not sufficient — behavior here is runtime/visual. Make the edits, run the gates,
   then **wait until the step's in-game checklist passes** (user confirms, or you run
   `runClient` and verify) before committing that step. This applies to `PLAN.md` / doc
   updates too: don't commit a step's plan or doc change until that step is confirmed
   working. (The `git commit` hook in `.cursor/hooks.json` will pause each commit to
-  reconfirm this.)
+  reconfirm this — but the hook is a backstop, not a substitute for approval.)
 - **Sole-agent assumption.** Unless told otherwise, assume you are the only
   agent/person in this repo; no need to defensively re-check remote/branch state for
   concurrent changes before each action (a quick check when something looks off is
