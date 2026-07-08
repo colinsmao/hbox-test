@@ -1,5 +1,6 @@
 package dev.kelianmao.mobwalk.client.widgets;
 
+import java.util.Arrays;
 import java.util.List;
 
 import dev.kelianmao.mobwalk.client.DownSkirtSpan;
@@ -34,8 +35,9 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * its exposed L. The flat tops/borders draw <b>through walls</b> (depth-off fill
  * layer in {@code WorldOverlayManager}) so any remaining buried surface is
  * visible for debugging; each surface is tinted by <b>height</b> (a blue-to-red
- * gradient across the selection's height range). Surfaces within the last block
- * before the flood-radius cutoff blend toward <b>grey</b> to signal "increase the
+ * gradient across the selection's height range). Surfaces within the last two
+ * blocks before the flood-radius cutoff blend toward <b>grey</b> (the outermost
+ * block fully grey) to signal "increase the
  * radius or re-center" — a selection bounded by a real drop stops short of the
  * radius and stays height-colored, so a radius cutoff reads differently from a
  * true boundary. Each edge drops a <b>depth-tested vertical skirt</b> so the
@@ -194,8 +196,13 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final float[] RING_COLOR = {0.5f, 0.5f, 0.5f};
 	private volatile double ringCenterX;
 	private volatile double ringCenterZ;
+	// The grey buffer is two blocks wide: the color ramps from height-colored to
+	// grey over the inner block [ringStart, ringFull], and the outermost block
+	// [ringFull, ringEnd] is solid grey. Keeping ringFull one block inside ringEnd
+	// is what makes the whole outer block read as fully grey.
 	private volatile double ringStart;
-	private volatile double ringEnd = 1.0;
+	private volatile double ringFull = 1.0;
+	private volatile double ringEnd = 2.0;
 
 	@Override
 	public String id() {
@@ -233,15 +240,17 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		occluderSnapshot = cache.allOccluders();
 		downSkirtSnapshot = cache.allDownSkirts();
 		holeSnapshot = cache.allHoles();
-		// The cutoff ring sits one block inside the window's outer painted extent:
-		// the far edge of the outermost column (seed ± radius), grown by the
-		// entity half-width, measured (Chebyshev) from the seed block center.
+		// The cutoff ring sits inside the window's outer painted extent: the far
+		// edge of the outermost column (seed ± radius), grown by the entity
+		// half-width, measured (Chebyshev) from the seed block center. The grey
+		// buffer is two blocks deep — a ramp block then a solid-grey outer block.
 		if (lastSeed != null) {
 			double halfW = profile.width() / 2.0;
 			ringCenterX = lastSeed.getX() + 0.5;
 			ringCenterZ = lastSeed.getZ() + 0.5;
 			ringEnd = selectionRadius + 0.5 + halfW;
-			ringStart = ringEnd - 1.0;
+			ringFull = ringEnd - 1.0;
+			ringStart = ringEnd - 2.0;
 		}
 	}
 
@@ -580,16 +589,21 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		vertex(buffer, matrix, x0, y, z0, r, g, b, a);
 	}
 
-	// The flat top, split into sub-quads at the cutoff-ring square (the lines
-	// |x-center| == ringStart and |z-center| == ringStart). The grey fade is a
+	// The flat top, split into sub-quads at BOTH cutoff-ring squares (the lines
+	// |x-center| == ringStart / ringFull, and likewise for z). The grey fade is a
 	// per-vertex color, so a single huge quad would smear the ramp across its whole
-	// length; splitting keeps the fade inside the <=1-block outer band — the
-	// interior stays one fully-colored quad, the outer strips fade correctly.
+	// length; splitting at ringStart keeps the ramp inside the inner buffer block,
+	// and splitting at ringFull makes the outer block a crisp solid-grey quad (both
+	// its edges pin to full grey). The interior stays one fully-colored quad.
 	private void fadedTop(BufferBuilder buffer, Matrix4fc matrix,
 			float minX, float maxX, float minZ, float maxZ, float y,
 			float r, float g, float b, float a) {
-		float[] xs = breakpoints(minX, maxX, (float) (ringCenterX - ringStart), (float) (ringCenterX + ringStart));
-		float[] zs = breakpoints(minZ, maxZ, (float) (ringCenterZ - ringStart), (float) (ringCenterZ + ringStart));
+		float[] xs = breakpoints(minX, maxX,
+			(float) (ringCenterX - ringFull), (float) (ringCenterX - ringStart),
+			(float) (ringCenterX + ringStart), (float) (ringCenterX + ringFull));
+		float[] zs = breakpoints(minZ, maxZ,
+			(float) (ringCenterZ - ringFull), (float) (ringCenterZ - ringStart),
+			(float) (ringCenterZ + ringStart), (float) (ringCenterZ + ringFull));
 		for (int i = 0; i + 1 < xs.length; i++) {
 			for (int j = 0; j + 1 < zs.length; j++) {
 				quad(buffer, matrix, xs[i], xs[i + 1], zs[j], zs[j + 1], y, r, g, b, a);
@@ -597,23 +611,30 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 	}
 
-	// Sorted span ends [lo, hi] plus any of the two cut coordinates lying strictly
-	// inside, so the span is split where it crosses the cutoff-ring boundary.
-	private static float[] breakpoints(float lo, float hi, float cutA, float cutB) {
-		float lowCut = Math.min(cutA, cutB);
-		float highCut = Math.max(cutA, cutB);
-		boolean useLow = lowCut > lo + 1.0e-4f && lowCut < hi - 1.0e-4f;
-		boolean useHigh = highCut > lo + 1.0e-4f && highCut < hi - 1.0e-4f;
-		if (useLow && useHigh) {
-			return new float[] {lo, lowCut, highCut, hi};
+	// Sorted span ends [lo, hi] plus any of the given cut coordinates lying strictly
+	// inside, so the span is split where it crosses a cutoff-ring boundary (the
+	// ramp-start and full-grey ring lines). Cuts are order-independent and
+	// deduplicated (two ring lines can coincide on tiny selections).
+	private static float[] breakpoints(float lo, float hi, float... cuts) {
+		float[] pts = new float[cuts.length + 2];
+		int n = 0;
+		pts[n++] = lo;
+		pts[n++] = hi;
+		for (float c : cuts) {
+			if (c > lo + 1.0e-4f && c < hi - 1.0e-4f) {
+				pts[n++] = c;
+			}
 		}
-		if (useLow) {
-			return new float[] {lo, lowCut, hi};
+		pts = Arrays.copyOf(pts, n);
+		Arrays.sort(pts);
+		float[] out = new float[n];
+		int m = 0;
+		for (float p : pts) {
+			if (m == 0 || p > out[m - 1] + 1.0e-4f) {
+				out[m++] = p;
+			}
 		}
-		if (useHigh) {
-			return new float[] {lo, highCut, hi};
-		}
-		return new float[] {lo, hi};
+		return Arrays.copyOf(out, m);
 	}
 
 	// Single emission choke point: blends the vertex color toward RING_COLOR by how
@@ -622,9 +643,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private void vertex(BufferBuilder buffer, Matrix4fc matrix, float x, float y, float z,
 			float r, float g, float b, float a) {
 		double d = Math.max(Math.abs(x - ringCenterX), Math.abs(z - ringCenterZ));
-		double t = Math.max(0.0, Math.min(1.0, (d - ringStart) / (ringEnd - ringStart)));
-		// Ease the ramp up (sqrt) so the grey saturates early and fills most of the
-		// outer block, while staying pinned to 0 at ringStart (no bleed inward).
+		double t = Math.max(0.0, Math.min(1.0, (d - ringStart) / (ringFull - ringStart)));
+		// Ease the ramp up (sqrt) so grey saturates early within the inner ramp
+		// block, staying pinned to 0 at ringStart (no bleed inward); the clamp pins
+		// it to 1 from ringFull outward, so the whole outer block is solid grey.
 		float f = (float) Math.sqrt(t);
 		float rr = r + (RING_COLOR[0] - r) * f;
 		float gg = g + (RING_COLOR[1] - g) * f;

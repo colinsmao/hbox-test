@@ -203,17 +203,20 @@ through-walls, depth-on `SKIRT` occluded).
   chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
   later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
   toggle and the four styles stay as-is until then.
-- **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last block
-  before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius cutoff
-  reads differently from a true boundary (a selection stopped by a real drop ends
-  short of the radius and stays height-colored). `publish` records the ring as a
-  Chebyshev square from the seed center (`ringStart`/`ringEnd`, `ringEnd = radius +
-  0.5 + halfW`); the per-vertex `vertex(...)` choke point blends every layer toward
-  grey by depth into the ring, `sqrt`-eased so the grey fills most of the outer block
-  without bleeding inward. `fadedTop` **splits each top at the ring lines** so a long
-  merged rect doesn't smear the ramp across its length — the interior stays one
-  fully-colored quad, only the ≤1-block outer strips fade. Window-boundary edges keep
-  their skirts; the grey alone signals "increase the radius / re-center".
+- **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last **two
+  blocks** before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius
+  cutoff reads differently from a true boundary (a selection stopped by a real drop
+  ends short of the radius and stays height-colored). `publish` records the ring as a
+  Chebyshev square from the seed center: `ringEnd = radius + 0.5 + halfW`, then
+  `ringFull = ringEnd - 1` and `ringStart = ringEnd - 2`. The per-vertex `vertex(...)`
+  choke point blends every layer toward grey over the **inner** buffer block
+  `[ringStart, ringFull]` (`sqrt`-eased so grey saturates early, pinned to 0 at
+  `ringStart` so it never bleeds inward) and **clamps to fully grey from `ringFull` out
+  to `ringEnd`**, so the entire outermost block is solid grey. `fadedTop` **splits each
+  top at both ring squares** (`ringStart` and `ringFull`) so a long merged rect doesn't
+  smear the ramp — the interior stays one fully-colored quad, the inner block ramps, and
+  the outer block is a crisp solid-grey quad. Window-boundary edges keep their skirts;
+  the grey alone signals "increase the radius / re-center".
 - **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
   leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **through-walls
   vertical beam** from the cliff-edge top `T`, so it reads even when the rim is behind
@@ -246,8 +249,9 @@ through-walls, depth-on `SKIRT` occluded).
   right-click trigger (select/clear) + sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the crouch-gated through-walls top + borders, the
-  ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
-  (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
+  ring-split top draw (`fadedTop`/`breakpoints`, split at both `ringStart` and
+  `ringFull`) and per-vertex grey blend (`vertex`, `RING_COLOR`,
+  `ringStart`/`ringFull`/`ringEnd`; 2-block buffer, outer block solid grey), the square fading skirt draw
   (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** down-skirt
   spans (`emitDownSkirts`, from `DownSkirtSpan`; suppressed at the outermost edge via
   `isAtOuterEdge`), **upward occluder skirts** (`emitOccluders`, the side-based interior
