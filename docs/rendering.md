@@ -119,8 +119,17 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 
 - **Stick is a trigger, not a brush.** Right-clicking (use-key rising edge) selects
   the surfaces reachable from the targeted block; right-clicking nothing clears. The
-  selection persists across item switches (drawn only while the stick is held) until
-  the next trigger or a level change.
+  selection persists across item switches (drawn while the stick is held in **either
+  hand**) until the next trigger or a level change.
+- **Either hand, main-first.** The stick works in the main **or** off hand. The
+  acting hand is chosen main-first, falling back to the off hand **only when the main
+  hand is empty** (or also a stick): a non-empty main hand is assumed to consume the
+  right-click (place/use), so an off-hand stick doesn't also fire — approximating
+  vanilla's "main acts first, off hand only if main did nothing" without an
+  interaction-result mixin (the trigger is edge-detected off the use key, so the true
+  result is unseen). The hand choice lives in `CollisionSurfaceOverlay.onUseItem`, not
+  the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
+  stays agnostic to which item (the stick) a widget cares about.
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
   `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
   (re)published into a `volatile` field on each stick action (select / clear / radius
@@ -145,8 +154,8 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   profile cycle.)
 - **Adjustable flood radius (shift+scroll).** `MobWalkClient` registers
   `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook — no mixin)
-  and, **only while holding the stick and sneaking**, changes the radius by the scroll
-  direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
+  and, **only while holding the stick (in either hand) and sneaking**, changes the
+  radius by the scroll direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
   and returns `false` to cancel the vanilla slot change. Plain scroll is untouched.
   The radius is clamped `[0, 20]` and steps by **1 up to 10, then by 2** (`12, 14, …,
   20`) — the window grows quadratically, so coarse steps keep the high end usable.

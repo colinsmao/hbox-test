@@ -243,7 +243,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			holeSnapshot = List.of();
 		}
 
-		holdingStick = player != null && player.getMainHandItem().is(Items.STICK);
+		holdingStick = player != null
+			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK));
 		crouching = player != null && player.isShiftKeyDown();
 	}
 
@@ -290,11 +291,23 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	@Override
-	public void onUseItem(Player player, InteractionHand hand) {
+	public void onUseItem(Player player) {
 		// Right-click with the stick floods the selection from the targeted block
 		// (resolved downward to its standable surface) across connected neighbors,
 		// replacing the previous selection; right-clicking nothing clears it.
-		if (!player.getItemInHand(hand).is(Items.STICK)) {
+		//
+		// The stick may be in either hand. Pick the acting hand main-first, falling
+		// back to the off hand ONLY when the main hand is empty (or also a stick):
+		// a non-empty main hand is assumed to consume the right-click (place/use), so
+		// an off-hand stick doesn't also fire — approximating vanilla's "main acts
+		// first, off hand only if main did nothing" without an interaction-result
+		// mixin (this is edge-detected off the use key, so the true result is unseen).
+		InteractionHand hand;
+		if (player.getMainHandItem().is(Items.STICK)) {
+			hand = InteractionHand.MAIN_HAND;
+		} else if (player.getOffhandItem().is(Items.STICK) && player.getMainHandItem().isEmpty()) {
+			hand = InteractionHand.OFF_HAND;
+		} else {
 			return;
 		}
 
@@ -327,11 +340,15 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	// True when shift+scroll should retarget the flood radius instead of switching
-	// the hotbar: only while holding the stick (the tool) and sneaking, so plain
-	// scroll still changes the hotbar normally.
+	// the hotbar: only while holding the stick (the tool, in either hand) and
+	// sneaking, so plain scroll still changes the hotbar normally. No empty-main
+	// gate here (unlike the use trigger): scroll doesn't compete with a main-hand
+	// right-click and only does anything once a selection exists.
 	public boolean wantsRadiusScroll() {
 		Player player = Minecraft.getInstance().player;
-		return player != null && player.getMainHandItem().is(Items.STICK) && player.isShiftKeyDown();
+		return player != null
+			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK))
+			&& player.isShiftKeyDown();
 	}
 
 	// Change the flood radius by delta (clamped) and, if a selection is active,

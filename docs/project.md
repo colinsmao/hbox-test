@@ -147,13 +147,14 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
 1. `runClient` launches with no errors in the log.
 2. **HUD:** in a world, the box + label is visible at the chosen corner and F1
    (hide HUD) hides it.
-3. **In-world:** holding a stick, the standable collision surface of the targeted
+3. **In-world:** holding a stick (in **either hand** — off hand acts only when the
+   main hand is empty or also a stick), the standable collision surface of the targeted
    block is drawn flat on top, double-sided without bad z-fighting; sweeping the
    crosshair paints a growing set whose surfaces all stay drawn; per-block shapes
    are correct (full / slab / stairs-as-L / fence-post-tops / carpet-thin) and tall
    grass/flowers resolve to the block below; the selection hides when the stick is
    unequipped and returns on re-equip; right-clicking resets it (exactly once per
-   click — holding does not spam) while swinging the arm; breaking/replacing a
+   click — holding does not spam) while swinging the acting arm; breaking/replacing a
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward
    skirt; the debug key (K) cycles the upward-marker style.

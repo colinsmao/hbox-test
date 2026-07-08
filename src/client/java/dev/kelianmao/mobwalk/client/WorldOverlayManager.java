@@ -31,7 +31,6 @@ import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec3;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -117,7 +116,7 @@ public final class WorldOverlayManager {
 		boolean down = client.screen == null && client.options.keyUse.isDown();
 		if (down && !usePressedLastTick && client.player != null) {
 			for (WorldOverlay overlay : OVERLAYS) {
-				overlay.onUseItem(client.player, InteractionHand.MAIN_HAND);
+				overlay.onUseItem(client.player);
 			}
 		}
 		usePressedLastTick = down;
