@@ -32,10 +32,12 @@ on world load/unload or window resize; the mod does nothing on a dedicated serve
 | config file | `config/mobwalk.json` |
 
 Name is free on Modrinth and CurseForge as of planning; claim the public slug at
-publish time (distribution is out of scope here). Framework class names
-(`OverlayMod` / `OverlayClient` / `OverlayManager` / `WorldOverlayManager` and the
-`*Overlay` / `*Span` types) are **kept** — they name the overlay framework, not the
-product — so the rebrand is a package/id/metadata move, not a class-rename churn.
+publish time (distribution is out of scope here). The two **mod-identity** classes
+are renamed to the product: `OverlayMod` → `MobWalk` (shared mod id/logger) and
+`OverlayClient` → `MobWalkClient` (client entrypoint). The **overlay-framework**
+class names (`OverlayManager` / `WorldOverlayManager` and the `*Overlay` / `*Span`
+types) are **kept** — they name the framework, not the product — so the rebrand is
+a package/id/metadata move plus those two identity renames, not a class-rename churn.
 
 ---
 
@@ -49,13 +51,15 @@ MobWalk identity. Pure rename, zero behavior change.
 - `gradle.properties`: `maven_group=dev.kelianmao`, `archives_base_name=mobwalk`.
 - `settings.gradle`: `rootProject.name` if set.
 - Package move `com.example.overlay` → `dev.kelianmao.mobwalk` across `src/main`,
-  `src/client`, `src/test` (directories + `package`/`import` statements); class
-  names unchanged.
-- `OverlayMod`: `MOD_ID = "mobwalk"`, logger name.
+  `src/client`, `src/test` (directories + `package`/`import` statements);
+  overlay-framework class names unchanged.
+- Rename the two mod-identity classes (files + declarations + all references):
+  `OverlayMod` → `MobWalk`, `OverlayClient` → `MobWalkClient`.
+- `MobWalk`: `MOD_ID = "mobwalk"`, logger name.
 - Keymapping translation key `key.overlay.occluder_style` (the K key) →
   `key.mobwalk.occluder_style` (string rename only; K behaviour unchanged).
 - `fabric.mod.json`: `id` `mobwalk`, `name` "MobWalk", `description`, `authors`,
-  `contact`, client entrypoint FQCN `dev.kelianmao.mobwalk.client.OverlayClient`.
+  `contact`, client entrypoint FQCN `dev.kelianmao.mobwalk.client.MobWalkClient`.
 - Docs in commit: `AGENTS.md` "**Package base** is …" line → `dev.kelianmao.mobwalk`
   (mod id `mobwalk`); `docs/project.md` repo-layout paths and jar name; any other
   `com.example.overlay` references in `docs/*`.
@@ -193,7 +197,7 @@ defaults above (default profile now Player).
   `POINT` constant (oracle/fallback); remove `PLAYER`/`RAVAGER` statics and `CYCLE`.
 - New `ProfileRegistry` (or methods on `OverlayConfig`): enabled profiles,
   `active()`, `cycleNext()` (over enabled, wraps), preset table (name → dims).
-- `OverlayClient`: `OverlayConfig.load()` early in `onInitializeClient`.
+- `MobWalkClient`: `OverlayConfig.load()` early in `onInitializeClient`.
 - `CollisionSurfaceOverlay`: initial `profile`/`selectionRadius` from config;
   sneak+right-click cycle uses the registry (over enabled) and **persists** the
   new active profile.
@@ -240,7 +244,7 @@ defaults above (default profile now Player).
 
 **Scope:** discoverable rebindable keys; optional sneak requirement for radius scroll.
 
-- `OverlayClient`: register `key.mobwalk.toggle_overlay` and
+- `MobWalkClient`: register `key.mobwalk.toggle_overlay` and
   `key.mobwalk.cycle_profile` (default unbound, `KeyMapping.Category.MISC`); toggle
   flips `config.enabled` (+save); cycle calls registry `cycleNext()` (+save), HUD
   shows name.
@@ -268,7 +272,7 @@ defaults above (default profile now Player).
 
 **Scope:** everything except the hitbox list.
 
-- `OverlayModMenuIntegration implements ModMenuApi` → `getModConfigScreenFactory()`
+- `MobWalkModMenuIntegration implements ModMenuApi` → `getModConfigScreenFactory()`
   returns the Cloth screen; `fabric.mod.json` `entrypoints.modmenu`.
 - `OverlayConfigScreen`: Cloth `ConfigBuilder` with categories General / Flood /
   Appearance: enable (boolean), active profile (selector over enabled names),

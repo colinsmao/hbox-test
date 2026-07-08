@@ -1,6 +1,6 @@
-# Graphics Overlay (Fabric Mod)
+# MobWalk (Fabric Mod)
 
-A minimal, client-side graphics overlay mod for Minecraft built on the
+A client-side overlay mod for Minecraft built on the
 [Fabric](https://fabricmc.net/) toolchain. It draws both on the in-game HUD and
 in the 3D world, with small frameworks that make adding more overlay widgets
 easy.
@@ -8,10 +8,10 @@ easy.
 ## Status
 
 Milestones 1 and 2 done: the mod builds and runs. `./gradlew build` produces
-`build/libs/graphics-overlay-1.0.0.jar`, and `./gradlew runClient` launches a dev
+`build/libs/mobwalk-1.0.0.jar`, and `./gradlew runClient` launches a dev
 client that draws:
 
-- **HUD (Milestone 1):** a demo overlay (a box + "Graphics Overlay" label) in
+- **HUD (Milestone 1):** a demo overlay (a box + "MobWalk" label) in
   the top-left of the HUD, which hides when you press F1.
 - **In-world (Milestone 2):** a ring (annulus) flat on the top face of the block
   under your crosshair, shown only while holding a stick; right-clicking the
