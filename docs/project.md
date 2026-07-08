@@ -72,8 +72,12 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   collision height (default **on**), re-flooding on toggle. Walkability math is
   unchanged — this only moves where the paint is drawn. See "Visible-face top vs
   collision top" in [`geometry.md`](geometry.md) and the surface-height toggle in
-  [`rendering.md`](rendering.md). (Remaining for this milestone: surfaces drawn through
-  water.)
+  [`rendering.md`](rendering.md). (3) **Surfaces draw through water:** the overlay
+  now draws at `BEFORE_TRANSLUCENT_TERRAIN` instead of after, so a submerged surface
+  (pond bottom) is no longer hidden by the depth the water writes — it shows
+  water-tinted, without crouching (see [`rendering.md`](rendering.md)). This is a
+  rendering fix only; **water is not walkable** (an entity-dependent modelling
+  change deferred to the profile/hitbox library).
 
 ## Repository layout
 
@@ -168,9 +172,13 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    HUD reads `surface: collision`, pressing again restores `surface: visible`; ordinary
    full blocks / slabs / stairs look identical in both modes, and the height colors don't
    shift when toggling.
-7. No errors on world load/unload or window resize; the selection clears on
+7. **Through water:** right-clicking the bottom of a pond paints its surface,
+   visible through the water (water-tinted) **without** crouching; a surface behind
+   opaque terrain (a hill) is still occluded unless crouching. (Water itself is not
+   walkable.)
+8. No errors on world load/unload or window resize; the selection clears on
    leaving/changing the world.
-8. The mod does nothing on a dedicated server.
+9. The mod does nothing on a dedicated server.
 
 ## Manual install into a real launcher
 

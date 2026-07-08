@@ -47,8 +47,35 @@ compiler and stale training data won't hand you.
 - Rendering is split into an **extraction** phase (read game state into an
   immutable snapshot) and a **drawing** phase (emit geometry). Register
   `LevelRenderEvents.END_EXTRACTION` and
-  `LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN`. The drawing context is
+  `LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN`. The drawing context is
   `LevelRenderContext` (`poseStack()`, `levelState().cameraRenderState.pos`).
+- **Draw before translucent terrain, not after — so submerged surfaces show
+  through water.** Translucent terrain (water, translucent blocks) is drawn late
+  and **writes depth**. When the overlay drew at `AFTER_TRANSLUCENT_TERRAIN`, a
+  pond-bottom surface in the depth-tested `SKIRT` layer failed the depth test
+  against the water above it and was hidden (only the depth-off crouch tops showed
+  through). Drawing at `BEFORE_TRANSLUCENT_TERRAIN` — after opaque terrain,
+  entities, and block entities — means the depth buffer holds only opaque geometry,
+  so the pond bottom passes depth and water then **blends over** it (the surface
+  reads water-tinted); opaque terrain still occludes exactly as before, and
+  entities standing on a surface still cover it. Both GPU layers move together
+  (the depth-off `FILLED` layer is unaffected by phase for opaque terrain; water
+  now merely tints the crouch tops / hole beams where it sits in front — a minor,
+  accepted cosmetic). This is a rendering fix only: water is **not** walkable —
+  treating a submerged floor as reachable is an entity-dependent modelling change
+  deferred to the profile/hitbox work (see [`project.md`](project.md) roadmap).
+  - **Known limitation — honey renders wrong (not fixed).** A honey block's own
+    standable surface draws incorrectly, and unlike other translucent blocks the
+    breakage persists **even in crouch/through-walls mode**. Only honey is affected.
+    Suspected cause (unconfirmed): the two recent changes interacting — the surface
+    sits at honey's *visible* top (`visualTopY`, since honey collides at `~15/16`
+    but renders full-height) which is exactly where honey's **own** translucent body
+    is drawn, and honey is itself translucent terrain drawn *after* our now-earlier
+    `BEFORE_TRANSLUCENT_TERRAIN` pass, so honey overdraws the surface (the crouch
+    `FILLED` layer moved earlier too, hence it no longer shows through). Honey is
+    also horizontally inset (the Point-only footprint limitation in
+    [`geometry.md`](geometry.md)). It is a rare edge case with no clean fix in sight,
+    so it is **left as-is**; revisit only if it turns out to matter.
 - **No high-level path** for arbitrary geometry: build a `BufferBuilder` and
   upload it through a `RenderPipeline` yourself. The legacy `WorldRenderEvents`
   vertex-consumer route is **gone** here. (Boxes/lines can still use vanilla
