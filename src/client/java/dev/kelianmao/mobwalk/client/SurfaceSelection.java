@@ -291,7 +291,8 @@ public final class SurfaceSelection {
 						if (colInWindow && yInWindow) {
 							candidates.add(wb);
 						}
-						if (originCol && yInWindow) {
+						// Seed tops from the clicked block (source block Y = oy).
+						if (originCol && y == oy) {
 							seedBoxes.add(wb);
 						}
 					}
@@ -299,8 +300,8 @@ public final class SurfaceSelection {
 			}
 		}
 
-		// The seed's own dilated tops decide where the flood starts; if the targeted
-		// column has no standable top (e.g. a wide entity buried beside a wall),
+		// The clicked block's dilated tops decide where the flood starts; if that
+		// block has no standable top (e.g. a wide entity buried beside a wall),
 		// there is nothing to select.
 		List<StandableRect> seedSurfaces = new ArrayList<>();
 		for (WorldBox seed : seedBoxes) {
@@ -359,7 +360,8 @@ public final class SurfaceSelection {
 	// threshold). Seeds are the merged rects that cover a seed surface. Each
 	// reached rect is re-emitted carrying its BFS hop-count from the seed (0 =
 	// seed) as its debug flood-depth tag (see StandableRect.depth).
-	private static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
+	// Package-private for unit tests (synthetic rects, no world).
+	static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
 		int n = rects.size();
 		boolean[] visited = new boolean[n];
 		int[] depth = new int[n];
@@ -1513,10 +1515,9 @@ public final class SurfaceSelection {
 		}
 
 		List<StandableRect> run() {
-			// Seeds: every standable top in the origin column within the node cube
-			// (matches eager's origin-column candidates) — the only place the full
-			// vertical band is exposed, and it is a single column.
-			List<CellSurface> seeds = collect(ox, oz, oy - radius, oy + radius + 1);
+			// Seeds: standable tops of the clicked block (matches eager). Other
+			// tops in the origin column join via normal BFS hops.
+			List<CellSurface> seeds = collectSeedBlock();
 			if (seeds.isEmpty()) {
 				return List.of();
 			}
@@ -1569,6 +1570,29 @@ public final class SurfaceSelection {
 				rawDepths[i] = reachedDepths.get(i);
 			}
 			return mergeCoplanarSplitFrontier(reached, rawDepths, radius);
+		}
+
+		// Standable tops of the clicked seed block (source block Y == oy). Keyed on
+		// block Y so every top of that block is seeded, including fence tops above
+		// oy+1.
+		private List<CellSurface> collectSeedBlock() {
+			ensureRows(ox, oz, oy, oy);
+			List<WorldBox> column = index.get(new ColKey(ox, oz));
+			if (column == null) {
+				return List.of();
+			}
+			List<CellSurface> surfaces = new ArrayList<>();
+			int count = column.size();
+			for (int i = 0; i < count; i++) {
+				WorldBox box = column.get(i);
+				if (box.by() != oy) {
+					continue;
+				}
+				for (StandableRect r : tops(box)) {
+					surfaces.add(new CellSurface(r, ox, oz));
+				}
+			}
+			return surfaces;
 		}
 
 		// Node surfaces of cell (cx,cz) whose top lies in [topLo,topHi] and whose

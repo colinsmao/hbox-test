@@ -99,6 +99,27 @@ final class SurfaceGeometryTest {
 	}
 
 	@Test
+	void floodFromHighSeedDoesNotReachDeepSameColumn() {
+		// Seeded carpet at 66.0625 with ground at 64 in the same footprint:
+		// |ΔY| = 2.0625 > reach 1.0 → only the seed height is reached.
+		StandableRect carpet = new StandableRect(0, 0, 1, 1, 66.0625);
+		StandableRect ground = new StandableRect(0, 0, 1, 1, 64.0);
+		List<StandableRect> reached = SurfaceSelection.flood(
+			List.of(carpet, ground), List.of(carpet), 1.0);
+		assertEquals(1, reached.size());
+		assertEquals(66.0625, reached.get(0).topY(), EPS);
+	}
+
+	@Test
+	void floodReachesSameColumnWithinReach() {
+		StandableRect upper = new StandableRect(0, 0, 1, 1, 65.0);
+		StandableRect lower = new StandableRect(0, 0, 1, 1, 64.0);
+		List<StandableRect> reached = SurfaceSelection.flood(
+			List.of(upper, lower), List.of(upper), 1.0);
+		assertEquals(2, reached.size());
+	}
+
+	@Test
 	void depthForMergedTakesMinOverCoveringNodes() {
 		// One merged rect [0,2] covers two same-height raw nodes at depths {0, 2};
 		// the merged depth is the min (0 = nearest the flood reached this patch).

@@ -60,11 +60,11 @@ defined by four rules:
    fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
    skirts, fewer quads. Greedy is not a minimal partition, but a missed merge only
    costs an extra interior skirt, **never reachability**.
-4. **Flood / reachability.** Starting from the seed block's surface(s), a surface is
-   reached iff it connects to an already-reached surface by **one geometric
-   adjacency rule**: the footprints share an edge with positive overlap (or overlap
-   with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach` (the
-   profile's single step threshold). This subsumes the old same-block /
+4. **Flood / reachability.** Starting from the clicked seed block's surface(s), a
+   surface is reached iff it connects to an already-reached surface by **one
+   geometric adjacency rule**: the footprints share an edge with positive overlap
+   (or overlap with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach`
+   (the profile's single step threshold). This subsumes the old same-block /
    own-column / neighbour-column special cases: a glass pane on a block connects to
    that block's exposed ring because their footprints abut at the hole edges — no
    special case.
@@ -138,12 +138,13 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   `exposeBox` runs (not just the box's own buried shell); `H = 0` collapses it back
   to `floor(yMax)±1`. `exposeBox` is memoized per box (and `H` is fixed per
   `select`, so the memo key is unchanged). A `BitSet` per column records
-  scanned rows so each `(column,row)` is queried at most once. Only the **origin
-  column** exposes its full band — it has to, to seed every standable top there. The
-  flood front moves `<= reach` per hop, so by induction everything reachable is found
-  near an already-reached height; the band is never needed. This drops the per-column
-  vertical factor from `O(radius)` to `O(heights the flood actually traverses there)`,
-  so open ground goes `~radius³ → ~radius²`.
+  scanned rows so each `(column,row)` is queried at most once. The flood **seeds
+  from the clicked block's tops** (source block Y = seed Y); other tops in that
+  column join only through normal BFS hops (`|dTopY| <= reach` + footprint
+  adjacency). The flood front moves `<= reach` per hop, so by induction everything
+  reachable is found near an already-reached height. This drops the per-column
+  vertical factor from `O(radius)` to `O(heights the flood actually traverses
+  there)`, so open ground goes `~radius³ → ~radius²`.
 - **`occluderColumns` (the occluder shell).** For `exposeBox` to trim a box's
   dilated top correctly it needs every box that can span above that top. A box in
   column `(cx,*)` spans `[cx, cx+1]`, dilated to `[cx-W/2, cx+1+W/2]`, which overlaps

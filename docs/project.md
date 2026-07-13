@@ -77,7 +77,8 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   (pond bottom) is no longer hidden by the depth the water writes — it shows
   water-tinted, without crouching (see [`rendering.md`](rendering.md)). This is a
   rendering fix only; **water is not walkable** (an entity-dependent modelling
-  change deferred to the profile/hitbox library).
+  change deferred to the profile/hitbox library). (4) **Flood seeds from the
+  clicked block's tops**; other surfaces join only via walkable BFS hops.
 
 ## Repository layout
 
