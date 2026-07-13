@@ -3,7 +3,6 @@ package dev.kelianmao.mobwalk.client;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import org.joml.Matrix4fc;
 
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
@@ -44,7 +43,11 @@ public interface WorldOverlay {
 		return true;
 	}
 
-	/** Called when the player right-clicks ("uses") an item. */
-	default void onUseItem(Player player, InteractionHand hand) {
+	/**
+	 * Called on the rising edge of the use key (right-click). The widget picks
+	 * which hand to act on itself (e.g. main-first with an off-hand fallback), so
+	 * the manager stays agnostic to what item a widget cares about.
+	 */
+	default void onUseItem(Player player) {
 	}
 }

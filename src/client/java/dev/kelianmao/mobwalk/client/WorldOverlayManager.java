@@ -31,7 +31,6 @@ import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.Vec3;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -96,7 +95,13 @@ public final class WorldOverlayManager {
 		register(collisionSurface);
 
 		LevelRenderEvents.END_EXTRACTION.register(WorldOverlayManager::extract);
-		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
+		// Draw BEFORE translucent terrain, not after: translucent water writes depth,
+		// so at AFTER_TRANSLUCENT_TERRAIN a submerged surface in the depth-tested SKIRT
+		// layer failed the depth test and was hidden (only the depth-off crouch tops
+		// showed through). Here the depth buffer holds only opaque terrain + entities,
+		// so a pond bottom passes depth and water then blends over it; opaque terrain
+		// still occludes as before.
+		LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
 		// Free GPU resources at shutdown. We use CLIENT_STOPPING rather than a
 		// GameRenderer#close mixin to avoid mixin plumbing; trade-off: buffers
 		// are freed at shutdown, not on a mid-session renderer reload.
@@ -111,7 +116,7 @@ public final class WorldOverlayManager {
 		boolean down = client.screen == null && client.options.keyUse.isDown();
 		if (down && !usePressedLastTick && client.player != null) {
 			for (WorldOverlay overlay : OVERLAYS) {
-				overlay.onUseItem(client.player, InteractionHand.MAIN_HAND);
+				overlay.onUseItem(client.player);
 			}
 		}
 		usePressedLastTick = down;

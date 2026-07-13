@@ -13,10 +13,10 @@ package dev.kelianmao.mobwalk.client;
  * the safe default and an A/B baseline. {@code width} is carried but unused until
  * the dilation stages.
  *
- * <p>{@code reach} is the walkable height threshold on {@code |dT|}: two surfaces
- * connect when their height difference is at most {@code reach}. Reachability is
- * plain yes/no — a location is reachable or it is not — so this is a single scalar
- * ({@code 1.0} for every profile).
+ * <p>{@code reach} is {@code max(jump, step)}: two surfaces connect when
+ * {@code |dTopY| <= reach}. {@link #PLAYER} and {@link #RAVAGER} use
+ * {@link #DEFAULT_JUMP_REACH} (documented living-entity jump peak); {@link #POINT}
+ * keeps {@code 1.0} as the geometric oracle.
  *
  * <p>{@code height} is the entity's hitbox height (vanilla values; doubles, not
  * {@code 1/16}-quantized — see {@code docs/geometry.md}). It drives the
@@ -26,9 +26,16 @@ package dev.kelianmao.mobwalk.client;
  * reduces to today's buried test) and the oracle baseline.
  */
 public record EntityProfile(String name, double width, double height, double reach) {
+	/**
+	 * Living-entity jump peak (~1.2522 blocks): sum of the discrete tick loop from
+	 * impulse {@code 0.42}, gravity {@code -0.08}, drag {@code ×0.98}. Vanilla
+	 * exposes the impulse, not this peak height.
+	 */
+	public static final double DEFAULT_JUMP_REACH = 1.2522;
+
 	public static final EntityProfile POINT = new EntityProfile("Point", 0.0, 0.0, 1.0);
-	public static final EntityProfile PLAYER = new EntityProfile("Player", 0.6, 1.8, 1.0);
-	public static final EntityProfile RAVAGER = new EntityProfile("Ravager", 1.95, 2.2, 1.0);
+	public static final EntityProfile PLAYER = new EntityProfile("Player", 0.6, 1.8, DEFAULT_JUMP_REACH);
+	public static final EntityProfile RAVAGER = new EntityProfile("Ravager", 1.95, 2.2, DEFAULT_JUMP_REACH);
 
 	// Cycle order for the sneak+right-click-at-nothing toggle.
 	private static final EntityProfile[] CYCLE = {POINT, PLAYER, RAVAGER};

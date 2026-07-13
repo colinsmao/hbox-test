@@ -61,6 +61,26 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   violet→orange ramp (red is reserved for hole beams), and skirts/beams at the very
   outermost radius edge are suppressed as cutoff artifacts. The geometry/algorithm lives
   in [`geometry.md`](geometry.md).
+- **Milestone 6 — polish + fidelity fixes (in progress):** a bundle of correctness
+  fixes. (1) **Grey cutoff ring** now spans a **2-block buffer** — the outermost block
+  ring is solid grey and the next ring in fades — so an incomplete selection reads more
+  clearly (see [`rendering.md`](rendering.md)). (2) **Visible-face surface height:**
+  blocks that render taller than they collide (soul sand, mud, cactus, honey) draw their
+  standable top on the **visible face** instead of buried at the collision height. The
+  visible top is gathered compute-side (memoized per `BlockState`) and baked into each
+  rect's `visualTopY`; a standalone key (default **V**) toggles it against the true
+  collision height (default **on**), re-flooding on toggle. Walkability math is
+  unchanged — this only moves where the paint is drawn. See "Visible-face top vs
+  collision top" in [`geometry.md`](geometry.md) and the surface-height toggle in
+  [`rendering.md`](rendering.md). (3) **Surfaces draw through water:** the overlay
+  now draws at `BEFORE_TRANSLUCENT_TERRAIN` instead of after, so a submerged surface
+  (pond bottom) is no longer hidden by the depth the water writes — it shows
+  water-tinted, without crouching (see [`rendering.md`](rendering.md)). This is a
+  rendering fix only; **water is not walkable** (an entity-dependent modelling
+  change deferred to the profile/hitbox library). (4) **Flood seeds from the
+  clicked block's tops**; other surfaces join only via walkable BFS hops.
+  (5) **Player / Ravager `reach = 1.2522`** (documented jump peak); Point
+  `reach = 1.0`.
 
 ## Repository layout
 
@@ -130,13 +150,14 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
 1. `runClient` launches with no errors in the log.
 2. **HUD:** in a world, the box + label is visible at the chosen corner and F1
    (hide HUD) hides it.
-3. **In-world:** holding a stick, the standable collision surface of the targeted
+3. **In-world:** holding a stick (in **either hand** — off hand acts only when the
+   main hand is empty or also a stick), the standable collision surface of the targeted
    block is drawn flat on top, double-sided without bad z-fighting; sweeping the
    crosshair paints a growing set whose surfaces all stay drawn; per-block shapes
    are correct (full / slab / stairs-as-L / fence-post-tops / carpet-thin) and tall
    grass/flowers resolve to the block below; the selection hides when the stick is
    unequipped and returns on re-equip; right-clicking resets it (exactly once per
-   click — holding does not spam) while swinging the arm; breaking/replacing a
+   click — holding does not spam) while swinging the acting arm; breaking/replacing a
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward
    skirt; the debug key (K) cycles the upward-marker style.
@@ -149,9 +170,19 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    intermediate ledge does (the ledge would trap the mob). A long dangerous rim shows a
    row of beams. Tops are colored violet (low) → orange (high), never red. Skirts and
    beams at the very outermost radius edge are not drawn.
-6. No errors on world load/unload or window resize; the selection clears on
+6. **Surface height (V):** on a **soul sand / mud** block (renders full-height but
+   collides at 15/16), the standable top draws on the **visible top face** by default;
+   pressing **V** drops it to the true collision height (buried inside the block) and the
+   HUD reads `surface: collision`, pressing again restores `surface: visible`; ordinary
+   full blocks / slabs / stairs look identical in both modes, and the height colors don't
+   shift when toggling.
+7. **Through water:** right-clicking the bottom of a pond paints its surface,
+   visible through the water (water-tinted) **without** crouching; a surface behind
+   opaque terrain (a hill) is still occluded unless crouching. (Water itself is not
+   walkable.)
+8. No errors on world load/unload or window resize; the selection clears on
    leaving/changing the world.
-7. The mod does nothing on a dedicated server.
+9. The mod does nothing on a dedicated server.
 
 ## Manual install into a real launcher
 

@@ -9,8 +9,13 @@ space**, never a pixel raster (a raster rewrite was prototyped and rejected — 
 
 ## Representation: rect/double space
 
-A standable surface is a `StandableRect(double minX, minZ, maxX, maxZ, topY)` in
-absolute world coordinates (the owning `BlockPos` folded in). Coordinates are
+A standable surface is a
+`StandableRect(double minX, minZ, maxX, maxZ, topY, visualTopY)` in absolute world
+coordinates (the owning `BlockPos` folded in). `topY` is the **collision** top that
+all math below is keyed on; `visualTopY` is a **draw-only** raise for blocks that
+render taller than they collide (see [Visible-face top vs collision
+top](#visible-face-top-vs-collision-top-milestone-6)) and equals `topY` for
+everything else — nothing in the geometry layer reads it. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
 epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose: width dilation
 (below) expands surfaces by entity-dependent amounts that are not `1/16`-aligned,
@@ -55,11 +60,11 @@ defined by four rules:
    fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
    skirts, fewer quads. Greedy is not a minimal partition, but a missed merge only
    costs an extra interior skirt, **never reachability**.
-4. **Flood / reachability.** Starting from the seed block's surface(s), a surface is
-   reached iff it connects to an already-reached surface by **one geometric
-   adjacency rule**: the footprints share an edge with positive overlap (or overlap
-   with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach` (the
-   profile's single step threshold). This subsumes the old same-block /
+4. **Flood / reachability.** Starting from the clicked seed block's surface(s), a
+   surface is reached iff it connects to an already-reached surface by **one
+   geometric adjacency rule**: the footprints share an edge with positive overlap
+   (or overlap with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach`
+   (the profile's single step threshold). This subsumes the old same-block /
    own-column / neighbour-column special cases: a glass pane on a block connects to
    that block's exposed ring because their footprints abut at the hole edges — no
    special case.
@@ -133,12 +138,13 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   `exposeBox` runs (not just the box's own buried shell); `H = 0` collapses it back
   to `floor(yMax)±1`. `exposeBox` is memoized per box (and `H` is fixed per
   `select`, so the memo key is unchanged). A `BitSet` per column records
-  scanned rows so each `(column,row)` is queried at most once. Only the **origin
-  column** exposes its full band — it has to, to seed every standable top there. The
-  flood front moves `<= reach` per hop, so by induction everything reachable is found
-  near an already-reached height; the band is never needed. This drops the per-column
-  vertical factor from `O(radius)` to `O(heights the flood actually traverses there)`,
-  so open ground goes `~radius³ → ~radius²`.
+  scanned rows so each `(column,row)` is queried at most once. The flood **seeds
+  from the clicked block's tops** (source block Y = seed Y); other tops in that
+  column join only through normal BFS hops (`|dTopY| <= reach` + footprint
+  adjacency). The flood front moves `<= reach` per hop, so by induction everything
+  reachable is found near an already-reached height. This drops the per-column
+  vertical factor from `O(radius)` to `O(heights the flood actually traverses
+  there)`, so open ground goes `~radius³ → ~radius²`.
 - **`occluderColumns` (the occluder shell).** For `exposeBox` to trim a box's
   dilated top correctly it needs every box that can span above that top. A box in
   column `(cx,*)` spans `[cx, cx+1]`, dilated to `[cx-W/2, cx+1+W/2]`, which overlaps
@@ -154,13 +160,16 @@ first factor; lazy-Y trims the second — orthogonal, and they compose.
 
 ## Reachability model
 
-Reach is a **single threshold** (`profile.reach()`, default `1.0`): two surfaces
+Reach is a **single threshold** (`profile.reach()` = `max(jump, step)`): two surfaces
 connect when their height difference is `<= reach`, anything deeper does not.
-Reachability is plain yes/no — a location is reachable from the seed or it is not —
+**Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
+the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
+**`1.0`**. Reachability is plain yes/no — a location is reachable from the seed or it is not —
 so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
-the radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
-trench is reachable and its floor *is* painted (not a hole); to see the width rule you
-need a gap that is **deep (`>= 2`) or over the void**. **Entity-height headroom** is
+the radius budget, which can cut off a very long winding path. So a shallow
+(`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
+the width rule you need a gap that is **deeper than `reach` or over the void**.
+**Entity-height headroom** is
 now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
 so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
 classification builds on this in **Milestone 5** (below): the flood still only paints
@@ -209,6 +218,63 @@ boundaries into homogeneous sub-spans, classifies each via `classifyDrop`, and p
 the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
 ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
+
+## Visible-face top vs collision top (Milestone 6)
+
+Everything above derives from `getCollisionShape`, so `StandableRect.topY` is the
+collision `yMax`. A handful of blocks **render taller than they collide** — soul
+sand collides at `14/16` (`0.875`) but outlines as a full cube, mud at ~`0.9` — so a
+marker drawn at the collision top sits **buried inside the visible block**. The fix
+is a **draw-only** second height, `StandableRect.visualTopY`, carried alongside the
+collision top; the renderer can draw on the face you actually see while **all
+walkability math stays on the collision `topY`** (reach, occlusion, holes are
+unchanged — a mob really does stand at `0.875`, we just don't want the paint hidden).
+
+- **Source data (paid once per state, no heuristic).** `WorldBox` carries the source
+  block's whole-shape `blockCollisionTop` (`y + collisionShape.max(Y)`) and
+  `blockOutlineTop`. The outline read (`getShape(...)`) is a real cost, but **every
+  block state is checked** — no "renders taller ⟹ collides below `1.0`" shortcut,
+  which a mod or future block would break. Instead `visibleTop` memoizes the block's
+  outline top per `BlockState` in a static cache (`OUTLINE_TOP_REL`, `NaN` = "no
+  separate outline"), so the shape is read **at most once per distinct state ever
+  seen** and every later occurrence is a map lookup. It is still gated by the render
+  toggle (`computeVisualTop`, threaded from the overlay's `useVisualTop` into
+  `select`): off ⇒ `blockOutlineTop = blockCollisionTop`, nothing lifts and no lookup
+  is done. Because the flag gates the compute, **toggling the render setting
+  re-floods** from the last seed (cheap: toggling is rare). The memo treats the
+  property as position-independent (keyed by state only); the few context-dependent
+  blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
+  Occluder-only / ledge scans leave the auxiliary-constructor default (`= yMax`), so
+  they never raise. Both tops are computed at the two node-producing scan sites only
+  (the eager oracle and `LazyFlood.ensureRows`).
+- **The raise rule (`exposeBox`).**
+  `visualTopY = (|topY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > topY) ?
+  blockOutlineTop : topY`. Gating on *"this sub-box is the block's topmost collision
+  surface"* is what leaves **stair treads, bottom slabs, and fences** untouched (a
+  stair's lower tread is not the block's top; a fence's outline is *shorter* than its
+  `1.5` collision top, so `blockOutlineTop > topY` is false). Only full-render-but-
+  short-collision tops lift.
+- **Through merge and skirts.** `mergeCoplanar` groups by collision `topY` and
+  carries the group's **max** `visualTopY` (a raised patch merged with a flush
+  neighbour stays raised, not re-buried). `DownSkirtSpan` / `OccluderSpan` /
+  `HoleSpan` each gain a `visualBaseY` (auxiliary constructor defaulting to `baseY`)
+  set from the source rect's `visualTopY`, so when the renderer draws on the visible
+  face the skirts/beams hang from that same face. All of this is inert until the
+  render toggle uses it — the compute step is behavior-preserving.
+
+### Known limitation — horizontal inset (not fixed)
+
+Some blocks are inset **horizontally** while still rendering full width — notably
+**honey** (`box(1,0,1,15,15,15)`, a `[1/16,15/16]` footprint under a full-cube
+render), so its edges/skirts sit ~1px inside the visible face. This is left
+**unfixed on purpose** because it is **Point-only**: a footprint dilates by `W/2` per
+side, so the dilated edge clears the block face whenever `W ≥ 2/16 = 0.125`, and
+every real entity is far past that (smallest vanilla mobs ~`0.4`; all shipped
+profiles `≥ 0.6`). Only the zero-width **Point** profile (the debug/oracle baseline)
+keeps the inset footprint. Fixing it would need a full **visual footprint** (four
+extra `StandableRect` coords + skirt re-draw + merge-seam handling) for a ~1px border
+on a few blocks — poor cost/benefit. The `visualTopY` mechanism generalizes to a
+visual footprint if it ever becomes worth it.
 
 ## Entity profiles (size + headroom)
 

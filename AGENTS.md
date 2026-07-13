@@ -157,16 +157,33 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   "docs" pass. Each commit must be self-contained and **fully update its own
   documentation in that same commit** — the relevant `docs/*.md`, `docs/project.md`
   status, code comments, and `PLAN.md` — so no step ever lands with stale or deferred
-  docs. Never lump distinct steps together, and never defer doc updates to the end.
+  docs; **docs are current at the commit level.** Never lump distinct steps together.
   This cadence is also what makes the commit hook a per-step checkpoint: batching many
   steps into one commit defeats it.
+- **Within a step, docs come *last* — after checks pass, not during the code.** Docs
+  belong in the commit, but don't write them until the step's behavior is final, or the
+  bug-fix loop just makes you rewrite them. The order is: **code → run checks
+  (build/test + in-game) → fix bugs and re-check (loop) → checks pass → write/update the
+  docs → human approval → commit (code + docs together).** So a step in flight is
+  expected to have finished, validated code with its docs still unwritten right up until
+  the commit; capture learnings in the plan scratch (`PLAN.md` / `.cursor/plans`)
+  meanwhile so nothing is lost.
+- **Commit granularity is judgment — avoid commit noise.** Group by concept, not by
+  file. A tiny tangential tweak (a small rule/prompt/doc-wording fix) may ride along
+  with a related commit rather than getting its own; reserve a standalone commit for a
+  change substantial enough to stand alone. Prefer fewer coherent commits over many
+  trivial ones (while still keeping genuinely distinct plan steps in their own commits).
+- **Never commit without explicit human approval.** This is absolute: the agent may
+  not `git commit` on its own initiative, self-approve the commit-gate hook, retry to
+  bypass it, or treat a green build/test as approval. Stage the change, surface the
+  checklist, and **wait for the human to say commit.**
 - **Don't commit until the step is confirmed in-game.** A green `./gradlew build` is
   not sufficient — behavior here is runtime/visual. Make the edits, run the gates,
   then **wait until the step's in-game checklist passes** (user confirms, or you run
   `runClient` and verify) before committing that step. This applies to `PLAN.md` / doc
   updates too: don't commit a step's plan or doc change until that step is confirmed
   working. (The `git commit` hook in `.cursor/hooks.json` will pause each commit to
-  reconfirm this.)
+  reconfirm this — but the hook is a backstop, not a substitute for approval.)
 - **Sole-agent assumption.** Unless told otherwise, assume you are the only
   agent/person in this repo; no need to defensively re-check remote/branch state for
   concurrent changes before each action (a quick check when something looks off is
@@ -183,11 +200,14 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
 ## Documentation & conventions
 
-- **Keep the docs current — it is part of the work, not an afterthought.** Whenever
-  a change alters behavior, architecture, status, constraints, versions, or adds a
-  non-obvious gotcha, update the relevant docs **in the same commit/PR** (see the
-  per-concept commit rule above) so the next agent inherits accurate knowledge.
-  Reviewing docs for staleness is a normal step before opening a PR.
+- **Keep the docs current — per commit, but written after the step's checks pass.**
+  Whenever a change alters behavior, architecture, status, constraints, versions, or
+  adds a non-obvious gotcha, update the relevant docs **in that same commit** so the
+  next agent inherits accurate knowledge — docs are never deferred to a later commit.
+  Within the step, though, write them **only once the code has passed its checks**
+  (build/test + in-game), not during the bug-fix loop (see the Git/workflow "docs come
+  last" rule): `code → checks → fix (loop) → docs → approval → commit`. Reviewing docs
+  for staleness is a normal step before opening a PR.
 - **Where knowledge goes (keep `AGENTS.md` lean):** place it by scope —
   - a project-wide *rule/instruction* that applies to any task → **`AGENTS.md`**;
   - a project *fact* (status, layout, versions, roadmap) → **`docs/project.md`**;

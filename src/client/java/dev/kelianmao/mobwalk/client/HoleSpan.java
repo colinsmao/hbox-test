@@ -23,7 +23,16 @@ package dev.kelianmao.mobwalk.client;
  * @param baseY        the cliff-edge top {@code T} the beam rises from.
  * @param fallDistance {@code T - landing.topY} for a trap landing, or {@code 0} for the
  *                     void (no landing at all).
+ * @param visualBaseY  the source rect's visible-face top (draw-only): where the beam
+ *                     rises from when the renderer draws on the visible face; equals
+ *                     {@code baseY} except for render-taller-than-collide blocks. See
+ *                     {@link StandableRect}.
  */
 public record HoleSpan(boolean alongX, boolean maxSide, double line,
-		double lo, double hi, double baseY, double fallDistance) {
+		double lo, double hi, double baseY, double fallDistance, double visualBaseY) {
+	/** A span whose visible base coincides with its collision base (the common case). */
+	public HoleSpan(boolean alongX, boolean maxSide, double line,
+			double lo, double hi, double baseY, double fallDistance) {
+		this(alongX, maxSide, line, lo, hi, baseY, fallDistance, baseY);
+	}
 }

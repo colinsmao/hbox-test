@@ -47,8 +47,35 @@ compiler and stale training data won't hand you.
 - Rendering is split into an **extraction** phase (read game state into an
   immutable snapshot) and a **drawing** phase (emit geometry). Register
   `LevelRenderEvents.END_EXTRACTION` and
-  `LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN`. The drawing context is
+  `LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN`. The drawing context is
   `LevelRenderContext` (`poseStack()`, `levelState().cameraRenderState.pos`).
+- **Draw before translucent terrain, not after — so submerged surfaces show
+  through water.** Translucent terrain (water, translucent blocks) is drawn late
+  and **writes depth**. When the overlay drew at `AFTER_TRANSLUCENT_TERRAIN`, a
+  pond-bottom surface in the depth-tested `SKIRT` layer failed the depth test
+  against the water above it and was hidden (only the depth-off crouch tops showed
+  through). Drawing at `BEFORE_TRANSLUCENT_TERRAIN` — after opaque terrain,
+  entities, and block entities — means the depth buffer holds only opaque geometry,
+  so the pond bottom passes depth and water then **blends over** it (the surface
+  reads water-tinted); opaque terrain still occludes exactly as before, and
+  entities standing on a surface still cover it. Both GPU layers move together
+  (the depth-off `FILLED` layer is unaffected by phase for opaque terrain; water
+  now merely tints the crouch tops / hole beams where it sits in front — a minor,
+  accepted cosmetic). This is a rendering fix only: water is **not** walkable —
+  treating a submerged floor as reachable is an entity-dependent modelling change
+  deferred to the profile/hitbox work (see [`project.md`](project.md) roadmap).
+  - **Known limitation — honey renders wrong (not fixed).** A honey block's own
+    standable surface draws incorrectly, and unlike other translucent blocks the
+    breakage persists **even in crouch/through-walls mode**. Only honey is affected.
+    Suspected cause (unconfirmed): the two recent changes interacting — the surface
+    sits at honey's *visible* top (`visualTopY`, since honey collides at `~15/16`
+    but renders full-height) which is exactly where honey's **own** translucent body
+    is drawn, and honey is itself translucent terrain drawn *after* our now-earlier
+    `BEFORE_TRANSLUCENT_TERRAIN` pass, so honey overdraws the surface (the crouch
+    `FILLED` layer moved earlier too, hence it no longer shows through). Honey is
+    also horizontally inset (the Point-only footprint limitation in
+    [`geometry.md`](geometry.md)). It is a rare edge case with no clean fix in sight,
+    so it is **left as-is**; revisit only if it turns out to matter.
 - **No high-level path** for arbitrary geometry: build a `BufferBuilder` and
   upload it through a `RenderPipeline` yourself. The legacy `WorldRenderEvents`
   vertex-consumer route is **gone** here. (Boxes/lines can still use vanilla
@@ -92,8 +119,17 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 
 - **Stick is a trigger, not a brush.** Right-clicking (use-key rising edge) selects
   the surfaces reachable from the targeted block; right-clicking nothing clears. The
-  selection persists across item switches (drawn only while the stick is held) until
-  the next trigger or a level change.
+  selection persists across item switches (drawn while the stick is held in **either
+  hand**) until the next trigger or a level change.
+- **Either hand, main-first.** The stick works in the main **or** off hand. The
+  acting hand is chosen main-first, falling back to the off hand **only when the main
+  hand is empty** (or also a stick): a non-empty main hand is assumed to consume the
+  right-click (place/use), so an off-hand stick doesn't also fire — approximating
+  vanilla's "main acts first, off hand only if main did nothing" without an
+  interaction-result mixin (the trigger is edge-detected off the use key, so the true
+  result is unseen). The hand choice lives in `CollisionSurfaceOverlay.onUseItem`, not
+  the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
+  stays agnostic to which item (the stick) a widget cares about.
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
   `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
   (re)published into a `volatile` field on each stick action (select / clear / radius
@@ -109,8 +145,9 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Entity profiles + `reach`.** An `EntityProfile(name, width, height, reach)`
   selects the entity the flood/dilation/headroom use. Three ship, cycled in order
   **Point** (`width 0`, `height 0`, default — reproduces the zero-width point-walker)
-  → **Player** (`0.6`, `1.8`) → **Ravager** (`1.95`, `2.2`); `reach` (default `1.0`)
-  is the single step threshold. **No keybind for the cycle:** it rides the
+  → **Player** (`0.6`, `1.8`, `reach 1.2522`) → **Ravager** (`1.95`, `2.2`,
+  `reach 1.2522`); Point keeps `reach 1.0`. `reach` is `max(jump, step)` — Player/
+  Ravager use the documented jump peak `1.2522`. **No keybind for the cycle:** it rides the
   use-key dispatch — **sneak + right-click at nothing** clears *and* advances the
   profile, then pings the HUD with the new name. The `profile` field is `volatile`
   (read in `emit`); `width` drives dilation and `height` drives headroom (see
@@ -118,8 +155,8 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   profile cycle.)
 - **Adjustable flood radius (shift+scroll).** `MobWalkClient` registers
   `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook — no mixin)
-  and, **only while holding the stick and sneaking**, changes the radius by the scroll
-  direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
+  and, **only while holding the stick (in either hand) and sneaking**, changes the
+  radius by the scroll direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
   and returns `false` to cancel the vanilla slot change. Plain scroll is untouched.
   The radius is clamped `[0, 20]` and steps by **1 up to 10, then by 2** (`12, 14, …,
   20`) — the window grows quadratically, so coarse steps keep the high end usable.
@@ -135,9 +172,10 @@ Each reached `StandableRect` is drawn as a **top fill**, an optional **border**,
 **skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
 through-walls, depth-on `SKIRT` occluded).
 
-- **Top fill (half-alpha), height-gradient colored.** Each surface is tinted by its
-  `topY` across the selection's `[minTopY, maxTopY]` range (single color when flat),
-  so elevation and drops read at a glance.
+- **Top fill (half-alpha), depth-gradient colored.** Each surface is tinted by its
+  BFS depth from the flood seed — a cyclic hue band (`depthColor`, blue at depth 0,
+  cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
+  out-of-sequence color at a glance.
 - **Crouch-gated through-walls, depth-tested by default.** Seeing surfaces *through*
   blocks is a debug aid, so the top is routed per-frame: **while sneaking** it goes
   into the depth-off `FILLED` pipeline (`withDepthStencilState(Optional.empty())`) and
@@ -203,27 +241,48 @@ through-walls, depth-on `SKIRT` occluded).
   chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
   later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
   toggle and the four styles stay as-is until then.
-- **Grey cutoff ring (incomplete-selection signal).** Surfaces within the last block
-  before the radius cutoff blend toward **grey** (`RING_COLOR`), so a radius cutoff
-  reads differently from a true boundary (a selection stopped by a real drop ends
-  short of the radius and stays height-colored). `publish` records the ring as a
-  Chebyshev square from the seed center (`ringStart`/`ringEnd`, `ringEnd = radius +
-  0.5 + halfW`); the per-vertex `vertex(...)` choke point blends every layer toward
-  grey by depth into the ring, `sqrt`-eased so the grey fills most of the outer block
-  without bleeding inward. `fadedTop` **splits each top at the ring lines** so a long
-  merged rect doesn't smear the ramp across its length — the interior stays one
-  fully-colored quad, only the ≤1-block outer strips fade. Window-boundary edges keep
-  their skirts; the grey alone signals "increase the radius / re-center".
+- **Surface-height toggle (visible face vs collision top; default `V`).** Blocks that
+  render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
+  their standable top *buried* at the collision height. A standalone key (default `V`,
+  registered in `MobWalkClient`) flips `useVisualTop` (default **on** — the fix). It is
+  a **compute-side** flag, not a per-draw one: it is passed into `select`, where the
+  visible top is gathered (gated on it, memoized per `BlockState` — see
+  [`geometry.md`](geometry.md) "Visible-face top vs collision top") and **baked into
+  each rect's `visualTopY` / span `visualBaseY`**. `emit` then *always* draws the top
+  fill, borders, and the up/down/hole skirts at that baked render height — no per-draw
+  branch — and it equals the collision top when the mode is off (the raise isn't
+  computed then). The height-gradient **color stays keyed on the collision `topY`**, so
+  the palette doesn't shift when toggling. Because the flag gates the compute,
+  `toggleVisualTop()` **re-floods** from the last seed (cheap: toggling is rare) and
+  pings the HUD (`surface: visible` / `surface: collision`). All walkability math is
+  unaffected (collision-top only); this is purely where the paint is drawn. Session-only
+  this milestone (resets to on at relaunch; a persisted setting lands with the Milestone
+  7 config).
+- **Depth-based grey cutoff (incomplete-selection signal).** Surfaces near the BFS
+  depth limit blend toward **grey** (`greyBlend`), so a depth-cutoff reads differently
+  from a true boundary (a selection stopped by a real drop stays depth-colored). The
+  blend is keyed on each rect's `depth` relative to `depthLimit` (= `selectionRadius`):
+  `depth <= limit−2` → no grey; `depth == limit−1` → half grey; `depth >= limit` → full
+  grey. This is possible because the **frontier-split merge**
+  (`mergeCoplanarSplitFrontier`) keeps the frontier ring (depth == limit) as separate
+  rects from the inner blob: raw nodes are partitioned into inner (depth < limit) and
+  frontier (depth >= limit), each is unioned/strip-merged independently, and the inner
+  area is subtracted from the frontier nodes so the two tile cleanly (inner has priority
+  in the dilation overlap zone). Without the split, `mergeCoplanar` would collapse the
+  whole same-height area into one rect at `min` depth (0), defeating the depth-based
+  grey and perimeter suppression. Down-skirt spans and hole beams at the frontier
+  (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
+  real geometry.
 - **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
   leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **through-walls
   vertical beam** from the cliff-edge top `T`, so it reads even when the rim is behind
   terrain: it is drawn in the depth-off `FILLED` layer (the same route as the
   crouch-gated tops), rising a fixed world height (`BEAM_HEIGHT`), solid-ish at the
   base and fading out toward the top, in a distinct red. Benign drops keep their
-  ordinary down-skirt and get **no** beam. A hole beam is drawn through the shared
-  `vertex` choke point, so a beam in the **grey ring** is blended toward grey — signalling
-  "raise the radius". Spans at the **very outermost edge** (`>= ringEnd`) are suppressed
-  entirely (`isAtOuterEdge`) — they are radius-cutoff artifacts, not real geometry.
+  ordinary down-skirt and get **no** beam.
+  Drop spans at the **frontier** (`depth >= depthLimit`) are skipped by `computeHoles`
+  — they are depth-cutoff artifacts, not real geometry (without this, the entire
+  perimeter drew a red hole-beam wall).
   The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
   `holeSubSpans`, published as `HoleSpan`) and `emit` just draws them (`emitHoles`).
   Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
@@ -246,16 +305,15 @@ through-walls, depth-on `SKIRT` occluded).
   right-click trigger (select/clear) + sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the crouch-gated through-walls top + borders, the
-  ring-split top draw (`fadedTop`/`breakpoints`) and per-vertex grey blend
-  (`vertex`, `RING_COLOR`, `ringStart`/`ringEnd`), the square fading skirt draw
-  (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** down-skirt
-  spans (`emitDownSkirts`, from `DownSkirtSpan`; suppressed at the outermost edge via
-  `isAtOuterEdge`), **upward occluder skirts** (`emitOccluders`, the side-based interior
-  nudge, the four debug styles + `cycleOccluderStyle`), and the **through-walls hole
-  beams** (`emitHoles`, from `HoleSpan`, into the depth-off `FILLED` layer; also
-  suppressed at the outermost edge) — `emit` no longer computes any edge spans per
-  frame — the height-gradient color (`heightColor`, violet→orange ramp, red reserved for
-  holes), the level-identity reset,
+  depth-based grey blend (`greyBlend`, keyed on `rect.depth()` vs `depthLimit`),
+  the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`),
+  drawing the **published** down-skirt spans (`emitDownSkirts`, from `DownSkirtSpan`;
+  frontier spans `depth >= limit` suppressed), **upward occluder skirts**
+  (`emitOccluders`, the side-based interior nudge, the four debug styles +
+  `cycleOccluderStyle`), and the **through-walls hole beams** (`emitHoles`, from
+  `HoleSpan`, into the depth-off `FILLED` layer) — `emit` no longer computes any edge
+  spans per frame — the cyclic depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
+  band), the level-identity reset,
   `volatile` snapshot/occluder/down-skirt/hole/profile/crouch/style handoff, and the
   double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
@@ -267,13 +325,15 @@ through-walls, depth-on `SKIRT` occluded).
   `KeyMapping(..., KeyMapping.Category.MISC)`, `consumeClick` in `END_CLIENT_TICK`).
   Note `26.1.2` uses the `keymapping` API (not `keybinding`) and `KeyMapping.Category`
   (not a `String` category).
-- `SurfaceSelection.java`: the output-sensitive `LazyFlood` (surface BFS,
-  on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo, the
-  `occluderColumns` shell, `floor(W)+1` neighbour reach, the 3-D cube cutoff,
-  merge-after-flood), the `selectEager` oracle + `PROFILE_FLOOD` parity/timing
-  harness, dilation + **headroom** occlusion in `exposeBox` (the `(T, T+H]` standing-
-  column predicate, guillotine `subtractRects`), the `union` re-cut + `mergeCoplanar`
-  strip-merge, the `footprintAdjacent` edge test + profile-`reach` gate, the
+- `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
+  BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
+  the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
+  **`mergeCoplanarSplitFrontier`** — union inner and frontier separately, subtract
+  inner from frontier so they tile cleanly), the `selectEager` oracle +
+  `PROFILE_FLOOD` parity/timing harness, dilation + **headroom** occlusion in
+  `exposeBox` (the `(T, T+H]` standing-column predicate, guillotine
+  `subtractRects`), the `union` re-cut + `mergeCoplanar` strip-merge (used by eager
+  path), the `footprintAdjacent` edge test + profile-`reach` gate, the
   **compute-side occluder-span classification** (`computeOccluders` /
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
   `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
@@ -282,9 +342,9 @@ through-walls, depth-on `SKIRT` occluded).
   strictly below the rim under the fall footprint, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,
   the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` / `holeSubSpans`
-  / `fallFootprint`; subdivided at reached-rect boundaries and published as `HoleSpan`),
-  and the extraction-thread-only
-  (non-thread-safe) contract.
+  / `fallFootprint`; frontier drops `depth >= depthLimit` skipped; subdivided at
+  reached-rect boundaries and published as `HoleSpan`),
+  and the extraction-thread-only (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
 - `WorldOverlayManager.java`: the two-layer setup (depth-off `FILLED` tops +
   depth-on `SKIRT`) and per-layer buffer/GPU handoff, the through-walls debug
