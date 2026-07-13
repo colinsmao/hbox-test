@@ -120,6 +120,24 @@ final class SurfaceGeometryTest {
 	}
 
 	@Test
+	void floodJoinsOneBlockPlusCarpetAtJumpReach() {
+		StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
+		StandableRect carpet = new StandableRect(0, 0, 1, 1, 65.0625);
+		assertEquals(1, SurfaceSelection.flood(
+			List.of(floor, carpet), List.of(floor), 1.0).size());
+		assertEquals(2, SurfaceSelection.flood(
+			List.of(floor, carpet), List.of(floor), EntityProfile.DEFAULT_JUMP_REACH).size());
+	}
+
+	@Test
+	void floodRejectsOneBlockPlusSlabAtJumpReach() {
+		StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
+		StandableRect slab = new StandableRect(0, 0, 1, 1, 65.5);
+		assertEquals(1, SurfaceSelection.flood(
+			List.of(floor, slab), List.of(floor), EntityProfile.DEFAULT_JUMP_REACH).size());
+	}
+
+	@Test
 	void depthForMergedTakesMinOverCoveringNodes() {
 		// One merged rect [0,2] covers two same-height raw nodes at depths {0, 2};
 		// the merged depth is the min (0 = nearest the flood reached this patch).

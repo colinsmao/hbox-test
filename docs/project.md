@@ -79,6 +79,8 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   rendering fix only; **water is not walkable** (an entity-dependent modelling
   change deferred to the profile/hitbox library). (4) **Flood seeds from the
   clicked block's tops**; other surfaces join only via walkable BFS hops.
+  (5) **Player / Ravager `reach = 1.2522`** (documented jump peak); Point
+  `reach = 1.0`.
 
 ## Repository layout
 

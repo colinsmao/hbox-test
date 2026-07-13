@@ -27,6 +27,14 @@ final class EntityProfileTest {
 	}
 
 	@Test
+	void shippedReach() {
+		assertEquals(1.0, EntityProfile.POINT.reach(), EPS);
+		assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.PLAYER.reach(), EPS);
+		assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.RAVAGER.reach(), EPS);
+		assertEquals(1.2522, EntityProfile.DEFAULT_JUMP_REACH, EPS);
+	}
+
+	@Test
 	void cycleOrderWraps() {
 		assertEquals(EntityProfile.PLAYER, EntityProfile.POINT.next());
 		assertEquals(EntityProfile.RAVAGER, EntityProfile.PLAYER.next());

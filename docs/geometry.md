@@ -160,13 +160,16 @@ first factor; lazy-Y trims the second — orthogonal, and they compose.
 
 ## Reachability model
 
-Reach is a **single threshold** (`profile.reach()`, default `1.0`): two surfaces
+Reach is a **single threshold** (`profile.reach()` = `max(jump, step)`): two surfaces
 connect when their height difference is `<= reach`, anything deeper does not.
-Reachability is plain yes/no — a location is reachable from the seed or it is not —
+**Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
+the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
+**`1.0`**. Reachability is plain yes/no — a location is reachable from the seed or it is not —
 so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
-the radius budget, which can cut off a very long winding path. So a shallow (`<= 1` deep)
-trench is reachable and its floor *is* painted (not a hole); to see the width rule you
-need a gap that is **deep (`>= 2`) or over the void**. **Entity-height headroom** is
+the radius budget, which can cut off a very long winding path. So a shallow
+(`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
+the width rule you need a gap that is **deeper than `reach` or over the void**.
+**Entity-height headroom** is
 now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
 so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
 classification builds on this in **Milestone 5** (below): the flood still only paints

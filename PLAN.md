@@ -55,10 +55,10 @@ Pause menu → [Mods] (ModMenu) → [Configure] → Cloth screen → OverlayConf
   "enabled": true,
   "profiles": [
     {"name": "Point",   "width": 0.0,  "height": 0.0,  "reach": 1.0, "builtin": true,  "enabled": true},
-    {"name": "Player",  "width": 0.6,  "height": 1.8,  "reach": 1.0, "builtin": true,  "enabled": true},
-    {"name": "Ravager", "width": 1.95, "height": 2.2,  "reach": 1.0, "builtin": true,  "enabled": true},
-    {"name": "Warden",  "width": 0.9,  "height": 2.9,  "reach": 1.0, "builtin": true,  "enabled": true},
-    {"name": "Zombie",  "width": 0.6,  "height": 1.95, "reach": 1.0, "builtin": true,  "enabled": true}
+    {"name": "Player",  "width": 0.6,  "height": 1.8,  "reach": 1.2522, "builtin": true,  "enabled": true},
+    {"name": "Ravager", "width": 1.95, "height": 2.2,  "reach": 1.2522, "builtin": true,  "enabled": true},
+    {"name": "Warden",  "width": 0.9,  "height": 2.9,  "reach": 1.2522, "builtin": true,  "enabled": true},
+    {"name": "Zombie",  "width": 0.6,  "height": 1.95, "reach": 1.2522, "builtin": true,  "enabled": true}
   ],
   "activeProfile": "Player",
   "defaultRadius": 3,
@@ -69,8 +69,8 @@ Pause menu → [Mods] (ModMenu) → [Configure] → Cloth screen → OverlayConf
 
 - Unknown/missing keys tolerated on load (defaults filled, then re-saved).
 - `reach` is `EntityProfile.reach`; GUI label "Reach", tooltip *max(jump, step) —
-  height difference two surfaces can bridge*. Humanoids are `1.0` (Player step is
-  0.6 but jump reach is 1.0), so this matches current behaviour.
+  height difference two surfaces can bridge*. Humanoids use `1.2522` (documented
+  jump peak; step is smaller), Point stays `1.0`.
 - No `occluderStyle` key — occluder marker style stays K-driven/session-only this
   milestone; its final look is a future graphics-milestone decision.
 - `activeProfile` is the **live** value: runtime cycling updates it and saves
@@ -88,8 +88,8 @@ eager-vs-lazy correctness oracle ([`docs/geometry.md`](docs/geometry.md)); at le
 one enabled profile must always exist.
 
 Seeded on first run: Point, Player, Ravager, Warden, Zombie (dimensions from the
-[Minecraft Wiki](https://minecraft.wiki/w/Hitbox/Entities%27_hitboxes), all
-`reach = 1.0`). "Add from vanilla" offers those plus other humanoids (Skeleton,
+[Minecraft Wiki](https://minecraft.wiki/w/Hitbox/Entities%27_hitboxes); Point
+`reach = 1.0`, humanoids `reach = 1.2522`). "Add from vanilla" offers those plus other humanoids (Skeleton,
 Enderman, Iron Golem, Pillager, …), auto-filling a row. **Spider (wall climb) and
 Slime (horizontal hop) are excluded** — they break the walk/flood model.
 
@@ -149,8 +149,8 @@ defaults above (default profile now Player).
   skipped; single-enabled cycles to itself.
 - New `OverlayConfigTest`: Gson round-trip; missing-file seeds defaults;
   unknown-key tolerance; validation clamps (out-of-range width / name collision /
-  bad activeProfile); preset values (Player 0.6/1.8/1.0, Ravager 1.95/2.2/1.0,
-  Warden 0.9/2.9/1.0, Zombie 0.6/1.95/1.0); Point always present/protected.
+  bad activeProfile); preset values (Player 0.6/1.8/1.2522, Ravager 1.95/2.2/1.2522,
+  Warden 0.9/2.9/1.2522, Zombie 0.6/1.95/1.2522); Point always present/protected.
 
 **In-game checklist:**
 1. Delete any `config/mobwalk.json`; launch → file created with seeded defaults.
@@ -262,7 +262,7 @@ Cloth, whose list controllers are scalar-only):
 3. (2D) Edit a builtin's width → Save → selection reflects it; "reset to vanilla"
    restores the seeded value.
 4. (2D/1D) Add/define a custom profile → Save → appears in the cycle and works.
-5. (2D) "Add from vanilla ▼" → pick Enderman → row auto-fills (0.6/2.9/1.0) →
+5. (2D) "Add from vanilla ▼" → pick Enderman → row auto-fills (0.6/2.9/1.2522) →
    usable.
 6. (2D) Delete the custom row → Save → gone; Point cannot be deleted.
 7. Invalid value (name collision / negative width) → save rejected/repaired with
