@@ -1359,10 +1359,10 @@ public final class SurfaceSelection {
 		// Scan block columns overlapping the footprint. Candidates are boxes whose
 		// top lies in (landY, topY). The occluder index must also include collision
 		// from the block row below landY — shapes that live in a lower block but
-		// rise into (landY, topY) (walls/fences at height 1.5). Without those
-		// occluders-from-below, exposeBox can leave standable ledge fragments that
-		// hole-classification then treats as traps. Motivating case: lantern on a
-		// wall — the wall box is in floor(landY)-1 and must bury the lantern body.
+		// rise into (landY, topY) (walls/fences at height 1.5). Those
+		// occluders-from-below keep exposeBox burial complete for rising shapes.
+		// Motivating case: lantern on a wall — the wall box is in floor(landY)-1
+		// and must bury the lantern body.
 		//
 		// Assumption (recorded): one block row below landY is enough because
 		// vanilla collision that matters here extends at most ~1.5 upward from its

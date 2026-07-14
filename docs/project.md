@@ -225,12 +225,12 @@ these incremental:
   CurseForge publish pipeline.
 - **Settle a single skirt/occluder rendering baseline (deferred from 4.5).** The
   `K`-key `cycleOccluderStyle` debug toggle (tiny / half-block / full / bold-line)
-  shipped in 4.5 for A/B'ing the upward-marker look, but no single style was ever
-  chosen and the toggle dropped-or-kept. This is purely appearance, so it is
-  deferred to a later appearance-focused milestone; see [`rendering.md`](rendering.md).
+  shipped in 4.5 for A/B'ing the upward-marker look; choosing a baseline style and
+  whether to keep the toggle is deferred to a later appearance-focused milestone;
+  see [`rendering.md`](rendering.md).
 - **Fall-damage / tall-drop warning (Milestone 5 extension).** Every benign drop
   already carries its fall distance (`T − landY` from `classifyDrop`). A drop onto
   reachable ground that is nonetheless tall enough to hurt (fall-damage threshold, or a
   configurable height) could get a distinct lighter warning marker — a shorter/dimmer
-  beam or a tinted rim — separate from the red hole beam. Deferred (the current
-  benign/hole split is enough); the fall distance is plumbed and ready.
+  beam or a tinted rim — separate from the red hole beam. Deferred; the fall distance
+  is plumbed and ready.

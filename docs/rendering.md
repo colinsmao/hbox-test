@@ -133,10 +133,10 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
   `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
   (re)published into a `volatile` field on each stick action (select / clear / radius
-  scroll / profile cycle). `extract` never mutates the selection; it only does the
+  scroll / profile cycle). `extract` only does the
   **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
-  dimension change / disconnect all reset it without a manager-side hook). There is no
-  per-frame staleness pass, so editing painted terrain needs a re-click.
+  dimension change / disconnect all reset it without a manager-side hook). Editing
+  painted terrain needs a re-click (publish is action-driven).
 - **Data source is the collision shape, not the visual shape:**
   `BlockState.getCollisionShape(level, pos, CollisionContext.empty())`. Empty shapes
   are pass-through (tall grass, flowers); `onUseItem` resolves the targeted block
@@ -147,14 +147,14 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   **Point** (`width 0`, `height 0`, default — reproduces the zero-width point-walker)
   → **Player** (`0.6`, `1.8`, `reach 1.2522`) → **Ravager** (`1.95`, `2.2`,
   `reach 1.2522`); Point keeps `reach 1.0`. `reach` is `max(jump, step)` — Player/
-  Ravager use the documented jump peak `1.2522`. **No keybind for the cycle:** it rides the
+  Ravager use the documented jump peak `1.2522`. The profile cycle rides the
   use-key dispatch — **sneak + right-click at nothing** clears *and* advances the
   profile, then pings the HUD with the new name. The `profile` field is `volatile`
   (read in `emit`); `width` drives dilation and `height` drives headroom (see
   `geometry.md`). (The separate occluder-style debug key above is unrelated to the
   profile cycle.)
 - **Adjustable flood radius (shift+scroll).** `MobWalkClient` registers
-  `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook — no mixin)
+  `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook)
   and, **only while holding the stick (in either hand) and sneaking**, changes the
   radius by the scroll direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
   and returns `false` to cancel the vanilla slot change. Plain scroll is untouched.
@@ -164,7 +164,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Threading.** The selection is computed only on the client/extraction thread
   (`select`/`clear`); the render thread reads only the immutable snapshot via the
   `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
-  result list, not a per-block cache — each action recomputes from scratch.
+  result list — each action recomputes from scratch.
 
 ### Per-surface drawing (`emit`)
 
@@ -233,30 +233,29 @@ through-walls, depth-on `SKIRT` occluded).
   hole candidates.
 - **Occluder-marker debug style (`cycleOccluderStyle` + a keybind).** The final
   upward-marker look is being A/B'd in-game: a **standalone keybind** (default `K`,
-  registered in `MobWalkClient` via `KeyMappingHelper`, **not** tied to the
+  registered in `MobWalkClient` via `KeyMappingHelper`, separate from the
   scroll/use handlers) increments a `volatile` style index (tiny / half-block / full /
-  bold-line, wrapping). It is a pure render-thread choice, so it does **not** touch the
-  published spans or re-flood. The `full` style clamps to `reach + SKIRT_MARGIN` so a
-  tall wall isn't a giant curtain. **Deferred:** no single baseline style was ever
-  chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
-  later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
-  toggle and the four styles stay as-is until then.
+  bold-line, wrapping). Pure render-thread choice: leaves published spans and the
+  flood alone. The `full` style clamps to `reach + SKIRT_MARGIN` so a
+  tall wall isn't a giant curtain. **Deferred:** baseline style + whether to keep the
+  toggle lands in a later appearance-focused milestone (see [`project.md`](project.md)
+  roadmap); the `K` toggle and the four styles stay as-is until then.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a stick
   selection active it re-runs `select` once with a one-shot flag, writes a single
   `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
   downskirts → holes), and posts a short chat summary (`merged=… occluders=…
   skirts=… holes=… (see latest.log)`). With an empty selection: chat
-  `flood-debug: no selection`. Armed only by the command.
+  `flood-debug: no selection`. Armed by `/mobwalk dump`.
 - **Surface-height toggle (visible face vs collision top; default `V`).** Blocks that
   render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
   their standable top *buried* at the collision height. A standalone key (default `V`,
   registered in `MobWalkClient`) flips `useVisualTop` (default **on** — the fix). It is
-  a **compute-side** flag, not a per-draw one: it is passed into `select`, where the
+  a **compute-side** flag: it is passed into `select`, where the
   visible top is gathered (gated on it, memoized per `BlockState` — see
   [`geometry.md`](geometry.md) "Visible-face top vs collision top") and **baked into
   each rect's `visualTopY` / span `visualBaseY`**. `emit` then *always* draws the top
-  fill, borders, and the up/down/hole skirts at that baked render height — no per-draw
-  branch — and it equals the collision top when the mode is off (the raise isn't
+  fill, borders, and the up/down/hole skirts at that baked render height
+  — and it equals the collision top when the mode is off (the raise isn't
   computed then). The height-gradient **color stays keyed on the collision `topY`**, so
   the palette doesn't shift when toggling. Because the flag gates the compute,
   `toggleVisualTop()` **re-floods** from the last seed (cheap: toggling is rare) and
