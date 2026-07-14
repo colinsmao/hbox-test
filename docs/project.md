@@ -72,12 +72,10 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   collision height (default **on**), re-flooding on toggle. Walkability math is
   unchanged — this only moves where the paint is drawn. See "Visible-face top vs
   collision top" in [`geometry.md`](geometry.md) and the surface-height toggle in
-  [`rendering.md`](rendering.md). (3) **Surfaces draw through water:** the overlay
-  now draws at `BEFORE_TRANSLUCENT_TERRAIN` instead of after, so a submerged surface
-  (pond bottom) is no longer hidden by the depth the water writes — it shows
-  water-tinted, without crouching (see [`rendering.md`](rendering.md)). This is a
-  rendering fix only; **water is not walkable** (an entity-dependent modelling
-  change deferred to the profile/hitbox library). (4) **Flood seeds from the
+  [`rendering.md`](rendering.md). (3) **Overlay draws after translucent terrain**
+  so ice/glass/honey stay visible under the fill; pond bottoms need crouch to
+  show through water (see the recorded translucent-phase decision in
+  [`rendering.md`](rendering.md)). (4) **Flood seeds from the
   clicked block's tops**; other surfaces join only via walkable BFS hops.
   (5) **Player / Ravager `reach = 1.2522`** (documented jump peak); Point
   `reach = 1.0`.

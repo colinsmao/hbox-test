@@ -61,10 +61,10 @@ public final class WorldOverlayManager {
 			.build()
 	);
 
-	// Same snippet but with its DEFAULT depth state (depth test kept, not
-	// disabled), used for the vertical skirts: a skirt buried behind solid
-	// geometry (a step riser, an interior floor edge) is occluded, while a skirt
-	// over an open drop stays visible, so the selection reads as a 3D mesh.
+	// Depth-tested layer for skirts + non-crouch tops. Keeps DEBUG_FILLED_SNIPPET's
+	// depth state (LEQUAL, writeDepth=false). Drawn after translucent terrain so
+	// ice/glass/honey stay in the color buffer and the half-alpha fill composites
+	// on top; opaque terrain still occludes via the depth test.
 	private static final RenderPipeline SKIRT = RenderPipelines.register(
 		RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
 			.withLocation(Identifier.fromNamespaceAndPath(MobWalk.MOD_ID, "pipeline/world_overlay_skirt"))
@@ -95,13 +95,12 @@ public final class WorldOverlayManager {
 		register(collisionSurface);
 
 		LevelRenderEvents.END_EXTRACTION.register(WorldOverlayManager::extract);
-		// Draw BEFORE translucent terrain, not after: translucent water writes depth,
-		// so at AFTER_TRANSLUCENT_TERRAIN a submerged surface in the depth-tested SKIRT
-		// layer failed the depth test and was hidden (only the depth-off crouch tops
-		// showed through). Here the depth buffer holds only opaque terrain + entities,
-		// so a pond bottom passes depth and water then blends over it; opaque terrain
-		// still occludes as before.
-		LevelRenderEvents.BEFORE_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
+		// Draw AFTER translucent terrain so ice/glass/honey are already in the
+		// color buffer and our half-alpha fill composites on top (full authored
+		// alpha). Depth-tested SKIRT then fails against water's written depth, so
+		// pond bottoms need crouch (depth-off FILLED) to show through — preferred
+		// over BEFORE (ice overdraws the fill) or dual-phase (2× draw, too faint).
+		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(WorldOverlayManager::draw);
 		// Free GPU resources at shutdown. We use CLIENT_STOPPING rather than a
 		// GameRenderer#close mixin to avoid mixin plumbing; trade-off: buffers
 		// are freed at shutdown, not on a mid-session renderer reload.

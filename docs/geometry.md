@@ -280,9 +280,13 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
 
 Some blocks are inset **horizontally** while still rendering full width — notably
 **honey** (`box(1,0,1,15,15,15)`, a `[1/16,15/16]` footprint under a full-cube
-render), so its edges/skirts sit ~1px inside the visible face. This is left
-**unfixed on purpose** because it is **Point-only**: a footprint dilates by `W/2` per
-side, so the dilated edge clears the block face whenever `W ≥ 2/16 = 0.125`, and
+render), so its edges/skirts sit ~1px inside the visible face. Honey also has
+**two height layers** (collision top `15/16`, full-height translucent/outline
+body): with `visualTopY` the paint sits on the outer shell and the fill+honey
+body read as stacked layers — see [`rendering.md`](rendering.md). The horizontal
+inset is left **unfixed on purpose** because it is **Point-only**: a footprint
+dilates by `W/2` per side, so the dilated edge clears the block face whenever
+`W ≥ 2/16 = 0.125`, and
 every real entity is far past that (smallest vanilla mobs ~`0.4`; all shipped
 profiles `≥ 0.6`). Only the zero-width **Point** profile (the debug/oracle baseline)
 keeps the inset footprint. Fixing it would need a full **visual footprint** (four
