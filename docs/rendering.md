@@ -96,8 +96,8 @@ Config UI, persistence, and MaLiLib option types live in
   `WorldOverlayManager` owns the `LevelRenderEvents` phases, **two** shared
   pipelines each with its own `BufferBuilder` — a **depth-off `FILLED`** layer
   (tops/borders through walls), a **depth-on `SKIRT`** layer (occluded by terrain),
-  and a **depth-off `BEAM`** layer (hole beams, drawn last so opaque beams cover
-  skirts),
+  and a **depth-off `BEAM`** layer (beams when `showBeamsThroughWalls` is on,
+  drawn last so opaque beams cover skirts; when off, beams share `SKIRT`),
   so `emit(matrix, fillBuffer, skirtBuffer)` writes into both and each layer
   batches into one draw call — the `MeshData` → `MappableRingBuffer` →
   render-pass GPU handoff (per layer), the use-key rising-edge dispatch, and GPU
@@ -291,12 +291,12 @@ through-walls, depth-on `SKIRT` occluded).
   (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
   real geometry.
 - **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
-  leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **through-walls
-  vertical beam** from the cliff-edge top `T`, so it reads even when the rim is behind
-  terrain: it is drawn in a dedicated depth-off `BEAM` layer (same pipeline as
-  crouch-gated tops) **after** the depth-tested skirts, so opaque beams cover
-  skirts instead of being overdrawn by them. Beams rise a fixed world height
-  (`BEAM_HEIGHT`) at the opacity from
+  leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **vertical
+  beam** from the cliff-edge top `T`. Appearance `showBeamsThroughWalls` (default on)
+  routes it to a dedicated depth-off `BEAM` layer (same pipeline as crouch-gated tops)
+  **after** the depth-tested skirts, so opaque beams cover skirts and read through
+  terrain; when off, beams go into the depth-tested `SKIRT` layer and are occluded by
+  blocks. Beams rise a fixed world height (`BEAM_HEIGHT`) at the opacity from
   Appearance `holeBeamColor`. Appearance `showHoleBeams` (default on) gates
   drawing; `holeBeamColor` supplies RGB and alpha (uniform along the beam). Benign
   drops keep their ordinary down-skirt and get **no** beam.
@@ -330,8 +330,9 @@ through-walls, depth-on `SKIRT` occluded).
   drawing the **published** down-skirt spans (`emitDownSkirts`, from `DownSkirtSpan`;
   frontier spans `depth >= limit` suppressed), **upward occluder skirts**
   (`emitOccluders`, the side-based interior nudge, the four debug styles +
-  `cycleOccluderStyle`), and the **through-walls hole beams** (`emitHoles`, from
-  `HoleSpan`, into the depth-off `BEAM` layer drawn after skirts) — `emit` no longer computes any edge
+  `cycleOccluderStyle`), and the **hole beams** (`emitHoles`, from
+  `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
+  `showBeamsThroughWalls`) — `emit` no longer computes any edge
   spans per frame — the cyclic depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
   band), the level-identity reset,
   `volatile` snapshot/occluder/down-skirt/hole/crouch/style handoff, and the

@@ -18,9 +18,9 @@ frameworks so more overlay widgets are easy to add.
 
 Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — filter
 tabs All/General/Appearance/Debug; General enabled / mobProfile / floodRadius;
-Appearance walkableColor / showHoleBeams / holeBeamColor; Debug crouch gestures +
-shadeByDepth / showCutoffRing (live apply, save-on-close). The repo is a client-only
-Fabric Gradle project generated
+Appearance walkableColor / showBeamsThroughWalls / showHoleBeams / holeBeamColor;
+Debug crouch gestures + shadeByDepth / showCutoffRing (live apply, save-on-close).
+The repo is a client-only Fabric Gradle project generated
 from `FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
 layout** below). `./gradlew build` passes (produces `build/libs/mobwalk-1.0.0.jar`).
 Rendering details live in [`rendering.md`](rendering.md); settings/config stack
@@ -234,9 +234,9 @@ The overlay frameworks (see [`rendering.md`](rendering.md)) are designed to make
 these incremental:
 
 - **Configuration:** MaLiLib All/General/Appearance/Debug tabs (enabled,
-  mobProfile, floodRadius, walkableColor, showHoleBeams, holeBeamColor; Debug
-  crouch gestures + shadeByDepth + showCutoffRing) via Mods → Configure; live
-  apply + save-on-close (see [`settings.md`](settings.md)).
+  mobProfile, floodRadius, walkableColor, showBeamsThroughWalls, showHoleBeams,
+  holeBeamColor; Debug crouch gestures + shadeByDepth + showCutoffRing) via Mods →
+  Configure; live apply + save-on-close (see [`settings.md`](settings.md)).
 - **Keybinds:** `KeyBindingHelper` to toggle overlays.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
   in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.

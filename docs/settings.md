@@ -77,11 +77,12 @@ category name: `"Appearance"`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `walkableColor` | `ConfigColor` | `#8066CC66` (light green, ~50% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill. Read live in `emit`. |
-| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `emitHoles` draws through-walls beams at hole rims. When off: beams are skipped. |
+| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `emitHoles` draws beams at hole rims. When off: beams are skipped. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 
 Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
-`Configs.showHoleBeams()`.
+`Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`.
 
 ## Live Debug options
 
@@ -109,7 +110,16 @@ Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 - `comment.<id>` — tooltip. Required for every option (missing → raw key).
   Player-facing only: help the player decide or use the option. Skip implementation
   jargon. Prefer short copy; extra length only when useful. A later UX pass may
-  refine tone.
+  refine tone. Existing `comment.*` / `name.*` strings in `en_us.json` are the
+  desired copy — agents add new keys and leave existing phrasing alone unless
+  asked to change it or the option’s meaning changed.
+- Bool `comment.*` lead with `If enabled,`. Options are either **mod actions**
+  (what the mod does/looks like) or **player actions** (how the player interacts).
+  Prefer active third person when the feature is the actor (`draws beams`,
+  `colors surfaces`, `shows …`). Prefer a full indicative clause when the player
+  is the actor (`scrolling changes …`, `right-clicking air cycles …`). Do not name
+  “the mod” / “the overlay” as subject. **Debug** is the odd tab for debug aids;
+  it is not required to be a pure mod-action or player-action group.
 - Do not ship `prettyName.*` unless a toggle message needs custom phrasing.
 
 ## Adding an option

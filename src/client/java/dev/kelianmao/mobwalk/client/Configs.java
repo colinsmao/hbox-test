@@ -54,6 +54,8 @@ public final class Configs implements IConfigHandler {
 	public static final class Appearance {
 		public static final ConfigColor WALKABLE_COLOR =
 			new ConfigColor("walkableColor", "#8066CC66").apply(APPEARANCE_KEY);
+		public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
+			new ConfigBoolean("showBeamsThroughWalls", true).apply(APPEARANCE_KEY);
 		public static final ConfigBoolean SHOW_HOLE_BEAMS =
 			new ConfigBoolean("showHoleBeams", true).apply(APPEARANCE_KEY);
 		public static final ConfigColor HOLE_BEAM_COLOR =
@@ -61,6 +63,7 @@ public final class Configs implements IConfigHandler {
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			WALKABLE_COLOR,
+			SHOW_BEAMS_THROUGH_WALLS,
 			SHOW_HOLE_BEAMS,
 			HOLE_BEAM_COLOR
 		);
@@ -156,6 +159,10 @@ public final class Configs implements IConfigHandler {
 
 	public static Color4f walkableColor() {
 		return Appearance.WALKABLE_COLOR.getColor();
+	}
+
+	public static boolean showBeamsThroughWalls() {
+		return Appearance.SHOW_BEAMS_THROUGH_WALLS.getBooleanValue();
 	}
 
 	public static boolean showHoleBeams() {

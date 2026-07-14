@@ -129,10 +129,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final double OCC_HALF_HEIGHT = 0.5;
 	private static final double OCC_BOLD_HEIGHT = 0.1;
 
-	// Hole beam: a through-walls vertical marker rising from the cliff-edge top of a
-	// hole span (drawn in the depth-off BEAM layer, after skirts, so it reads
-	// through terrain and opaque beams cover skirts).
-	// Color and opacity from Appearance holeBeamColor (uniform along the beam).
+	// Hole beam: a vertical marker rising from the cliff-edge top of a hole span.
+	// Routed to the depth-off BEAM layer or depth-tested SKIRT layer by Appearance
+	// showBeamsThroughWalls. Color/opacity from holeBeamColor.
 	private static final float BEAM_HEIGHT = 4.0f;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
@@ -489,14 +488,16 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		// depth-tested layer, in the active debug style.
 		emitOccluders(skirtBuffer, positionMatrix, skirtDepth);
 
-		// Hole beams: through-walls markers into the beam layer (drawn after skirts
-		// so opaque beams are not overdrawn by depth-tested skirts).
-		emitHoles(beamBuffer, positionMatrix);
+		// Hole beams: depth-off beam layer when showBeamsThroughWalls, else
+		// depth-tested skirt layer (occluded by terrain). Emit after skirts so
+		// beams still sit above skirt quads when sharing that buffer.
+		BufferBuilder holes = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
+		emitHoles(holes, positionMatrix);
 	}
 
-	// Draw a through-walls vertical beam rising from each hole span's rim (baseY),
-	// clamped to a fixed world height, at holeBeamColor opacity. Into the beam
-	// layer (depth-off, drawn after skirts) so opaque beams cover skirts.
+	// Draw a vertical beam rising from each hole span's rim (baseY), clamped to a
+	// fixed world height, at holeBeamColor opacity. Caller picks beam vs skirt
+	// buffer (Appearance showBeamsThroughWalls).
 	private void emitHoles(BufferBuilder beamBuffer, Matrix4fc positionMatrix) {
 		if (!Configs.showHoleBeams()) {
 			return;

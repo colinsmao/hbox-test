@@ -153,6 +153,11 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   [`docs/geometry.md`](docs/geometry.md)).
 - **Mismatched JDK is the most common setup failure** — verify `java -version` is
   `25` before debugging build issues.
+- **Locale files are author-owned copy.** Treat `assets/mobwalk/lang/*.json` (and
+  other locale resources) as the desired wording. Add keys for new options; update
+  a string only when the user asks or the option’s meaning changed. Do not rephrase,
+  “improve,” or whole-file rewrite existing entries. Prefer targeted edits over
+  replacing the file.
 
 ## Git / workflow
 
