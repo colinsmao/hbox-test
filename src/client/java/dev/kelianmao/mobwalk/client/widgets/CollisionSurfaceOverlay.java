@@ -2,6 +2,7 @@ package dev.kelianmao.mobwalk.client.widgets;
 
 import java.util.List;
 
+import dev.kelianmao.mobwalk.client.Configs;
 import dev.kelianmao.mobwalk.client.DownSkirtSpan;
 import dev.kelianmao.mobwalk.client.EntityProfile;
 import dev.kelianmao.mobwalk.client.HoleSpan;
@@ -148,8 +149,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Flood depth limit: the maximum BFS hop-count from the seed. Adjustable at
 	// runtime via shift+scroll while holding the stick (see adjustRadius), clamped.
 	private static final int MIN_RADIUS = 0;
-	private static final int MAX_RADIUS = 20;
-	private static final int DEFAULT_RADIUS = 3;
+	private static final int MAX_RADIUS = 30;
+	private static final int DEFAULT_RADIUS = 20;
 	// Past this the scroll steps by 2, keeping the high end usable.
 	private static final int COARSE_RADIUS = 10;
 
@@ -276,7 +277,24 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public boolean isVisible() {
-		return holdingStick && !snapshot.isEmpty();
+		return Configs.isOverlayEnabled() && holdingStick && !snapshot.isEmpty();
+	}
+
+	/**
+	 * Live apply from MaLiLib default-radius control: update the session radius and
+	 * re-flood an active selection so the change shows immediately.
+	 */
+	public void applyDefaultRadius(int radius) {
+		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, radius));
+		if (updated == selectionRadius) {
+			return;
+		}
+		selectionRadius = updated;
+		Level level = Minecraft.getInstance().level;
+		if (level != null && lastSeed != null) {
+			cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+			publish();
+		}
 	}
 
 	@Override

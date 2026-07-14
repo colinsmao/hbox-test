@@ -15,10 +15,10 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — Step 1
-(MaLiLib + ModMenu + empty Generic config screen) is the current landing.
-The repo is a client-only Fabric Gradle project generated from
-`FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
+Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — Steps
+1–2 land MaLiLib/ModMenu plus Generic enable and default flood radius (live
+apply, save-on-close). The repo is a client-only Fabric Gradle project generated
+from `FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
 layout** below). `./gradlew build` passes (produces `build/libs/mobwalk-1.0.0.jar`).
 Rendering details live in [`rendering.md`](rendering.md).
 
@@ -82,8 +82,8 @@ Rendering details live in [`rendering.md`](rendering.md).
   `reach = 1.0`. Milestone 6.5 added `/mobwalk dump` and occluders-from-below in
   ledge gather.
 - **Milestone 7 — settings (in progress):** MaLiLib + ModMenu Configure entry;
-  empty Generic `GuiConfigs` screen; `Configs` (`IConfigHandler`) persists
-  `config/mobwalk.json` on screen close. Enable + default-radius options are next.
+  Generic options for overlay enable and default flood radius (0–30, default 20)
+  with live apply and save-on-close to `config/mobwalk.json`.
 
 ## Repository layout
 

@@ -15,5 +15,6 @@ public final class InitHandler implements IInitializationHandler {
 		Registry.CONFIG_SCREEN.registerConfigScreenFactory(
 			new ModInfo(MobWalk.MOD_ID, "MobWalk", GuiConfigs::new)
 		);
+		Configs.initCallbacks();
 	}
 }

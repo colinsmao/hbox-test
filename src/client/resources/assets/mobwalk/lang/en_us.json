@@ -1,3 +1,8 @@
 {
-	"mobwalk.gui.title.configs": "MobWalk Configs"
+	"mobwalk.gui.title.configs": "MobWalk Configs",
+
+	"mobwalk.config.generic.name.enabled": "Enable overlay",
+
+	"mobwalk.config.generic.name.defaultRadius": "Flood radius",
+	"mobwalk.config.generic.comment.defaultRadius": "BFS flood depth limit. Large values may cause performance issues."
 }

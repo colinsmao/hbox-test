@@ -33,8 +33,11 @@ Pause → Mods (ModMenu) → Configure → GuiConfigs (MaLiLib GuiConfigsBase)
   `implementation` (non-remapping); ModMenu is `compileOnly` + `localRuntime`.
 - `InitHandler` registers the config handler and `Registry.CONFIG_SCREEN`
   factory; `MobWalkClient` registers it via `InitializationHandler`.
-- Step 1 ships an empty Generic options list so the screen opens; enable /
-  default-radius options and live `setValueChangeCallback` apply land in Step 2.
+- **Generic options (live):** `enabled` gates `CollisionSurfaceOverlay.isVisible()`
+  each frame (existing snapshot; no re-flood). `defaultRadius` (0–30, default 20,
+  slider) updates the session radius and re-floods an active selection via
+  `setValueChangeCallback` → `applyDefaultRadius`. Closing the screen saves
+  `config/mobwalk.json` through `IConfigHandler.save()`.
 
 ## HUD rendering (Milestone 1)
 

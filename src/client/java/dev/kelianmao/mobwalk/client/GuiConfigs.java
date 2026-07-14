@@ -6,7 +6,7 @@ import fi.dy.masa.malilib.gui.GuiConfigsBase;
 
 import dev.kelianmao.mobwalk.MobWalk;
 
-/** MaLiLib settings screen (ModMenu Configure entry). Generic options land in Step 2. */
+/** MaLiLib settings screen (ModMenu Configure entry). */
 public final class GuiConfigs extends GuiConfigsBase {
 	public GuiConfigs() {
 		super(10, 50, MobWalk.MOD_ID, null, "mobwalk.gui.title.configs");

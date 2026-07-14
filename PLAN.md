@@ -13,9 +13,10 @@ launch / world load-unload / resize; client-only mod.
 
 ## Status
 
-**Done:** Step 1 — MaLiLib + ModMenu + empty Generic config screen.
+**Done:** Steps 1–2 — MaLiLib + ModMenu; Generic enable + default flood radius
+(live apply, save-on-close).
 
-**Next:** Step 2 — enable + default radius (live apply, save-on-close).
+**Next:** deferred follow-ups (profiles UI, sneak-scroll, hole beams, keybinds).
 
 ## Stack
 
