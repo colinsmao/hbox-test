@@ -130,16 +130,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final double OCC_BOLD_HEIGHT = 0.1;
 
 	// Hole beam: a through-walls vertical marker rising from the cliff-edge top of a
-	// hole span (drawn in the depth-off FILLED layer so it reads through terrain).
-	// Solid-ish red at the base, fading out toward a fixed world height so it doesn't
-	// read as a hard wall. Per-edge for now (Step 3); Step 4 coalesces to one beam per
-	// hole region and tunes this look.
+	// hole span (drawn in the depth-off BEAM layer, after skirts, so it reads
+	// through terrain and opaque beams cover skirts).
+	// Color and opacity from Appearance holeBeamColor (uniform along the beam).
 	private static final float BEAM_HEIGHT = 4.0f;
-	private static final float BEAM_R = 0.95f;
-	private static final float BEAM_G = 0.15f;
-	private static final float BEAM_B = 0.1f;
-	private static final float BEAM_ALPHA_BASE = 0.85f;
-	private static final float BEAM_ALPHA_TOP = 0.05f;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
@@ -443,7 +437,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	@Override
-	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer) {
+	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
+			BufferBuilder beamBuffer) {
 		List<StandableRect> rects = snapshot;
 		if (rects.isEmpty()) {
 			return;
@@ -453,6 +448,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		float skirtDepth = (float) (Configs.mobProfile().reach() + SKIRT_MARGIN);
 
 		for (StandableRect rect : rects) {
+			if (!Configs.showCutoffRing() && inCutoffRing(rect.depth(), limit)) {
+				continue;
+			}
 			float minX = (float) rect.minX();
 			float minZ = (float) rect.minZ();
 			float maxX = (float) rect.maxX();
@@ -491,19 +489,27 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		// depth-tested layer, in the active debug style.
 		emitOccluders(skirtBuffer, positionMatrix, skirtDepth);
 
-		// Hole beams: through-walls markers at each hole rim, into the depth-off
-		// FILLED layer so they read even behind terrain.
-		emitHoles(fillBuffer, positionMatrix);
+		// Hole beams: through-walls markers into the beam layer (drawn after skirts
+		// so opaque beams are not overdrawn by depth-tested skirts).
+		emitHoles(beamBuffer, positionMatrix);
 	}
 
 	// Draw a through-walls vertical beam rising from each hole span's rim (baseY),
-	// clamped to a fixed world height, solid-ish at the base and fading out at the
-	// top. Into the depth-off FILLED buffer so it is visible behind terrain.
-	private void emitHoles(BufferBuilder fillBuffer, Matrix4fc positionMatrix) {
+	// clamped to a fixed world height, at holeBeamColor opacity. Into the beam
+	// layer (depth-off, drawn after skirts) so opaque beams cover skirts.
+	private void emitHoles(BufferBuilder beamBuffer, Matrix4fc positionMatrix) {
+		if (!Configs.showHoleBeams()) {
+			return;
+		}
 		List<HoleSpan> spans = holeSnapshot;
 		if (spans.isEmpty()) {
 			return;
 		}
+		Color4f beam = Configs.holeBeamColor();
+		float r = beam.r;
+		float g = beam.g;
+		float b = beam.b;
+		float a = beam.a;
 		// HoleSpan doesn't carry a flood-depth, so holes at the cutoff edge can't
 		// be depth-suppressed — that's acceptable: depth-limit artifacts are rare
 		// at cliff edges (the flood stops mid-surface, not at a drop).
@@ -526,8 +532,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 				xa = (float) h.line();
 				xb = (float) h.line();
 			}
-			vQuad(fillBuffer, positionMatrix, xa, za, xb, zb, top, base,
-				BEAM_R, BEAM_G, BEAM_B, BEAM_ALPHA_TOP, BEAM_ALPHA_BASE);
+			vQuad(beamBuffer, positionMatrix, xa, za, xb, zb, top, base,
+				r, g, b, a, a);
 		}
 	}
 
@@ -545,6 +551,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		float o = (float) SKIRT_OFFSET;
 		for (DownSkirtSpan sp : spans) {
 			if (sp.depth() >= limit) {
+				continue;
+			}
+			if (!Configs.showCutoffRing() && inCutoffRing(sp.depth(), limit)) {
 				continue;
 			}
 			float[] rgb = greyBlend(surfaceRgb(sp.depth()), sp.depth(), limit);
@@ -583,6 +592,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		float o = (float) SKIRT_OFFSET;
 		for (OccluderSpan span : spans) {
 			if (span.depth() >= limit) {
+				continue;
+			}
+			if (!Configs.showCutoffRing() && inCutoffRing(span.depth(), limit)) {
 				continue;
 			}
 			// Rise from the rect's render height (visualBaseY); the wall top (span.topY)
@@ -655,6 +667,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		buffer.addVertex(matrix, x1, y, z1).setColor(r, g, b, a);
 		buffer.addVertex(matrix, x0, y, z1).setColor(r, g, b, a);
 		buffer.addVertex(matrix, x0, y, z0).setColor(r, g, b, a);
+	}
+
+	// True for depths in the cutoff-ring band (partial/full grey when shown):
+	// depth == limit-1 → half grey; depth >= limit → full grey.
+	private static boolean inCutoffRing(int depth, int limit) {
+		return depth >= 0 && depth > limit - 2;
 	}
 
 	// Blend a base color toward RING_COLOR by how close the rect's BFS depth is to

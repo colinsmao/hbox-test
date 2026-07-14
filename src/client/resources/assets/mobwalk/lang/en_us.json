@@ -13,11 +13,17 @@
 
   "mobwalk.config.appearance.comment.walkableColor": "Color and transparency of walkable surfaces.",
 
+  "mobwalk.config.appearance.comment.showHoleBeams": "Draw vertical beams at holes (drops a mob cannot escape).",
+
+  "mobwalk.config.appearance.comment.holeBeamColor": "Color and transparency of hole beams.",
+
   "mobwalk.config.debug.comment.crouchSeeThroughWalls": "While crouching, show selected surfaces through walls.",
 
   "mobwalk.config.debug.comment.crouchScrollRadius": "While crouching with a stick, scroll to change flood radius instead of the hotbar.",
 
   "mobwalk.config.debug.comment.crouchCycleProfile": "While crouching with a stick, right-click air to cycle the mob profile.",
 
-  "mobwalk.config.debug.comment.shadeByDepth": "Color surfaces by the BFS flood depth from the seed. Mostly for debugging connectivity, as the rainbow hues are distracting."
+  "mobwalk.config.debug.comment.shadeByDepth": "Color surfaces by the BFS flood depth from the seed. Mostly for debugging connectivity, as the rainbow hues are distracting.",
+
+  "mobwalk.config.debug.comment.showCutoffRing": "Show the grey outermost flood-radius rings (inconclusive neighbor relationships)."
 }

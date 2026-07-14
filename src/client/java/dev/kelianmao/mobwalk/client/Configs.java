@@ -54,9 +54,15 @@ public final class Configs implements IConfigHandler {
 	public static final class Appearance {
 		public static final ConfigColor WALKABLE_COLOR =
 			new ConfigColor("walkableColor", "#8066CC66").apply(APPEARANCE_KEY);
+		public static final ConfigBoolean SHOW_HOLE_BEAMS =
+			new ConfigBoolean("showHoleBeams", true).apply(APPEARANCE_KEY);
+		public static final ConfigColor HOLE_BEAM_COLOR =
+			new ConfigColor("holeBeamColor", "#80F2261A").apply(APPEARANCE_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-			WALKABLE_COLOR
+			WALKABLE_COLOR,
+			SHOW_HOLE_BEAMS,
+			HOLE_BEAM_COLOR
 		);
 
 		private Appearance() {}
@@ -71,12 +77,15 @@ public final class Configs implements IConfigHandler {
 			new ConfigBoolean("crouchCycleProfile", true).apply(DEBUG_KEY);
 		public static final ConfigBoolean SHADE_BY_DEPTH =
 			new ConfigBoolean("shadeByDepth", false).apply(DEBUG_KEY);
+		public static final ConfigBoolean SHOW_CUTOFF_RING =
+			new ConfigBoolean("showCutoffRing", true).apply(DEBUG_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			CROUCH_SEE_THROUGH,
 			CROUCH_SCROLL_RADIUS,
 			CROUCH_CYCLE_PROFILE,
-			SHADE_BY_DEPTH
+			SHADE_BY_DEPTH,
+			SHOW_CUTOFF_RING
 		);
 
 		private Debug() {}
@@ -149,6 +158,14 @@ public final class Configs implements IConfigHandler {
 		return Appearance.WALKABLE_COLOR.getColor();
 	}
 
+	public static boolean showHoleBeams() {
+		return Appearance.SHOW_HOLE_BEAMS.getBooleanValue();
+	}
+
+	public static Color4f holeBeamColor() {
+		return Appearance.HOLE_BEAM_COLOR.getColor();
+	}
+
 	public static boolean crouchScrollRadius() {
 		return Debug.CROUCH_SCROLL_RADIUS.getBooleanValue();
 	}
@@ -163,6 +180,10 @@ public final class Configs implements IConfigHandler {
 
 	public static boolean shadeByDepth() {
 		return Debug.SHADE_BY_DEPTH.getBooleanValue();
+	}
+
+	public static boolean showCutoffRing() {
+		return Debug.SHOW_CUTOFF_RING.getBooleanValue();
 	}
 
 	@Override

@@ -75,11 +75,13 @@ public final class WorldOverlayManager {
 	private static final Vector3f MODEL_OFFSET = new Vector3f();
 	private static final Matrix4f TEXTURE_MATRIX = new Matrix4f();
 
-	// One GPU layer (own allocator + ring buffer) per pipeline. The depth-off
-	// FILLED layer carries the flat tops/borders; the depth-tested SKIRT layer
-	// carries the vertical edge walls.
+	// One GPU layer (own allocator + ring buffer) per pipeline role. Depth-off
+	// FILLED carries tops/borders; depth-tested SKIRT carries vertical skirts;
+	// depth-off BEAM carries hole beams and is drawn last so opaque beams cover
+	// skirts (fill alone cannot — skirts always drew after fill).
 	private static final Layer fillLayer = new Layer(FILLED);
 	private static final Layer skirtLayer = new Layer(SKIRT);
+	private static final Layer beamLayer = new Layer(FILLED);
 
 	private static boolean usePressedLastTick = false;
 
@@ -157,17 +159,19 @@ public final class WorldOverlayManager {
 		Matrix4fc pose = matrices.last().pose();
 		BufferBuilder fill = fillLayer.begin();
 		BufferBuilder skirt = skirtLayer.begin();
+		BufferBuilder beam = beamLayer.begin();
 		for (WorldOverlay overlay : visible) {
-			overlay.emit(pose, fill, skirt);
+			overlay.emit(pose, fill, skirt, beam);
 		}
 
 		matrices.popPose();
 
-		// Fill first (depth-off, drawn through walls), then skirts (depth-tested):
-		// tops never occlude skirts, and skirts are occluded only by world geometry.
+		// Fill (depth-off tops) → skirts (depth-tested) → beams (depth-off, last):
+		// beams composite over skirts so opaque hole beams are not overdrawn.
 		Minecraft client = Minecraft.getInstance();
 		drawLayer(client, fillLayer);
 		drawLayer(client, skirtLayer);
+		drawLayer(client, beamLayer);
 	}
 
 	private static void drawLayer(Minecraft client, Layer layer) {
@@ -255,6 +259,7 @@ public final class WorldOverlayManager {
 	private static void close() {
 		fillLayer.close();
 		skirtLayer.close();
+		beamLayer.close();
 	}
 
 	// A single GPU draw layer: its pipeline, a private vertex allocator/builder,

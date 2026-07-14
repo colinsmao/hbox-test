@@ -17,9 +17,10 @@ per [`AGENTS.md`](AGENTS.md)). When that chunk lands, distill durable facts into
   **General** / **Appearance** / **Debug** (default **All**).
 - General (`Configs.Generic` / JSON `"Generic"`): **enabled**; **mobProfile**
   (Point/Player/Ravager, default Player); **floodRadius** (0–30, default 20).
-- Appearance: **walkableColor** (`#8066CC66` light green with alpha).
+- Appearance: **walkableColor** (`#8066CC66`); **showHoleBeams** (default on);
+  **holeBeamColor** (`#80F2261A`).
 - Debug: **crouchSeeThroughWalls**; **crouchScrollRadius**; **crouchCycleProfile**
-  (default on); **shadeByDepth** (default off — depth-hue debug aid).
+  (default on); **shadeByDepth** (default off); **showCutoffRing** (default on).
 - Save-on-close → `config/mobwalk.json`; player-facing `comment.*` tooltips;
   optional `name.*` (else option id via `refreshDisplayNames`).
 
@@ -35,12 +36,11 @@ Add or reorder freely; pick items up via a temporary plan when ready.
 
 - Hotkey open for the config screen.
 - Profiles UI / hitbox library (seeded vanilla + custom beyond the cycle list).
-- Show hole beams toggle.
 - Keybinds: toggle overlay; cycle profile (vanilla Controls or MaLiLib hotkeys).
 - Persist occluder style (K) and surface-height mode (V).
 - HUD settings (offset, duration, colour, anchor).
 - Activation item picker (stick today).
-- More Appearance options (skirt/beam styling, ring grey, height ramp).
+- More Appearance options (skirt styling, ring grey color, height ramp).
 - Flood perf hardening (timeout, threading, frame-slicing).
 - Settings tooltip UX pass (tone/length).
 - Server-side config (only if the mod ever grows a server half).

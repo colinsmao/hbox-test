@@ -25,19 +25,20 @@ public interface WorldOverlay {
 	/**
 	 * Drawing phase: append quads to the shared buffers.
 	 *
-	 * <p>{@link WorldOverlayManager} maintains two {@code POSITION_COLOR} /
-	 * {@code QUADS} layers with different depth state: {@code fillBuffer} is
-	 * <b>depth-disabled</b> (draws through walls — a debug aid) and
-	 * {@code skirtBuffer} is <b>depth-tested</b> (occluded by world geometry).
-	 * A widget puts flat "always visible" geometry in the fill buffer and
-	 * world-occluded geometry (e.g. vertical skirts) in the skirt buffer.
+	 * <p>{@link WorldOverlayManager} maintains three {@code POSITION_COLOR} /
+	 * {@code QUADS} layers: {@code fillBuffer} is <b>depth-disabled</b> (tops /
+	 * borders through walls), {@code skirtBuffer} is <b>depth-tested</b>
+	 * (occluded by world geometry), and {@code beamBuffer} is <b>depth-disabled</b>
+	 * again but drawn <b>last</b> so hole beams composite over skirts.
 	 *
 	 * @param positionMatrix already translated so world coordinates are
 	 *                       camera-relative; pass absolute world coords.
-	 * @param fillBuffer     depth-disabled layer (draws through walls).
+	 * @param fillBuffer     depth-disabled layer (tops/borders through walls).
 	 * @param skirtBuffer    depth-tested layer (occluded by world geometry).
+	 * @param beamBuffer     depth-disabled layer drawn after skirts (hole beams).
 	 */
-	void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer);
+	void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
+			BufferBuilder beamBuffer);
 
 	default boolean isVisible() {
 		return true;

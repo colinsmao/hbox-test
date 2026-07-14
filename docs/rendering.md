@@ -95,7 +95,9 @@ Config UI, persistence, and MaLiLib option types live in
   **immediate-mode** (geometry rebuilt every frame), not retained.
   `WorldOverlayManager` owns the `LevelRenderEvents` phases, **two** shared
   pipelines each with its own `BufferBuilder` — a **depth-off `FILLED`** layer
-  (draws through walls) and a **depth-on `SKIRT`** layer (occluded by terrain),
+  (tops/borders through walls), a **depth-on `SKIRT`** layer (occluded by terrain),
+  and a **depth-off `BEAM`** layer (hole beams, drawn last so opaque beams cover
+  skirts),
   so `emit(matrix, fillBuffer, skirtBuffer)` writes into both and each layer
   batches into one draw call — the `MeshData` → `MappableRingBuffer` →
   render-pass GPU handoff (per layer), the use-key rising-edge dispatch, and GPU
@@ -178,7 +180,8 @@ through-walls, depth-on `SKIRT` occluded).
   `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
   switches RGB to the cyclic BFS-depth hue band (`depthColor`, blue at depth 0,
   cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color. Cutoff greying (`greyBlend`) applies in both modes.
+  out-of-sequence color. Cutoff ring greying (`greyBlend`) applies in both modes when
+  Debug `showCutoffRing` is on (default); when off, those ring depths are not drawn.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
   `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
   surfaces *through* blocks is a debug aid, so when the option is on the top is
@@ -270,10 +273,12 @@ through-walls, depth-on `SKIRT` occluded).
   unaffected (collision-top only); this is purely where the paint is drawn. Session-only
   this milestone (resets to on at relaunch; a persisted setting lands with the Milestone
   7 config).
-- **Depth-based grey cutoff (incomplete-selection signal).** Surfaces near the BFS
-  depth limit blend toward **grey** (`greyBlend`), so a depth-cutoff reads differently
-  from a true boundary (a selection stopped by a real drop stays depth-colored). The
-  blend is keyed on each rect's `depth` relative to `depthLimit` (= `selectionRadius`):
+- **Depth-based grey cutoff (incomplete-selection signal).** When Debug
+  `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
+  blended toward **grey** (`greyBlend`), so a depth-cutoff reads differently from a
+  true boundary (a selection stopped by a real drop stays colored). When off, those
+  ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
+  `depth` relative to `depthLimit` (= `selectionRadius`):
   `depth <= limit−2` → no grey; `depth == limit−1` → half grey; `depth >= limit` → full
   grey. This is possible because the **frontier-split merge**
   (`mergeCoplanarSplitFrontier`) keeps the frontier ring (depth == limit) as separate
@@ -288,13 +293,16 @@ through-walls, depth-on `SKIRT` occluded).
 - **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
   leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **through-walls
   vertical beam** from the cliff-edge top `T`, so it reads even when the rim is behind
-  terrain: it is drawn in the depth-off `FILLED` layer (the same route as the
-  crouch-gated tops), rising a fixed world height (`BEAM_HEIGHT`), solid-ish at the
-  base and fading out toward the top, in a distinct red. Benign drops keep their
-  ordinary down-skirt and get **no** beam.
+  terrain: it is drawn in a dedicated depth-off `BEAM` layer (same pipeline as
+  crouch-gated tops) **after** the depth-tested skirts, so opaque beams cover
+  skirts instead of being overdrawn by them. Beams rise a fixed world height
+  (`BEAM_HEIGHT`) at the opacity from
+  Appearance `holeBeamColor`. Appearance `showHoleBeams` (default on) gates
+  drawing; `holeBeamColor` supplies RGB and alpha (uniform along the beam). Benign
+  drops keep their ordinary down-skirt and get **no** beam.
   Drop spans at the **frontier** (`depth >= depthLimit`) are skipped by `computeHoles`
   — they are depth-cutoff artifacts, not real geometry (without this, the entire
-  perimeter drew a red hole-beam wall).
+  perimeter drew a hole-beam wall).
   The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
   `holeSubSpans`, published as `HoleSpan`) and `emit` just draws them (`emitHoles`).
   Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
@@ -323,7 +331,7 @@ through-walls, depth-on `SKIRT` occluded).
   frontier spans `depth >= limit` suppressed), **upward occluder skirts**
   (`emitOccluders`, the side-based interior nudge, the four debug styles +
   `cycleOccluderStyle`), and the **through-walls hole beams** (`emitHoles`, from
-  `HoleSpan`, into the depth-off `FILLED` layer) — `emit` no longer computes any edge
+  `HoleSpan`, into the depth-off `BEAM` layer drawn after skirts) — `emit` no longer computes any edge
   spans per frame — the cyclic depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
   band), the level-identity reset,
   `volatile` snapshot/occluder/down-skirt/hole/crouch/style handoff, and the
@@ -360,8 +368,8 @@ through-walls, depth-on `SKIRT` occluded).
   reached-rect boundaries and published as `HoleSpan`),
   and the extraction-thread-only (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
-- `WorldOverlayManager.java`: the two-layer setup (depth-off `FILLED` tops +
-  depth-on `SKIRT`), single draw at `AFTER_TRANSLUCENT_TERRAIN` (ice/honey
+- `WorldOverlayManager.java`: three-layer setup (depth-off `FILLED` tops,
+  depth-on `SKIRT`, depth-off `BEAM` last), single draw at `AFTER_TRANSLUCENT_TERRAIN` (ice/honey
   composite; pond bottoms via crouch — see Milestone 2 translucent decision),
   per-layer buffer/GPU handoff, the through-walls debug aid, the
   `CLIENT_STOPPING`-vs-mixin GPU-cleanup trade-off, the camera-relative

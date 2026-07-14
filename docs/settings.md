@@ -77,8 +77,11 @@ category name: `"Appearance"`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `walkableColor` | `ConfigColor` | `#8066CC66` (light green, ~50% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill. Read live in `emit`. |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `emitHoles` draws through-walls beams at hole rims. When off: beams are skipped. |
+| `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 
-Helper: `Configs.walkableColor()` → `Color4f`.
+Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
+`Configs.showHoleBeams()`.
 
 ## Live Debug options
 
@@ -90,11 +93,12 @@ name: `"Debug"`.
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
 | `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: stick + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: stick + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
-| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`depthColor`). When off: they use Appearance `walkableColor`. Cutoff `greyBlend` applies in both modes. |
+| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `greyBlend`. |
+| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`greyBlend`). When off: those ring depths are not drawn. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
-`Configs.crouchCycleProfile()`, `Configs.shadeByDepth()` — read live each use
-(no value-change callbacks).
+`Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,
+`Configs.showCutoffRing()` — read live each use (no value-change callbacks).
 
 ## Lang convention (`name.*` / `comment.*`)
 
