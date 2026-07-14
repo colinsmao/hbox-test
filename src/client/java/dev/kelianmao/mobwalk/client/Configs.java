@@ -12,10 +12,12 @@ import fi.dy.masa.malilib.config.ConfigUtils;
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
+import fi.dy.masa.malilib.config.options.ConfigColor;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
 import fi.dy.masa.malilib.config.options.ConfigOptionList;
 import fi.dy.masa.malilib.util.FileUtils;
 import fi.dy.masa.malilib.util.StringUtils;
+import fi.dy.masa.malilib.util.data.Color4f;
 import fi.dy.masa.malilib.util.data.json.JsonUtils;
 
 import dev.kelianmao.mobwalk.MobWalk;
@@ -28,6 +30,7 @@ import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay;
 public final class Configs implements IConfigHandler {
 	private static final String CONFIG_FILE_NAME = MobWalk.MOD_ID + ".json";
 	private static final String GENERIC_KEY = MobWalk.MOD_ID + ".config.generic";
+	private static final String APPEARANCE_KEY = MobWalk.MOD_ID + ".config.appearance";
 	private static final String DEBUG_KEY = MobWalk.MOD_ID + ".config.debug";
 	private static final int CONFIG_VERSION = 1;
 
@@ -48,18 +51,32 @@ public final class Configs implements IConfigHandler {
 		private Generic() {}
 	}
 
+	public static final class Appearance {
+		public static final ConfigColor WALKABLE_COLOR =
+			new ConfigColor("walkableColor", "#8066CC66").apply(APPEARANCE_KEY);
+
+		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
+			WALKABLE_COLOR
+		);
+
+		private Appearance() {}
+	}
+
 	public static final class Debug {
-		public static final ConfigBoolean CROUCH_SCROLL_RADIUS =
-			new ConfigBoolean("crouchScrollRadius", true).apply(DEBUG_KEY);
 		public static final ConfigBoolean CROUCH_SEE_THROUGH =
 			new ConfigBoolean("crouchSeeThroughWalls", true).apply(DEBUG_KEY);
+		public static final ConfigBoolean CROUCH_SCROLL_RADIUS =
+			new ConfigBoolean("crouchScrollRadius", true).apply(DEBUG_KEY);
 		public static final ConfigBoolean CROUCH_CYCLE_PROFILE =
 			new ConfigBoolean("crouchCycleProfile", true).apply(DEBUG_KEY);
+		public static final ConfigBoolean SHADE_BY_DEPTH =
+			new ConfigBoolean("shadeByDepth", false).apply(DEBUG_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			CROUCH_SEE_THROUGH,
 			CROUCH_SCROLL_RADIUS,
-			CROUCH_CYCLE_PROFILE
+			CROUCH_CYCLE_PROFILE,
+			SHADE_BY_DEPTH
 		);
 
 		private Debug() {}
@@ -74,6 +91,7 @@ public final class Configs implements IConfigHandler {
 	 */
 	public static void refreshDisplayNames() {
 		fallbackNameToOptionId(Generic.OPTIONS, GENERIC_KEY);
+		fallbackNameToOptionId(Appearance.OPTIONS, APPEARANCE_KEY);
 		fallbackNameToOptionId(Debug.OPTIONS, DEBUG_KEY);
 	}
 
@@ -127,6 +145,10 @@ public final class Configs implements IConfigHandler {
 		return next.profile();
 	}
 
+	public static Color4f walkableColor() {
+		return Appearance.WALKABLE_COLOR.getColor();
+	}
+
 	public static boolean crouchScrollRadius() {
 		return Debug.CROUCH_SCROLL_RADIUS.getBooleanValue();
 	}
@@ -137,6 +159,10 @@ public final class Configs implements IConfigHandler {
 
 	public static boolean crouchCycleProfile() {
 		return Debug.CROUCH_CYCLE_PROFILE.getBooleanValue();
+	}
+
+	public static boolean shadeByDepth() {
+		return Debug.SHADE_BY_DEPTH.getBooleanValue();
 	}
 
 	@Override
@@ -158,6 +184,7 @@ public final class Configs implements IConfigHandler {
 		if (element != null && element.isJsonObject()) {
 			JsonObject root = element.getAsJsonObject();
 			ConfigUtils.readConfigBase(root, "Generic", Generic.OPTIONS);
+			ConfigUtils.readConfigBase(root, "Appearance", Appearance.OPTIONS);
 			ConfigUtils.readConfigBase(root, "Debug", Debug.OPTIONS);
 		}
 	}
@@ -173,6 +200,7 @@ public final class Configs implements IConfigHandler {
 		}
 		JsonObject root = new JsonObject();
 		ConfigUtils.writeConfigBase(root, "Generic", Generic.OPTIONS);
+		ConfigUtils.writeConfigBase(root, "Appearance", Appearance.OPTIONS);
 		ConfigUtils.writeConfigBase(root, "Debug", Debug.OPTIONS);
 		root.add("config_version", new JsonPrimitive(CONFIG_VERSION));
 		JsonUtils.writeJsonToFile(root, dir.resolve(CONFIG_FILE_NAME));

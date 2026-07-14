@@ -13,7 +13,7 @@ import fi.dy.masa.malilib.util.StringUtils;
 
 import dev.kelianmao.mobwalk.MobWalk;
 
-/** MaLiLib settings screen (ModMenu Configure entry). Filter tabs: All / General / Debug. */
+/** MaLiLib settings screen (ModMenu Configure entry). Filter tabs: All / General / Appearance / Debug. */
 public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab {
 	private static ConfigGuiTab tab = ConfigGuiTab.ALL;
 
@@ -55,6 +55,7 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 	public List<ConfigOptionWrapper> getAllConfigs() {
 		List<ConfigOptionWrapper> configs = new ArrayList<>();
 		configs.addAll(ConfigOptionWrapper.createFor(Configs.Generic.OPTIONS));
+		configs.addAll(ConfigOptionWrapper.createFor(Configs.Appearance.OPTIONS));
 		configs.addAll(ConfigOptionWrapper.createFor(Configs.Debug.OPTIONS));
 		return configs;
 	}
@@ -66,6 +67,9 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 		}
 		if (tab == ConfigGuiTab.GENERAL) {
 			return ConfigOptionWrapper.createFor(Configs.Generic.OPTIONS);
+		}
+		if (tab == ConfigGuiTab.APPEARANCE) {
+			return ConfigOptionWrapper.createFor(Configs.Appearance.OPTIONS);
 		}
 		if (tab == ConfigGuiTab.DEBUG) {
 			return ConfigOptionWrapper.createFor(Configs.Debug.OPTIONS);
@@ -88,6 +92,7 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 	public enum ConfigGuiTab {
 		ALL(IConfigGuiAllTab.getTranslationKey()),
 		GENERAL("mobwalk.gui.button.config_gui.general"),
+		APPEARANCE("mobwalk.gui.button.config_gui.appearance"),
 		DEBUG("mobwalk.gui.button.config_gui.debug");
 
 		private final String translationKey;

@@ -14,18 +14,19 @@ per [`AGENTS.md`](AGENTS.md)). When that chunk lands, distill durable facts into
 ## Shipped on this branch
 
 - MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs` with filter tabs **All** /
-  **General** / **Debug**.
+  **General** / **Appearance** / **Debug** (default **All**).
 - General (`Configs.Generic` / JSON `"Generic"`): **enabled**; **mobProfile**
   (Point/Player/Ravager, default Player); **floodRadius** (0–30, default 20).
+- Appearance: **walkableColor** (`#8066CC66` light green with alpha).
 - Debug: **crouchSeeThroughWalls**; **crouchScrollRadius**; **crouchCycleProfile**
-  (all default on).
+  (default on); **shadeByDepth** (default off — depth-hue debug aid).
 - Save-on-close → `config/mobwalk.json`; player-facing `comment.*` tooltips;
   optional `name.*` (else option id via `refreshDisplayNames`).
 
 Stack (technical detail in [`docs/settings.md`](docs/settings.md)):
 
 ```
-Mods → Configure → GuiConfigsBase (All/General/Debug) → live options → save on close → mobwalk.json
+Mods → Configure → GuiConfigsBase (All/General/Appearance/Debug) → live options → save on close → mobwalk.json
 ```
 
 ## Ideas / backlog
@@ -39,7 +40,7 @@ Add or reorder freely; pick items up via a temporary plan when ready.
 - Persist occluder style (K) and surface-height mode (V).
 - HUD settings (offset, duration, colour, anchor).
 - Activation item picker (stick today).
-- Appearance / visual constants (height ramp, alphas, skirt/beam styling, ring grey).
+- More Appearance options (skirt/beam styling, ring grey, height ramp).
 - Flood perf hardening (timeout, threading, frame-slicing).
 - Settings tooltip UX pass (tone/length).
 - Server-side config (only if the mod ever grows a server half).

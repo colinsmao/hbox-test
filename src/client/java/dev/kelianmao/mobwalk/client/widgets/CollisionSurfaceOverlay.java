@@ -27,6 +27,8 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
+import fi.dy.masa.malilib.util.data.Color4f;
+
 /**
  * Draws the standable surfaces (upward-facing collision faces an entity can
  * stand on) of a region the player selects with a stick. The surfaces are
@@ -34,15 +36,13 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * covered by something directly above are emitted, so e.g. a stair renders as
  * its exposed L. The flat tops/borders draw <b>through walls</b> (depth-off fill
  * layer in {@code WorldOverlayManager}) so any remaining buried surface is
- * visible for debugging; each surface (and its skirts) is tinted by its
- * <b>flood BFS depth</b> — the distance from the seed at which the flood reached
- * it — as a cyclic hue band ({@link #depthColor}), a Milestone 6 debug aid so a
- * continuity bug (an area reached at an implausible depth) reads as an
- * out-of-sequence color. Surfaces within the last two
+ * visible for debugging. Tint comes from Appearance {@code walkableColor} by
+ * default; Debug {@code shadeByDepth} switches to a cyclic BFS-depth hue band
+ * ({@link #depthColor}) as a continuity-bug aid. Surfaces within the last two
  * blocks before the flood-radius cutoff blend toward <b>grey</b> (the outermost
  * block fully grey) to signal "increase the
  * radius or re-center" — a selection bounded by a real drop stops short of the
- * radius and stays depth-colored, so a radius cutoff reads differently from a
+ * radius and stays colored, so a radius cutoff reads differently from a
  * true boundary. By default tops (and their skirts/beams) draw on each block's
  * <b>visible face</b> ({@code visualTopY}) so blocks that render taller than they
  * collide (soul sand, mud) aren't buried; a standalone key (default {@code V})
@@ -75,13 +75,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
 	// surface. Kept as small as possible so the top hugs the real surface.
 	private static final double Y_OFFSET = 0.002;
-	private static final float FILL_ALPHA = 0.5f;
 	// An opaque outline drawn around each rect so adjacent surfaces (and the
 	// sub-rects of a single block) stay visually separable through the fill.
 	private static final float BORDER_ALPHA = 1.0f;
 	private static final float BORDER_THICKNESS = 0.045f;
 
-	// Debug depth coloring (Milestone 6 continuity-bug aid): tops and their skirts
+	// Debug depth coloring (gated by Configs.shadeByDepth): tops and their skirts
 	// are colored by flood BFS distance from the seed (0 = seed), NOT by height. The
 	// hue advances a small fixed step per depth ring and WRAPS, so it is a smooth
 	// gradient locally (neighbouring rings are near-identical colors — you can read
@@ -460,13 +459,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			float maxZ = (float) rect.maxZ();
 			float y = (float) rect.visualTopY() + (float) Y_OFFSET;
 
-			float[] rgb = greyBlend(depthColor(rect.depth()), rect.depth(), limit);
+			float[] rgb = greyBlend(surfaceRgb(rect.depth()), rect.depth(), limit);
 			float r = rgb[0];
 			float g = rgb[1];
 			float b = rgb[2];
+			float fillAlpha = Configs.walkableColor().a;
 
 			BufferBuilder topBuffer = crouching ? fillBuffer : skirtBuffer;
-			quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
+			quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, fillAlpha);
 
 			if (crouching) {
 				float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
@@ -547,7 +547,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			if (sp.depth() >= limit) {
 				continue;
 			}
-			float[] rgb = greyBlend(depthColor(sp.depth()), sp.depth(), limit);
+			float[] rgb = greyBlend(surfaceRgb(sp.depth()), sp.depth(), limit);
 			float sr = rgb[0] * SKIRT_SHADE;
 			float sg = rgb[1] * SKIRT_SHADE;
 			float sb = rgb[2] * SKIRT_SHADE;
@@ -601,7 +601,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			markerHeight = Math.min(markerHeight, available);
 			float yTopMarker = base + markerHeight;
 
-			float[] rgb = greyBlend(depthColor(span.depth()), span.depth(), limit);
+			float[] rgb = greyBlend(surfaceRgb(span.depth()), span.depth(), limit);
 			float r = rgb[0] * UP_SKIRT_SHADE;
 			float g = rgb[1] * UP_SKIRT_SHADE;
 			float b = rgb[2] * UP_SKIRT_SHADE;
@@ -700,6 +700,16 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		buffer.addVertex(matrix, xb, yTop, zb).setColor(r, g, b, aTop);
 		buffer.addVertex(matrix, xa, yTop, za).setColor(r, g, b, aTop);
 		buffer.addVertex(matrix, xa, yBot, za).setColor(r, g, b, aBot);
+	}
+
+	// Base RGB for a surface/skirt at the given flood depth: Appearance walkable
+	// color, or the cyclic depth-hue band when Debug shadeByDepth is on.
+	private static float[] surfaceRgb(int depth) {
+		if (Configs.shadeByDepth()) {
+			return depthColor(depth);
+		}
+		Color4f c = Configs.walkableColor();
+		return new float[] {c.r, c.g, c.b};
 	}
 
 	// Map a flood BFS depth (distance from the seed) to RGB: the hue advances a small

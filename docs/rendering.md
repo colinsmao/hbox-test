@@ -174,10 +174,11 @@ Each reached `StandableRect` is drawn as a **top fill**, an optional **border**,
 **skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
 through-walls, depth-on `SKIRT` occluded).
 
-- **Top fill (half-alpha), depth-gradient colored.** Each surface is tinted by its
-  BFS depth from the flood seed — a cyclic hue band (`depthColor`, blue at depth 0,
+- **Top fill, Appearance-colored (or depth-hue debug).** Tops use Appearance
+  `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
+  switches RGB to the cyclic BFS-depth hue band (`depthColor`, blue at depth 0,
   cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color at a glance.
+  out-of-sequence color. Cutoff greying (`greyBlend`) applies in both modes.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
   `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
   surfaces *through* blocks is a debug aid, so when the option is on the top is
