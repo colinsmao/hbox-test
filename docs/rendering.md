@@ -147,7 +147,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   (`0.6`, `1.8`, `reach 1.2522`, **settings default**) → **Ravager** (`1.95`, `2.2`,
   `reach 1.2522`); Point keeps `reach 1.0`. `reach` is `max(jump, step)` — Player/
   Ravager use the documented jump peak `1.2522`. The active profile is
-  `Configs.entityProfile()` (Generic `profile` option). Changing it in the config
+  `Configs.mobProfile()` (Generic `mobProfile` option). Changing it in the config
   GUI re-floods an active selection. When Debug `crouchCycleProfile` is on,
   **sneak + right-click at nothing** clears *and* advances that option, then pings
   the HUD with the new name. `width` drives dilation and `height` drives headroom

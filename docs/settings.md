@@ -45,26 +45,28 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `enabled` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
-| `profile` | `ConfigOptionList` | `Player` (`EntityProfile.Option`) | Cycles Point / Player / Ravager. Source of truth for the active flood profile; `setValueChangeCallback` → `reselectWithCurrentProfile` when a selection is active. |
-| `defaultRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | `setValueChangeCallback` → `CollisionSurfaceOverlay.applyDefaultRadius` (updates session radius and re-floods an active selection). |
+| `mobProfile` | `ConfigOptionList` | `Player` (`EntityProfile.Option`) | Cycles Point / Player / Ravager. Source of truth for the active flood profile; `setValueChangeCallback` → `reselectWithMobProfile` when a selection is active. |
+| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
 
-Helpers: `Configs.entityProfile()`, `Configs.cycleEntityProfile()`.
+Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`.
 
-Lang keys (prettyName reuses `name.*` so toggle messages share the label):
-
-- `mobwalk.config.generic.name.enabled` / `…name.profile` / `…name.defaultRadius`
-- `mobwalk.config.generic.comment.profile` / `…comment.defaultRadius` (tooltips)
+Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
+id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
+entry still overrides. No `prettyName.*` — MaLiLib falls back to `splitCamelCase`
+for toggle messages.
 
 `config_version` (`1`) is written beside the category objects in `mobwalk.json`.
 
 ## Screen layout
 
-One scrolling list in `GuiConfigs.getConfigs()` (no category tabs):
+`GuiConfigs` implements `IConfigGuiAllTab` with filter buttons (not inline LABELs):
 
-1. A MaLiLib **LABEL** row, lang `mobwalk.config.general` → **"General"**
-2. `Configs.Generic.OPTIONS`
-3. A MaLiLib **LABEL** row, lang `mobwalk.config.debug` → **"Debug"**
-4. `Configs.Debug.OPTIONS`
+- **All** — General-category then Debug options (default tab)
+- **General** — `Configs.Generic.OPTIONS` (JSON category stays `"Generic"`)
+- **Debug** — `Configs.Debug.OPTIONS`
+
+Tab button lang: `mobwalk.gui.button.config_gui.general` / `.debug` (All uses
+MaLiLib’s `IConfigGuiAllTab` key).
 
 ## Live Debug options
 
@@ -73,18 +75,24 @@ name: `"Debug"`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: stick + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
-| `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: stick + crouch + right-click air advances `Configs.PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
+| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: stick + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
+| `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: stick + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()` — read live each use (no value-change callbacks).
 
-Lang keys:
+## Lang convention (`name.*` / `comment.*`)
 
-- `mobwalk.config.general` / `mobwalk.config.debug` (section LABELs)
-- `mobwalk.config.debug.name.crouchScrollRadius` / `…name.crouchSeeThroughWalls` /
-  `…name.crouchCycleProfile`
+- `name.<id>` — optional override for the row label. If missing,
+  `Configs.refreshDisplayNames()` (on config screen open) sets the display name to
+  the option id (same as the last segment of the apply() key), so the GUI does not
+  show a raw translation key.
+- `comment.<id>` — tooltip. Required for every option (missing → raw key).
+  Player-facing only: help the player decide or use the option. Skip implementation
+  jargon. Prefer short copy; extra length only when useful. A later UX pass may
+  refine tone.
+- Do not ship `prettyName.*` unless a toggle message needs custom phrasing.
 
 ## Adding an option
 
@@ -95,19 +103,16 @@ Match the existing Generic / Debug pattern in `Configs.java`:
 2. Add it to that class’s `OPTIONS` list.
 3. Call `.apply(…_KEY)` so translated name/comment resolve under
   `mobwalk.config.generic.*` or `mobwalk.config.debug.*`.
-4. Set prettyName to the same `name.*` key when toggle/HUD messages should reuse
-  the GUI label.
-5. Add lang entries in `en_us.json` (`name.*`, and `comment.*` when a tooltip
-  helps).
-6. Wire live apply with `setValueChangeCallback` when changing the value should
-  update an overlay immediately (see `DEFAULT_RADIUS`); otherwise read the
+4. Add a player-facing `comment.*` in `en_us.json` (required). Optional `name.*`
+  only when the row label should differ from the option id.
+5. Wire live apply with `setValueChangeCallback` when changing the value should
+  update an overlay immediately (see `FLOOD_RADIUS`); otherwise read the
   option live from a `Configs.*()` helper.
-7. Persistence is automatic via `ConfigUtils.readConfigBase` /
+6. Persistence is automatic via `ConfigUtils.readConfigBase` /
   `writeConfigBase` over that category’s `OPTIONS` — keep the option on that list.
 
 New categories: add another nested class + OPTIONS list, another JSON category
-string in load/save, and append a LABEL section (or tab) in `GuiConfigs` when
-the UI needs it.
+string in load/save, and a matching filter tab in `GuiConfigs`.
 
 ## MaLiLib config types (0.28.x)
 

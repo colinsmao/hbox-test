@@ -15,6 +15,7 @@ import fi.dy.masa.malilib.config.options.ConfigBoolean;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
 import fi.dy.masa.malilib.config.options.ConfigOptionList;
 import fi.dy.masa.malilib.util.FileUtils;
+import fi.dy.masa.malilib.util.StringUtils;
 import fi.dy.masa.malilib.util.data.json.JsonUtils;
 
 import dev.kelianmao.mobwalk.MobWalk;
@@ -33,24 +34,16 @@ public final class Configs implements IConfigHandler {
 	public static final class Generic {
 		public static final ConfigBoolean ENABLED =
 			new ConfigBoolean("enabled", true).apply(GENERIC_KEY);
-		public static final ConfigOptionList PROFILE =
-			new ConfigOptionList("profile", EntityProfile.Option.PLAYER).apply(GENERIC_KEY);
-		public static final ConfigInteger DEFAULT_RADIUS =
-			new ConfigInteger("defaultRadius", 20, 0, 30, true).apply(GENERIC_KEY);
+		public static final ConfigOptionList MOB_PROFILE =
+			new ConfigOptionList("mobProfile", EntityProfile.Option.PLAYER).apply(GENERIC_KEY);
+		public static final ConfigInteger FLOOD_RADIUS =
+			new ConfigInteger("floodRadius", 20, 0, 30, true).apply(GENERIC_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			ENABLED,
-			PROFILE,
-			DEFAULT_RADIUS
+			MOB_PROFILE,
+			FLOOD_RADIUS
 		);
-
-		static {
-			// GUI labels use name.*; point prettyName at the same key so toggle
-			// messages don't need a duplicate lang entry.
-			ENABLED.setPrettyName(GENERIC_KEY + ".name." + ENABLED.getCleanName());
-			PROFILE.setPrettyName(GENERIC_KEY + ".name." + PROFILE.getCleanName());
-			DEFAULT_RADIUS.setPrettyName(GENERIC_KEY + ".name." + DEFAULT_RADIUS.getCleanName());
-		}
 
 		private Generic() {}
 	}
@@ -64,37 +57,51 @@ public final class Configs implements IConfigHandler {
 			new ConfigBoolean("crouchCycleProfile", true).apply(DEBUG_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-			CROUCH_SCROLL_RADIUS,
 			CROUCH_SEE_THROUGH,
+			CROUCH_SCROLL_RADIUS,
 			CROUCH_CYCLE_PROFILE
 		);
-
-		static {
-			CROUCH_SCROLL_RADIUS.setPrettyName(
-				DEBUG_KEY + ".name." + CROUCH_SCROLL_RADIUS.getCleanName());
-			CROUCH_SEE_THROUGH.setPrettyName(
-				DEBUG_KEY + ".name." + CROUCH_SEE_THROUGH.getCleanName());
-			CROUCH_CYCLE_PROFILE.setPrettyName(
-				DEBUG_KEY + ".name." + CROUCH_CYCLE_PROFILE.getCleanName());
-		}
 
 		private Debug() {}
 	}
 
 	Configs() {}
 
+	/**
+	 * If {@code name.*} is untranslated, show the option id (last segment of the
+	 * apply() key) instead of the raw translation key. Call once language is
+	 * loaded (e.g. config screen open). Optional {@code name.*} entries still win.
+	 */
+	public static void refreshDisplayNames() {
+		fallbackNameToOptionId(Generic.OPTIONS, GENERIC_KEY);
+		fallbackNameToOptionId(Debug.OPTIONS, DEBUG_KEY);
+	}
+
+	private static void fallbackNameToOptionId(
+		ImmutableList<IConfigBase> options, String prefix
+	) {
+		for (IConfigBase option : options) {
+			String nameKey = prefix + ".name." + option.getCleanName();
+			if (StringUtils.hasTranslation(nameKey)) {
+				option.setTranslatedName(nameKey);
+			} else {
+				option.setTranslatedName(option.getName());
+			}
+		}
+	}
+
 	/** Wire live apply into the overlay (call once from init, before config load). */
 	public static void initCallbacks() {
-		Generic.DEFAULT_RADIUS.setValueChangeCallback(cfg -> {
+		Generic.FLOOD_RADIUS.setValueChangeCallback(cfg -> {
 			CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
 			if (collision != null) {
-				collision.applyDefaultRadius(cfg.getIntegerValue());
+				collision.applyFloodRadius(cfg.getIntegerValue());
 			}
 		});
-		Generic.PROFILE.setValueChangeCallback(cfg -> {
+		Generic.MOB_PROFILE.setValueChangeCallback(cfg -> {
 			CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
 			if (collision != null) {
-				collision.reselectWithCurrentProfile();
+				collision.reselectWithMobProfile();
 			}
 		});
 	}
@@ -103,20 +110,20 @@ public final class Configs implements IConfigHandler {
 		return Generic.ENABLED.getBooleanValue();
 	}
 
-	public static int defaultRadius() {
-		return Generic.DEFAULT_RADIUS.getIntegerValue();
+	public static int floodRadius() {
+		return Generic.FLOOD_RADIUS.getIntegerValue();
 	}
 
-	/** Active entity profile (settings source of truth). */
-	public static EntityProfile entityProfile() {
-		return ((EntityProfile.Option) Generic.PROFILE.getOptionListValue()).profile();
+	/** Active mob profile (settings source of truth). */
+	public static EntityProfile mobProfile() {
+		return ((EntityProfile.Option) Generic.MOB_PROFILE.getOptionListValue()).profile();
 	}
 
-	/** Advance the profile option one step forward (Point → Player → Ravager → Point). */
-	public static EntityProfile cycleEntityProfile() {
+	/** Advance the mob-profile option one step (Point → Player → Ravager → Point). */
+	public static EntityProfile cycleMobProfile() {
 		EntityProfile.Option next =
-			(EntityProfile.Option) Generic.PROFILE.getOptionListValue().cycle(true);
-		Generic.PROFILE.setOptionListValue(next);
+			(EntityProfile.Option) Generic.MOB_PROFILE.getOptionListValue().cycle(true);
+		Generic.MOB_PROFILE.setOptionListValue(next);
 		return next.profile();
 	}
 

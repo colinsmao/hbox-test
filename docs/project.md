@@ -16,9 +16,9 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — General
-LABEL + Generic enable / profile (Player default) / radius, plus Debug crouch-scroll,
-crouch see-through, and crouch-cycle-profile (flat list LABELs; live apply,
+Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — filter
+tabs All/General/Debug; General enabled / mobProfile (Player default) /
+floodRadius; Debug crouch-scroll, see-through, and cycle-profile (live apply,
 save-on-close). The repo is a client-only Fabric Gradle project generated
 from `FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
 layout** below). `./gradlew build` passes (produces `build/libs/mobwalk-1.0.0.jar`).
@@ -232,8 +232,9 @@ relevant guide **before** touching that area; add a new guide as the project gro
 The overlay frameworks (see [`rendering.md`](rendering.md)) are designed to make
 these incremental:
 
-- **Configuration:** MaLiLib Generic options (enable, flood radius, profiles) via
-  Mods → Configure; live apply + save-on-close (see [`settings.md`](settings.md)).
+- **Configuration:** MaLiLib All/General/Debug tabs (enabled, mobProfile,
+  floodRadius; Debug crouch gestures) via Mods → Configure; live apply +
+  save-on-close (see [`settings.md`](settings.md)).
 - **Keybinds:** `KeyBindingHelper` to toggle overlays.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
   in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.

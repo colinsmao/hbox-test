@@ -1,19 +1,18 @@
-{
-  "mobwalk.gui.title.configs": "MobWalk Configs",
-
-  "mobwalk.config.general": "General",
-
-  "mobwalk.config.generic.name.enabled": "Enable overlay",
-
-  "mobwalk.config.generic.name.profile": "Profile",
-  "mobwalk.config.generic.comment.profile": "Entity size used for flood dilation and headroom. Cycles Point, Player, Ravager.",
-
-  "mobwalk.config.generic.name.defaultRadius": "Flood radius",
-  "mobwalk.config.generic.comment.defaultRadius": "BFS flood depth limit. Large values may cause performance issues.",
-
-  "mobwalk.config.debug": "Debug",
-
-  "mobwalk.config.debug.name.crouchScrollRadius": "Crouch and scroll to adjust flood radius",
-  "mobwalk.config.debug.name.crouchSeeThroughWalls": "Crouch to see surfaces through walls",
-  "mobwalk.config.debug.name.crouchCycleProfile": "Crouch and right-click air to cycle profile"
-}
+{
+  "mobwalk.gui.title.configs": "MobWalk Configs",
+
+  "mobwalk.gui.button.config_gui.general": "General",
+  "mobwalk.gui.button.config_gui.debug": "Debug",
+
+  "mobwalk.config.generic.comment.enabled": "Show the standable-surface overlay when holding a stick.",
+
+  "mobwalk.config.generic.comment.mobProfile": "Which mob size the walkable area is calculated for (Point, Player, or Ravager).",
+
+  "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block. Large values may slow the game.",
+
+  "mobwalk.config.debug.comment.crouchSeeThroughWalls": "While crouching, show selected surfaces through walls.",
+
+  "mobwalk.config.debug.comment.crouchScrollRadius": "While crouching with a stick, scroll to change flood radius instead of the hotbar.",
+
+  "mobwalk.config.debug.comment.crouchCycleProfile": "While crouching with a stick, right-click air to cycle the mob profile."
+}

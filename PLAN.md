@@ -13,19 +13,19 @@ per [`AGENTS.md`](AGENTS.md)). When that chunk lands, distill durable facts into
 
 ## Shipped on this branch
 
-- MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs`.
-- Flat list LABELs: **General** then **Debug**.
-- General: overlay **enable**; **profile** (Point/Player/Ravager, default Player);
-  **default flood radius** (0–30, default 20).
-- Save-on-close → `config/mobwalk.json`; lang `name.*` + `comment.*` (prettyName
-  reuses `name.*`).
-- Debug: **crouch to scroll radius**; **crouch to see through walls**; **crouch
-  right-click air to cycle profile** (all default on).
+- MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs` with filter tabs **All** /
+  **General** / **Debug**.
+- General (`Configs.Generic` / JSON `"Generic"`): **enabled**; **mobProfile**
+  (Point/Player/Ravager, default Player); **floodRadius** (0–30, default 20).
+- Debug: **crouchSeeThroughWalls**; **crouchScrollRadius**; **crouchCycleProfile**
+  (all default on).
+- Save-on-close → `config/mobwalk.json`; player-facing `comment.*` tooltips;
+  optional `name.*` (else option id via `refreshDisplayNames`).
 
 Stack (technical detail in [`docs/settings.md`](docs/settings.md)):
 
 ```
-Mods → Configure → GuiConfigsBase → live config options → save on close → mobwalk.json
+Mods → Configure → GuiConfigsBase (All/General/Debug) → live options → save on close → mobwalk.json
 ```
 
 ## Ideas / backlog
@@ -36,13 +36,12 @@ Add or reorder freely; pick items up via a temporary plan when ready.
 - Profiles UI / hitbox library (seeded vanilla + custom beyond the cycle list).
 - Show hole beams toggle.
 - Keybinds: toggle overlay; cycle profile (vanilla Controls or MaLiLib hotkeys).
-- Config UI: MaLiLib-style All/Generic/Debug filter tabs; camelCase `name.*` +
-  tooltip `comment.*`; rename `defaultRadius` → `floodRadius`.
 - Persist occluder style (K) and surface-height mode (V).
 - HUD settings (offset, duration, colour, anchor).
 - Activation item picker (stick today).
 - Appearance / visual constants (height ramp, alphas, skirt/beam styling, ring grey).
 - Flood perf hardening (timeout, threading, frame-slicing).
+- Settings tooltip UX pass (tone/length).
 - Server-side config (only if the mod ever grows a server half).
 
 ## Scratch

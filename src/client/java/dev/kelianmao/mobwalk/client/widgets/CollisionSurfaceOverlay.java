@@ -150,7 +150,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// runtime via shift+scroll while holding the stick (see adjustRadius), clamped.
 	private static final int MIN_RADIUS = 0;
 	private static final int MAX_RADIUS = 30;
-	private static final int DEFAULT_RADIUS = 20;
+	private static final int INITIAL_FLOOD_RADIUS = 20;
 	// Past this the scroll steps by 2, keeping the high end usable.
 	private static final int COARSE_RADIUS = 10;
 
@@ -162,10 +162,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// can re-flood from the same origin. Both touched only on the client thread
 	// (onUseItem and the scroll handler). lastSeed is null when nothing is
 	// selected.
-	private int selectionRadius = DEFAULT_RADIUS;
+	private int selectionRadius = INITIAL_FLOOD_RADIUS;
 	private BlockPos lastSeed;
 
-	// Active entity profile comes from Configs.entityProfile() (settings source of
+	// Active mob profile comes from Configs.mobProfile() (settings source of
 	// truth). Sneak+air-click may cycle it when Debug crouchCycleProfile is on.
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
@@ -281,10 +281,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	/**
-	 * Live apply from MaLiLib default-radius control: update the session radius and
+	 * Live apply from MaLiLib flood-radius control: update the session radius and
 	 * re-flood an active selection so the change shows immediately.
 	 */
-	public void applyDefaultRadius(int radius) {
+	public void applyFloodRadius(int radius) {
 		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, radius));
 		if (updated == selectionRadius) {
 			return;
@@ -292,19 +292,19 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		selectionRadius = updated;
 		Level level = Minecraft.getInstance().level;
 		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
+			cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
 			publish();
 		}
 	}
 
 	/**
-	 * Live apply from MaLiLib profile control: re-flood an active selection so the
-	 * new entity size shows immediately.
+	 * Live apply from MaLiLib mob-profile control: re-flood an active selection so
+	 * the new entity size shows immediately.
 	 */
-	public void reselectWithCurrentProfile() {
+	public void reselectWithMobProfile() {
 		Level level = Minecraft.getInstance().level;
 		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
+			cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
 			publish();
 		}
 	}
@@ -341,7 +341,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, selectionRadius, Configs.entityProfile(), useVisualTop);
+			cache.select(level, start, selectionRadius, Configs.mobProfile(), useVisualTop);
 			lastSeed = start;
 		} else {
 			// Right-click at nothing clears. When Debug crouchCycleProfile is on,
@@ -351,7 +351,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			cache.clear();
 			lastSeed = null;
 			if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
-				EntityProfile next = Configs.cycleEntityProfile();
+				EntityProfile next = Configs.cycleMobProfile();
 				OverlayManager.radiusIndicator().showProfile(next.name());
 			}
 		}
@@ -387,7 +387,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			selectionRadius = updated;
 			Level level = Minecraft.getInstance().level;
 			if (level != null && lastSeed != null) {
-				cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
+				cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
 				publish();
 			}
 		}
@@ -413,7 +413,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		useVisualTop = !useVisualTop;
 		Level level = Minecraft.getInstance().level;
 		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
+			cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
 			publish();
 		}
 		return useVisualTop;
@@ -430,7 +430,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return null;
 		}
 		cache.requestDebugDump();
-		cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
+		cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
 		publish();
 		return new FloodDebugCounts(
 			cache.allRects().size(),
@@ -451,7 +451,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		int limit = depthLimit;
-		float skirtDepth = (float) (Configs.entityProfile().reach() + SKIRT_MARGIN);
+		float skirtDepth = (float) (Configs.mobProfile().reach() + SKIRT_MARGIN);
 
 		for (StandableRect rect : rects) {
 			float minX = (float) rect.minX();
