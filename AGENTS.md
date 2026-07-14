@@ -200,6 +200,19 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
 ## Documentation & conventions
 
+- **Describe what something *is* / *does*, never what it isn't / doesn't.** This is
+  a hard style rule for `docs/*.md`, `PLAN.md` prose, and code comments: write the
+  positive fact only. Do **not** pad with negations of alternatives or absences
+  ("no keybind", "no HUD", "never spam", "does not touch X", "not a Y"). Readers
+  learn the system from what exists; listing what was rejected or omitted is noise
+  and goes stale. Prefer "Client chat command `/mobwalk dump`" over "chat command
+  only (no keybind, no HUD)". Prefer "Armed by `/mobwalk dump`" over "normal
+  selects never log". **Exceptions (narrow):** (1) an in-game checklist item that
+  must assert a regression absence (`action → expected: no [flood-debug] lines`);
+  (2) a hard safety/correctness invariant the reader must rely on ("must never load
+  on a dedicated server"); (3) contrasting two real behaviours the reader needs to
+  tell apart ("upward skirt, not a downward drop"). When in doubt, delete the
+  negative clause — if the positive sentence still stands, the negation was filler.
 - **Keep the docs current — per commit, but written after the step's checks pass.**
   Whenever a change alters behavior, architecture, status, constraints, versions, or
   adds a non-obvious gotcha, update the relevant docs **in that same commit** so the

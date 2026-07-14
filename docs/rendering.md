@@ -241,6 +241,12 @@ through-walls, depth-on `SKIRT` occluded).
   chosen and the toggle dropped-or-kept — this appearance decision is deferred to a
   later appearance-focused milestone (see [`project.md`](project.md) roadmap); the `K`
   toggle and the four styles stay as-is until then.
+- **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a stick
+  selection active it re-runs `select` once with a one-shot flag, writes a single
+  `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
+  downskirts → holes), and posts a short chat summary (`merged=… occluders=…
+  skirts=… holes=… (see latest.log)`). With an empty selection: chat
+  `flood-debug: no selection`. Armed only by the command.
 - **Surface-height toggle (visible face vs collision top; default `V`).** Blocks that
   render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
   their standable top *buried* at the collision height. A standalone key (default `V`,
@@ -320,9 +326,11 @@ through-walls, depth-on `SKIRT` occluded).
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
-  scroll input to the world overlay's radius and the HUD indicator — and the
+  scroll input to the world overlay's radius and the HUD indicator — the
   standalone occluder-style debug keybind (`KeyMappingHelper.registerKeyMapping`,
-  `KeyMapping(..., KeyMapping.Category.MISC)`, `consumeClick` in `END_CLIENT_TICK`).
+  `KeyMapping(..., KeyMapping.Category.MISC)`, `consumeClick` in `END_CLIENT_TICK`),
+  and the `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
+  `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
   Note `26.1.2` uses the `keymapping` API (not `keybinding`) and `KeyMapping.Category`
   (not a `String` category).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface

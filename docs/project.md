@@ -98,7 +98,7 @@ it.
   │   └── MobWalk.java                     # shared constants (MOD_ID, logger)
   ├── main/resources/fabric.mod.json       # client-only; single client entrypoint
   ├── client/java/dev/kelianmao/mobwalk/client/
-  │   ├── MobWalkClient.java               # ClientModInitializer entrypoint (+ debug keybind)
+  │   ├── MobWalkClient.java               # ClientModInitializer (+ debug keybinds, /mobwalk dump)
   │   ├── Overlay.java                     # HUD widget interface
   │   ├── OverlayManager.java              # HUD registry + render dispatch
   │   ├── WorldOverlay.java                # in-world widget interface
@@ -160,7 +160,8 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    click — holding does not spam) while swinging the acting arm; breaking/replacing a
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward
-   skirt; the debug key (K) cycles the upward-marker style.
+   skirt; the debug key (K) cycles the upward-marker style. `/mobwalk dump` one-shots
+   the flood pipeline to `latest.log` and posts a short chat summary.
 4. **Headroom:** with Player/Ravager selected, a floor under a low ceiling (gap
    `< H`) is **not** painted (its lost headroom shows as an upward skirt marking the
    ceiling), while a tall-enough tunnel paints; Point is unchanged from Milestone 4.

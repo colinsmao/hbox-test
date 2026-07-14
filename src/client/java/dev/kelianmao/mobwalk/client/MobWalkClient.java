@@ -2,11 +2,14 @@ package dev.kelianmao.mobwalk.client;
 
 import dev.kelianmao.mobwalk.MobWalk;
 import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay;
+import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay.FloodDebugCounts;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import org.lwjgl.glfw.GLFW;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -14,6 +17,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.fabric.api.event.client.player.ClientHotbarScrollEvents;
 
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
 public final class MobWalkClient implements ClientModInitializer {
@@ -72,6 +77,30 @@ public final class MobWalkClient implements ClientModInitializer {
 				OverlayManager.radiusIndicator().showProfile("surface: " + (visible ? "visible" : "collision"));
 			}
 		});
+
+		// /mobwalk dump — one-shot flood geometry dump to latest.log + short chat line.
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+			dispatcher.register(ClientCommands.literal("mobwalk")
+				.then(ClientCommands.literal("dump").executes(ctx -> {
+					Minecraft client = Minecraft.getInstance();
+					CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+					if (client.player == null || collision == null) {
+						return 0;
+					}
+					FloodDebugCounts counts = collision.dumpFloodDebug();
+					if (counts == null) {
+						client.player.sendSystemMessage(
+							Component.literal("flood-debug: no selection"));
+					} else {
+						client.player.sendSystemMessage(Component.literal(
+							"flood-debug: merged=" + counts.merged()
+								+ " occluders=" + counts.occluders()
+								+ " skirts=" + counts.skirts()
+								+ " holes=" + counts.holes()
+								+ " (see latest.log)"));
+					}
+					return 1;
+				}))));
 
 		// Shift+scroll while holding the stick adjusts the flood radius (and shows
 		// the indicator) instead of switching the hotbar slot; returning false
