@@ -386,6 +386,30 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		return useVisualTop;
 	}
 
+	/**
+	 * One-shot flood geometry dump for {@code /mobwalk dump}: re-selects from
+	 * {@code lastSeed} with debug logging armed. Returns null if there is no
+	 * selection; otherwise the post-dump counts for the chat summary.
+	 */
+	public FloodDebugCounts dumpFloodDebug() {
+		Level level = Minecraft.getInstance().level;
+		if (level == null || lastSeed == null) {
+			return null;
+		}
+		cache.requestDebugDump();
+		cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+		publish();
+		return new FloodDebugCounts(
+			cache.allRects().size(),
+			cache.allOccluders().size(),
+			cache.allDownSkirts().size(),
+			cache.allHoles().size());
+	}
+
+	/** Counts returned by {@link #dumpFloodDebug} for the chat status line. */
+	public record FloodDebugCounts(int merged, int occluders, int skirts, int holes) {
+	}
+
 	@Override
 	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer) {
 		List<StandableRect> rects = snapshot;

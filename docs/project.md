@@ -72,12 +72,10 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   collision height (default **on**), re-flooding on toggle. Walkability math is
   unchanged — this only moves where the paint is drawn. See "Visible-face top vs
   collision top" in [`geometry.md`](geometry.md) and the surface-height toggle in
-  [`rendering.md`](rendering.md). (3) **Surfaces draw through water:** the overlay
-  now draws at `BEFORE_TRANSLUCENT_TERRAIN` instead of after, so a submerged surface
-  (pond bottom) is no longer hidden by the depth the water writes — it shows
-  water-tinted, without crouching (see [`rendering.md`](rendering.md)). This is a
-  rendering fix only; **water is not walkable** (an entity-dependent modelling
-  change deferred to the profile/hitbox library). (4) **Flood seeds from the
+  [`rendering.md`](rendering.md). (3) **Overlay draws after translucent terrain**
+  so ice/glass/honey stay visible under the fill; pond bottoms need crouch to
+  show through water (see the recorded translucent-phase decision in
+  [`rendering.md`](rendering.md)). (4) **Flood seeds from the
   clicked block's tops**; other surfaces join only via walkable BFS hops.
   (5) **Player / Ravager `reach = 1.2522`** (documented jump peak); Point
   `reach = 1.0`.
@@ -98,7 +96,7 @@ it.
   │   └── MobWalk.java                     # shared constants (MOD_ID, logger)
   ├── main/resources/fabric.mod.json       # client-only; single client entrypoint
   ├── client/java/dev/kelianmao/mobwalk/client/
-  │   ├── MobWalkClient.java               # ClientModInitializer entrypoint (+ debug keybind)
+  │   ├── MobWalkClient.java               # ClientModInitializer (+ debug keybinds, /mobwalk dump)
   │   ├── Overlay.java                     # HUD widget interface
   │   ├── OverlayManager.java              # HUD registry + render dispatch
   │   ├── WorldOverlay.java                # in-world widget interface
@@ -160,7 +158,8 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    click — holding does not spam) while swinging the acting arm; breaking/replacing a
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward
-   skirt; the debug key (K) cycles the upward-marker style.
+   skirt; the debug key (K) cycles the upward-marker style. `/mobwalk dump` one-shots
+   the flood pipeline to `latest.log` and posts a short chat summary.
 4. **Headroom:** with Player/Ravager selected, a floor under a low ceiling (gap
    `< H`) is **not** painted (its lost headroom shows as an upward skirt marking the
    ceiling), while a tall-enough tunnel paints; Point is unchanged from Milestone 4.
@@ -224,12 +223,12 @@ these incremental:
   CurseForge publish pipeline.
 - **Settle a single skirt/occluder rendering baseline (deferred from 4.5).** The
   `K`-key `cycleOccluderStyle` debug toggle (tiny / half-block / full / bold-line)
-  shipped in 4.5 for A/B'ing the upward-marker look, but no single style was ever
-  chosen and the toggle dropped-or-kept. This is purely appearance, so it is
-  deferred to a later appearance-focused milestone; see [`rendering.md`](rendering.md).
+  shipped in 4.5 for A/B'ing the upward-marker look; choosing a baseline style and
+  whether to keep the toggle is deferred to a later appearance-focused milestone;
+  see [`rendering.md`](rendering.md).
 - **Fall-damage / tall-drop warning (Milestone 5 extension).** Every benign drop
   already carries its fall distance (`T − landY` from `classifyDrop`). A drop onto
   reachable ground that is nonetheless tall enough to hurt (fall-damage threshold, or a
   configurable height) could get a distinct lighter warning marker — a shorter/dimmer
-  beam or a tinted rim — separate from the red hole beam. Deferred (the current
-  benign/hole split is enough); the fall distance is plumbed and ready.
+  beam or a tinted rim — separate from the red hole beam. Deferred; the fall distance
+  is plumbed and ready.

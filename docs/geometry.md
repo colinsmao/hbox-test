@@ -177,7 +177,7 @@ classification builds on this in **Milestone 5** (below): the flood still only p
 
 ## Hole classification (Milestone 5)
 
-Milestone 5 does not change reachability; it **reads the flood output** to label the
+Milestone 5 **reads the flood output** to label the
 **drop edges** of the selection (the `openSpans` edges that are neither equal-height
 merge seams nor wall/ceiling up-skirts). One pure predicate,
 `SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
@@ -197,13 +197,12 @@ merge seams nor wall/ceiling up-skirts). One pure predicate,
 Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
 world read: `gatherLedges` scans collision boxes in the `(landY, T)` band over the
 footprint's columns and runs each through the **same `exposeBox`** the flood uses (dilate
-by `W/2`, cut by occluders) — so a box the entity cannot actually stand on (too narrow
-after dilation, or occluded) is correctly *not* a ledge, and a wide hitbox is handled the
-same way the flood handles it. This is why it is not a reinvention: the ledge test reuses
-the flood's own standability, it does not re-implement it.
+by `W/2`, cut by occluders) — so only flood-standable fragments count as ledges, and a
+wide hitbox is handled the same way the flood handles it. The ledge test reuses the
+flood's own standability.
 
-There is **no CUTOFF class**: near the radius the selection is incomplete, but a drop
-there is still classified normally — a genuine deep drop reads HOLE. The **outermost edge**
+Near the radius the selection is incomplete, but a drop there is still classified
+normally — a genuine deep drop reads HOLE. The **outermost edge**
 of the selection (at `ringEnd`) is suppressed entirely render-side: skirts and hole beams
 there are artifacts of the radius cutoff. Interior border uncertainty is a render concern:
 a hole beam in the grey ring is blended toward grey by the same distance falloff that
@@ -212,12 +211,27 @@ greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the ra
 The candidate drop spans are the compute-side `DownSkirtSpan`s (every genuine drop
 edge). `computeHoles` walks them once per select: for each it builds the **fall
 footprint** (a one-block band just beyond the rim, on the drop side), gathers ledges, and
-classifies. Because **one edge can span reached and unreached ground**, it does **not**
-classify the whole edge at once: `holeSubSpans` subdivides the edge at reached-rect
+classifies. Because **one edge can span reached and unreached ground**,
+`holeSubSpans` subdivides the edge at reached-rect
 boundaries into homogeneous sub-spans, classifies each via `classifyDrop`, and publishes
 the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
 ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
+
+**Ledge gather Y band — occluders from below.** `gatherLedges` re-runs `exposeBox`
+on world boxes whose tops lie in `(landY, topY)`. Candidate tops are only in that
+open interval, but the occluder index starts at `floor(landY) - 1` so collision
+that *lives in the block row below* `landY` and rises into the band (vanilla
+walls/fences at height 1.5) still participates in burial. Those occluders-from-below
+keep burial complete for rising shapes. Motivating case: a lantern on
+a wall — under Ravager dilation the lantern body (wider than its cap) left a
+`7/16` ring with `fall = 0.0625` until the wall box below was in the index.
+
+**Assumption:** one block row below `landY` is enough — the occluding shapes that
+matter extend at most ~1.5 upward from their block Y, so they sit in
+`floor(landY) - 1` when `landY` is a full-block top. Deeper scan if a single
+block's collision grows past that, or if a multi-block pillar's lowest piece sits
+further below.
 
 ## Visible-face top vs collision top (Milestone 6)
 
@@ -266,9 +280,13 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
 
 Some blocks are inset **horizontally** while still rendering full width — notably
 **honey** (`box(1,0,1,15,15,15)`, a `[1/16,15/16]` footprint under a full-cube
-render), so its edges/skirts sit ~1px inside the visible face. This is left
-**unfixed on purpose** because it is **Point-only**: a footprint dilates by `W/2` per
-side, so the dilated edge clears the block face whenever `W ≥ 2/16 = 0.125`, and
+render), so its edges/skirts sit ~1px inside the visible face. Honey also has
+**two height layers** (collision top `15/16`, full-height translucent/outline
+body): with `visualTopY` the paint sits on the outer shell and the fill+honey
+body read as stacked layers — see [`rendering.md`](rendering.md). The horizontal
+inset is left **unfixed on purpose** because it is **Point-only**: a footprint
+dilates by `W/2` per side, so the dilated edge clears the block face whenever
+`W ≥ 2/16 = 0.125`, and
 every real entity is far past that (smallest vanilla mobs ~`0.4`; all shipped
 profiles `≥ 0.6`). Only the zero-width **Point** profile (the debug/oracle baseline)
 keeps the inset footprint. Fixing it would need a full **visual footprint** (four

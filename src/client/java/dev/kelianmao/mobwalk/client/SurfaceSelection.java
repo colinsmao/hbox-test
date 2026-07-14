@@ -173,6 +173,18 @@ public final class SurfaceSelection {
 	// Replaced wholesale each select.
 	private List<HoleSpan> holes = List.of();
 
+	// One-shot geometry dump for /mobwalk dump: when set, the next select() logs
+	// reached/merged/occluders/skirts/holes then clears the flag. Armed by
+	// requestDebugDump() only.
+	private boolean debugDumpOnce = false;
+	// Pre-merge reached tops captured only when debugDumpOnce is set (lazy path).
+	private List<StandableRect> debugReachedPreMerge = List.of();
+
+	/** Arm a one-shot pipeline dump on the next {@link #select}. */
+	public void requestDebugDump() {
+		debugDumpOnce = true;
+	}
+
 	/**
 	 * Replace the selection with the merged standable surfaces reachable from the
 	 * surfaces of {@code start}, within a spatial window of half-extent
@@ -191,12 +203,30 @@ public final class SurfaceSelection {
 	 */
 	public void select(Level level, BlockPos start, int radius, EntityProfile profile,
 			boolean computeVisualTop) {
+		boolean dump = debugDumpOnce;
+		debugReachedPreMerge = List.of();
 		if (!PROFILE_FLOOD) {
-			result = LAZY ? selectLazy(level, start, radius, profile, computeVisualTop)
-					: selectEager(level, start, radius, profile, computeVisualTop);
+			if (LAZY) {
+				LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop);
+				result = lazy.run();
+				if (dump) {
+					debugReachedPreMerge = lazy.preMergeReached();
+				}
+			} else {
+				result = selectEager(level, start, radius, profile, computeVisualTop);
+				if (dump) {
+					// Eager returns already-flooded merged rects; use that as "reached".
+					debugReachedPreMerge = result;
+				}
+			}
 			occluders = computeOccluders(level, result, profile);
 			downSkirts = computeDownSkirts(result, occluders);
 			holes = computeHoles(level, result, downSkirts, profile, radius);
+			if (dump) {
+				logFloodDebug(profile, start, radius, computeVisualTop);
+				debugDumpOnce = false;
+				debugReachedPreMerge = List.of();
+			}
 			return;
 		}
 
@@ -225,9 +255,54 @@ public final class SurfaceSelection {
 				profile.name(), radius);
 		}
 		result = LAZY ? lazyRects : eager;
+		if (dump) {
+			debugReachedPreMerge = LAZY ? lazy.preMergeReached() : result;
+		}
 		occluders = computeOccluders(level, result, profile);
 		downSkirts = computeDownSkirts(result, occluders);
 		holes = computeHoles(level, result, downSkirts, profile, radius);
+		if (dump) {
+			logFloodDebug(profile, start, radius, computeVisualTop);
+			debugDumpOnce = false;
+			debugReachedPreMerge = List.of();
+		}
+	}
+
+	private void logFloodDebug(EntityProfile profile, BlockPos start, int radius,
+			boolean computeVisualTop) {
+		MobWalk.LOGGER.info(
+			"[flood-debug] profile={} W={} H={} reach={} seed={} radius={} visualTop={}",
+			profile.name(), profile.width(), profile.height(), profile.reach(),
+			start, radius, computeVisualTop);
+		logFloodDebugRects("reached", debugReachedPreMerge);
+		logFloodDebugRects("merged", result);
+		MobWalk.LOGGER.info("[flood-debug] occluders={}", occluders.size());
+		for (OccluderSpan s : occluders) {
+			MobWalk.LOGGER.info(
+				"[flood-debug]   occ alongX={} side={} line={} [{},{}] baseY={} topY={}",
+				s.alongX(), s.positiveSide(), s.line(), s.lo(), s.hi(), s.baseY(), s.topY());
+		}
+		MobWalk.LOGGER.info("[flood-debug] downskirts={}", downSkirts.size());
+		for (DownSkirtSpan s : downSkirts) {
+			MobWalk.LOGGER.info(
+				"[flood-debug]   drop alongX={} maxSide={} line={} [{},{}] baseY={}",
+				s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(), s.baseY());
+		}
+		MobWalk.LOGGER.info("[flood-debug] holes={}", holes.size());
+		for (HoleSpan s : holes) {
+			MobWalk.LOGGER.info(
+				"[flood-debug]   hole alongX={} maxSide={} line={} [{},{}] baseY={} fall={}",
+				s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(), s.baseY(), s.fallDistance());
+		}
+	}
+
+	private static void logFloodDebugRects(String label, List<StandableRect> rects) {
+		MobWalk.LOGGER.info("[flood-debug] {}={}", label, rects.size());
+		for (StandableRect r : rects) {
+			MobWalk.LOGGER.info(
+				"[flood-debug]   {} [{},{}]x[{},{}] topY={} depth={}",
+				label, r.minX(), r.maxX(), r.minZ(), r.maxZ(), r.topY(), r.depth());
+		}
 	}
 
 	// The eager, window-driven flood (the verified Stage 4 path; kept as the lazy
@@ -333,6 +408,8 @@ public final class SurfaceSelection {
 		occluders = List.of();
 		downSkirts = List.of();
 		holes = List.of();
+		debugDumpOnce = false;
+		debugReachedPreMerge = List.of();
 	}
 
 	/** Immutable snapshot of the reached surfaces (height-tinted at draw time). */
@@ -1279,14 +1356,24 @@ public final class SurfaceSelection {
 		if (landY == Double.NEGATIVE_INFINITY) {
 			return;
 		}
-		// Scan block columns overlapping the footprint in the Y band (landY, topY).
+		// Scan block columns overlapping the footprint. Candidates are boxes whose
+		// top lies in (landY, topY). The occluder index must also include collision
+		// from the block row below landY — shapes that live in a lower block but
+		// rise into (landY, topY) (walls/fences at height 1.5). Those
+		// occluders-from-below keep exposeBox burial complete for rising shapes.
+		// Motivating case: lantern on a wall — the wall box is in floor(landY)-1
+		// and must bury the lantern body.
+		//
+		// Assumption (recorded): one block row below landY is enough because
+		// vanilla collision that matters here extends at most ~1.5 upward from its
+		// block Y. A taller single-block collision (or a multi-block pillar whose
+		// lowest piece sits further below) would need a deeper yLo; revisit then.
 		int xLo = (int) Math.floor(fp.minX());
 		int xHi = (int) Math.ceil(fp.maxX()) - 1;
 		int zLo = (int) Math.floor(fp.minZ());
 		int zHi = (int) Math.ceil(fp.maxZ()) - 1;
-		int yLo = (int) Math.floor(landY);
+		int yLo = (int) Math.floor(landY) - 1;
 		int yHi = (int) Math.ceil(topY);
-		// Gather all boxes in the band (used both as candidates and as occluders).
 		Map<ColKey, List<WorldBox>> index = new HashMap<>();
 		List<WorldBox> candidates = new ArrayList<>();
 		for (int x = xLo - (int) Math.ceil(halfW); x <= xHi + (int) Math.ceil(halfW) + 1; x++) {
@@ -1488,6 +1575,8 @@ public final class SurfaceSelection {
 		private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 		private int columnsExposed = 0;
 		private int rowsScanned = 0;
+		// Pre-merge BFS reached set (for /mobwalk dump); empty until run() finishes.
+		private List<StandableRect> preMergeReached = List.of();
 
 		LazyFlood(Level level, BlockPos start, int radius, EntityProfile profile,
 				boolean computeVisualTop) {
@@ -1514,11 +1603,16 @@ public final class SurfaceSelection {
 			return rowsScanned;
 		}
 
+		List<StandableRect> preMergeReached() {
+			return preMergeReached;
+		}
+
 		List<StandableRect> run() {
 			// Seeds: standable tops of the clicked block (matches eager). Other
 			// tops in the origin column join via normal BFS hops.
 			List<CellSurface> seeds = collectSeedBlock();
 			if (seeds.isEmpty()) {
+				preMergeReached = List.of();
 				return List.of();
 			}
 			// depth doubles as the visited set: a key is present iff visited, and its
@@ -1561,6 +1655,7 @@ public final class SurfaceSelection {
 					}
 				}
 			}
+			preMergeReached = List.copyOf(reached);
 			// Frontier-split merge: union inner and frontier separately, subtract
 			// inner from frontier (inner has priority in the dilation overlap),
 			// so the frontier ring keeps its real depth and is never collapsed
