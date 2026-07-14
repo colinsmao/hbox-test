@@ -126,4 +126,49 @@ final class HeadroomTest {
 		WorldBox onTop = box(0, 0, 0.5, 1, 64, 65);
 		assertEquals(0.5, area(expose(floor, 0.0, onTop)), EPS);
 	}
+
+	/**
+	 * Occluders-from-below geometry (motivating case: lantern on a wall). Standing
+	 * lantern body (7/16) is wider than its cap (4/16); under Ravager dilation the
+	 * cap leaves a body ring unless a wall rising from the block below is in the
+	 * occluder index — the same reason {@code gatherLedges} scans
+	 * {@code floor(landY) - 1}.
+	 */
+	@Test
+	void ravagerLanternBodyRingSurvivesCapAlone() {
+		double halfW = EntityProfile.RAVAGER.width() / 2.0;
+		double height = EntityProfile.RAVAGER.height();
+		WorldBox body = box(5.0 / 16.0, 5.0 / 16.0, 11.0 / 16.0, 11.0 / 16.0, 57.0, 57.0 + 7.0 / 16.0);
+		WorldBox cap = box(6.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0, 10.0 / 16.0, 57.0 + 7.0 / 16.0, 57.0 + 9.0 / 16.0);
+		List<StandableRect> exposed = exposeDilated(body, halfW, height, cap);
+		assertTrue(area(exposed) > EPS, "body ring must survive when wall is absent");
+		for (StandableRect r : exposed) {
+			assertEquals(57.0 + 7.0 / 16.0, r.topY(), EPS);
+		}
+	}
+
+	@Test
+	void wallRisingThroughLanternBuriesBodyTopForRavager() {
+		double halfW = EntityProfile.RAVAGER.width() / 2.0;
+		double height = EntityProfile.RAVAGER.height();
+		// Wall post [4,12]/16 × [0,1.5] from y=56 (same column as the lantern).
+		WorldBox wall = box(4.0 / 16.0, 4.0 / 16.0, 12.0 / 16.0, 12.0 / 16.0, 56.0, 57.5);
+		WorldBox body = box(5.0 / 16.0, 5.0 / 16.0, 11.0 / 16.0, 11.0 / 16.0, 57.0, 57.0 + 7.0 / 16.0);
+		WorldBox cap = box(6.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0, 10.0 / 16.0, 57.0 + 7.0 / 16.0, 57.0 + 9.0 / 16.0);
+		assertTrue(exposeDilated(body, halfW, height, wall, cap).isEmpty());
+	}
+
+	private static List<StandableRect> exposeDilated(WorldBox target, double halfW, double height,
+			WorldBox... others) {
+		Map<ColKey, List<WorldBox>> index = new HashMap<>();
+		List<WorldBox> column = new ArrayList<>();
+		column.add(target);
+		for (WorldBox o : others) {
+			column.add(o);
+		}
+		index.put(new ColKey(0, 0), column);
+		List<StandableRect> out = new ArrayList<>();
+		SurfaceSelection.exposeBox(target, index, halfW, height, out);
+		return out;
+	}
 }

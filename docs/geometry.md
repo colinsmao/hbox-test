@@ -219,6 +219,22 @@ the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep
 ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
+**Ledge gather Y band — occluders from below.** `gatherLedges` re-runs `exposeBox`
+on world boxes whose tops lie in `(landY, topY)`. Candidate tops are only in that
+open interval, but the occluder index starts at `floor(landY) - 1` so collision
+that *lives in the block row below* `landY` and rises into the band (vanilla
+walls/fences at height 1.5) still participates in burial. Without those
+occluders-from-below, `exposeBox` can leave standable fragments that
+hole-classification treats as intermediate ledges. Motivating case: a lantern on
+a wall — under Ravager dilation the lantern body (wider than its cap) left a
+`7/16` ring with `fall = 0.0625` until the wall box below was in the index.
+
+**Assumption:** one block row below `landY` is enough — the occluding shapes that
+matter extend at most ~1.5 upward from their block Y, so they sit in
+`floor(landY) - 1` when `landY` is a full-block top. Deeper scan if a single
+block's collision grows past that, or if a multi-block pillar's lowest piece sits
+further below.
+
 ## Visible-face top vs collision top (Milestone 6)
 
 Everything above derives from `getCollisionShape`, so `StandableRect.topY` is the
