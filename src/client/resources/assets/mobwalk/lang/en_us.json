@@ -1,8 +1,13 @@
 {
-	"mobwalk.gui.title.configs": "MobWalk Configs",
+  "mobwalk.gui.title.configs": "MobWalk Configs",
 
-	"mobwalk.config.generic.name.enabled": "Enable overlay",
+  "mobwalk.config.generic.name.enabled": "Enable overlay",
 
-	"mobwalk.config.generic.name.defaultRadius": "Flood radius",
-	"mobwalk.config.generic.comment.defaultRadius": "BFS flood depth limit. Large values may cause performance issues."
+  "mobwalk.config.generic.name.defaultRadius": "Flood radius",
+  "mobwalk.config.generic.comment.defaultRadius": "BFS flood depth limit. Large values may cause performance issues.",
+
+  "mobwalk.config.debug": "Debug",
+
+  "mobwalk.config.debug.name.crouchScrollRadius": "Crouch and scroll to adjust flood radius",
+  "mobwalk.config.debug.name.crouchSeeThroughWalls": "Crouch to see surfaces through walls"
 }

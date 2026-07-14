@@ -26,6 +26,7 @@ import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay;
 public final class Configs implements IConfigHandler {
 	private static final String CONFIG_FILE_NAME = MobWalk.MOD_ID + ".json";
 	private static final String GENERIC_KEY = MobWalk.MOD_ID + ".config.generic";
+	private static final String DEBUG_KEY = MobWalk.MOD_ID + ".config.debug";
 	private static final int CONFIG_VERSION = 1;
 
 	public static final class Generic {
@@ -49,6 +50,27 @@ public final class Configs implements IConfigHandler {
 		private Generic() {}
 	}
 
+	public static final class Debug {
+		public static final ConfigBoolean CROUCH_SCROLL_RADIUS =
+			new ConfigBoolean("crouchScrollRadius", true).apply(DEBUG_KEY);
+		public static final ConfigBoolean CROUCH_SEE_THROUGH =
+			new ConfigBoolean("crouchSeeThroughWalls", true).apply(DEBUG_KEY);
+
+		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
+			CROUCH_SCROLL_RADIUS,
+			CROUCH_SEE_THROUGH
+		);
+
+		static {
+			CROUCH_SCROLL_RADIUS.setPrettyName(
+				DEBUG_KEY + ".name." + CROUCH_SCROLL_RADIUS.getCleanName());
+			CROUCH_SEE_THROUGH.setPrettyName(
+				DEBUG_KEY + ".name." + CROUCH_SEE_THROUGH.getCleanName());
+		}
+
+		private Debug() {}
+	}
+
 	Configs() {}
 
 	/** Wire live apply into the overlay (call once from init, before config load). */
@@ -69,6 +91,14 @@ public final class Configs implements IConfigHandler {
 		return Generic.DEFAULT_RADIUS.getIntegerValue();
 	}
 
+	public static boolean crouchScrollRadius() {
+		return Debug.CROUCH_SCROLL_RADIUS.getBooleanValue();
+	}
+
+	public static boolean crouchSeeThroughWalls() {
+		return Debug.CROUCH_SEE_THROUGH.getBooleanValue();
+	}
+
 	@Override
 	public void load() {
 		loadFromFile();
@@ -86,7 +116,9 @@ public final class Configs implements IConfigHandler {
 		}
 		JsonElement element = JsonUtils.parseJsonFile(configFile);
 		if (element != null && element.isJsonObject()) {
-			ConfigUtils.readConfigBase(element.getAsJsonObject(), "Generic", Generic.OPTIONS);
+			JsonObject root = element.getAsJsonObject();
+			ConfigUtils.readConfigBase(root, "Generic", Generic.OPTIONS);
+			ConfigUtils.readConfigBase(root, "Debug", Debug.OPTIONS);
 		}
 	}
 
@@ -101,6 +133,7 @@ public final class Configs implements IConfigHandler {
 		}
 		JsonObject root = new JsonObject();
 		ConfigUtils.writeConfigBase(root, "Generic", Generic.OPTIONS);
+		ConfigUtils.writeConfigBase(root, "Debug", Debug.OPTIONS);
 		root.add("config_version", new JsonPrimitive(CONFIG_VERSION));
 		JsonUtils.writeJsonToFile(root, dir.resolve(CONFIG_FILE_NAME));
 	}

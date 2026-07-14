@@ -246,7 +246,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 		holdingStick = player != null
 			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK));
-		crouching = player != null && player.isShiftKeyDown();
+		// Through-walls tops + crouch borders share this flag; gated by Debug setting.
+		crouching = player != null
+			&& player.isShiftKeyDown()
+			&& Configs.crouchSeeThroughWalls();
 	}
 
 	// Publish the current selection into the volatile snapshot emit() reads. Called
@@ -346,12 +349,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		player.swing(hand);
 	}
 
-	// True when shift+scroll should retarget the flood radius instead of switching
-	// the hotbar: only while holding the stick (the tool, in either hand) and
-	// sneaking, so plain scroll still changes the hotbar normally. No empty-main
-	// gate here (unlike the use trigger): scroll doesn't compete with a main-hand
-	// right-click and only does anything once a selection exists.
+	// True when scroll should retarget the flood radius instead of switching the
+	// hotbar: Debug "crouch to scroll radius" enabled, holding the stick (either
+	// hand), and crouching. When the option is off the feature is inactive — scroll
+	// always leaves the hotbar alone to vanilla.
 	public boolean wantsRadiusScroll() {
+		if (!Configs.crouchScrollRadius()) {
+			return false;
+		}
 		Player player = Minecraft.getInstance().player;
 		return player != null
 			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK))

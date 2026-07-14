@@ -1,123 +1,49 @@
-# PLAN — Settings via MaLiLib (Milestone 7)
+# PLAN — Settings (this branch)
 
-Executable plan. Per [`AGENTS.md`](AGENTS.md): each step is one commit, validated
-in-game via `./gradlew runClient` before the next, docs in the same commit.
-`./gradlew build` must pass before every commit. Cross-cutting: no log errors on
-launch / world load-unload / resize; client-only mod.
+**Branch:** `cursor/mobwalk-malilib-settings-31f3` — settings work lives here.
 
-## Branching / PRs
+This file is the **settings ideas backlog** for the branch: what we want, what’s
+already shipped, and notes that should survive across chats. It is **not** an
+executable step list.
 
-- Branch `cursor/mobwalk-malilib-settings-31f3` (from `main`); PR "Milestone 7:
-  settings via MaLiLib"; one commit per step.
-- Cloth attempt left on `cursor/mobwalk-settings-31f3` for reference.
+**How work proceeds:** each chunk of settings work is planned and executed
+in-conversation with a **temporary plan** (its own steps + in-game checklists
+per [`AGENTS.md`](AGENTS.md)). When that chunk lands, distill durable facts into
+`docs/` and fold leftover ideas back into the lists below.
 
-## Status
+## Shipped on this branch
 
-**Done:** Steps 1–2 — MaLiLib + ModMenu; Generic enable + default flood radius
-(live apply, save-on-close).
+- MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs` (Generic).
+- Live options: overlay **enable**; **default flood radius** (0–30, default 20).
+- Save-on-close → `config/mobwalk.json`; lang `name.*` + `comment.*` (prettyName
+  reuses `name.*`).
+- Debug section (flat list LABEL under Generic): **crouch to scroll radius**
+  (default on — off deactivates the gesture); **crouch to see through walls**
+  (default on; borders share that gate).
 
-**Next:** deferred follow-ups (profiles UI, sneak-scroll, hole beams, keybinds).
-
-## Stack
+Stack (technical detail in [`docs/settings.md`](docs/settings.md)):
 
 ```
-Pause menu → Mods (ModMenu) → Configure → MaLiLib GuiConfigsBase
-  → live ConfigBoolean / ConfigInteger (immediate)
-  → save on screen close (IConfigHandler) → config/mobwalk.json
+Mods → Configure → GuiConfigsBase → live config options → save on close → mobwalk.json
 ```
 
-- **ModMenu** = Configure entry (primary open path; hotkey deferred).
-- **MaLiLib** = screen + config options + JSON persistence (same stack as
-  MiniHUD / Litematica for MC `26.1.2`).
-- Widgets write option values **immediately**; `setValueChangeCallback` refreshes
-  overlay state so graphics update while the panel is open. Closing the screen
-  persists via `ConfigManager.onConfigsChanged` → `IConfigHandler.save()`.
-- Loom non-remapping: plain `implementation` / `compileOnly` (+ ModMenu
-  `localRuntime`). Client source set only.
+## Ideas / backlog
 
-### Dependencies
-
-- MaLiLib **`0.28.9`** for MC `26.1.2` — `fi.dy.masa.malilib:malilib-fabric-26.1.2:0.28.9`
-  from `https://masa.dy.fi/maven/sakura-ryoko`; transitive
-  `me.fallenbreath:conditional-mixin-fabric` from
-  `https://maven.fallenbreath.me/releases`; `depends.malilib`.
-- ModMenu `18.0.0` — `maven.modrinth:modmenu`; `compileOnly` + `localRuntime`;
-  `suggests.modmenu`.
-
-### API note (0.28.9)
-
-Use sakura-ryoko `fi.dy.masa.malilib.*`: `GuiConfigsBase`, `ConfigBoolean`,
-`ConfigInteger`, `IConfigHandler`, `InitializationHandler`,
-`setValueChangeCallback`. (The maruohon rewrite’s `BaseConfigScreen` /
-`saveIfDirty` is a different, unreleased API.)
-
-## Defaults (this pass)
-
-- Overlay **enabled** by default.
-- Default flood radius **20**, clamp **0–30**.
-
-## Step 1 — MaLiLib + ModMenu + minimal screen
-
-**Scope:** wire MaLiLib and ModMenu; open an empty Generic MaLiLib config screen.
-No overlay behaviour change yet.
-
-- `gradle.properties`: `malilib_version=0.28.9`, `modmenu_version=18.0.0`.
-- `build.gradle`: masa Maven for `fi.dy.masa`; MaLiLib `implementation`; ModMenu
-  `compileOnly` + `localRuntime` from Modrinth.
-- `fabric.mod.json`: `depends.malilib`, `suggests.modmenu`, `entrypoints.modmenu`.
-- `Configs` (`IConfigHandler`) with empty Generic options list + load/save stub
-  for `config/mobwalk.json`.
-- `InitHandler` → register config handler + `Registry.CONFIG_SCREEN` factory;
-  `MobWalkClient` registers `InitializationHandler`.
-- `GuiConfigs extends GuiConfigsBase` showing Generic (empty list OK).
-- `MobWalkModMenuIntegration` → `GuiConfigs` with parent.
-- Docs in commit: `docs/project.md` (deps + layout); `docs/rendering.md` (stack).
-
-**Unit tests:** none (build wiring).
-
-**In-game checklist:**
-1. `./gradlew build` → BUILD SUCCESSFUL.
-2. `runClient` → launches; MaLiLib loads; no new log errors.
-3. Pause → Mods → MobWalk → Configure → MaLiLib config screen opens (Generic).
-4. Close screen → returns to ModMenu/pause without errors.
-5. Regression: stick selection (either hand), sneak+scroll radius, sneak+right-click
-   profile cycle, K occluder-style, V surface-height, `/mobwalk dump` unchanged;
-   no errors on world load/unload / resize.
-
-## Step 2 — General: enable + default radius (live)
-
-**Scope:** two Generic options with live apply and save-on-close.
-
-- `Configs.Generic`: `ENABLED` (`ConfigBoolean`, default true); `DEFAULT_RADIUS`
-  (`ConfigInteger`, default 20, min 0, max 30, slider).
-- Lang (`assets/mobwalk/lang/en_us.json`): screen title + pretty names + comments
-  (MaLiLib `.apply("mobwalk.config.generic")` keys).
-- `setValueChangeCallback`: enable gates `CollisionSurfaceOverlay.isVisible()`;
-  radius updates selection radius and re-floods an active selection.
-- Raise overlay `MAX_RADIUS` to **30**; initial `selectionRadius` from config
-  default (20).
-- Docs in commit: `docs/rendering.md` (live options + save-on-close);
-  `docs/project.md` status.
-
-**Unit tests:** none (GUI / render gate); in-game.
-
-**In-game checklist:**
-1. Mods → MobWalk → Configure → Generic shows enable + flood radius (0–30 slider).
-2. With a stick selection visible, toggle enable off → overlay hides immediately;
-   toggle on → returns.
-3. Change radius slider with a selection active → flood re-computes to the new
-   radius while the panel is open (or immediately on close if the world was paused).
-4. Close Configure → values in `config/mobwalk.json`; relaunch → same values.
-5. Hover controls → MaLiLib comment/tooltip text shows.
-6. Regression: stick selection, sneak+scroll (clamped to 30), sneak+right-click
-   profile cycle, K, V, `/mobwalk dump` unchanged; no errors on open/close/resize.
-
----
-
-## Deferred / out of scope (follow-ups)
+Add or reorder freely; pick items up via a temporary plan when ready.
 
 - Hotkey open for the config screen.
-- Profiles UI / hitbox library; sneak-scroll gate; hole-beams toggle; keybinds
-  (toggle overlay / cycle profile).
-- Occluder style / V as persisted settings — graphics / later milestones.
-- HUD settings; activation item picker; flood perf hardening; server-side config.
+- Profiles UI / hitbox library (seeded vanilla + custom; Player default).
+- Show hole beams toggle.
+- Keybinds: toggle overlay; cycle profile (vanilla Controls or MaLiLib hotkeys).
+- Persist occluder style (K) and surface-height mode (V).
+- HUD settings (offset, duration, colour, anchor).
+- Activation item picker (stick today).
+- Appearance / visual constants (height ramp, alphas, skirt/beam styling, ring grey).
+- Flood perf hardening (timeout, threading, frame-slicing).
+- Server-side config (only if the mod ever grows a server half).
+
+## Scratch
+
+Durable settings facts (stack, live options, MaLiLib types) live in
+[`docs/settings.md`](docs/settings.md). Session notes and mid-task decisions can
+land here; clear when folded into docs or the backlog above.

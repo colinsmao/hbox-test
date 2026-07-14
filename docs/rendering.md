@@ -21,23 +21,10 @@ compiler and stale training data won't hand you.
   decoupled (`Overlay` / `WorldOverlay`); all Fabric-API and GPU contact lives in
   `OverlayManager` / `WorldOverlayManager`, so API churn touches one file.
 
-## Settings screen (Milestone 7)
+## Settings (Milestone 7)
 
-```
-Pause → Mods (ModMenu) → Configure → GuiConfigs (MaLiLib GuiConfigsBase)
-  → Configs (IConfigHandler) → config/mobwalk.json on screen close
-```
-
-- **MaLiLib `0.28.9`** (`fi.dy.masa.malilib.*`) is the settings UI and JSON
-  persistence stack (same family as MiniHUD / Litematica). Loom uses plain
-  `implementation` (non-remapping); ModMenu is `compileOnly` + `localRuntime`.
-- `InitHandler` registers the config handler and `Registry.CONFIG_SCREEN`
-  factory; `MobWalkClient` registers it via `InitializationHandler`.
-- **Generic options (live):** `enabled` gates `CollisionSurfaceOverlay.isVisible()`
-  each frame (existing snapshot; no re-flood). `defaultRadius` (0–30, default 20,
-  slider) updates the session radius and re-floods an active selection via
-  `setValueChangeCallback` → `applyDefaultRadius`. Closing the screen saves
-  `config/mobwalk.json` through `IConfigHandler.save()`.
+Config UI, persistence, and MaLiLib option types live in
+[`settings.md`](settings.md). This file covers how overlays are drawn.
 
 ## HUD rendering (Milestone 1)
 
@@ -165,11 +152,13 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   (read in `emit`); `width` drives dilation and `height` drives headroom (see
   `geometry.md`). (The separate occluder-style debug key above is unrelated to the
   profile cycle.)
-- **Adjustable flood radius (shift+scroll).** `MobWalkClient` registers
-  `ClientHotbarScrollEvents.ALLOW` (the official Fabric hotbar-scroll hook)
-  and, **only while holding the stick (in either hand) and sneaking**, changes the
-  radius by the scroll direction (`adjustRadius`), re-floods from the last seed so the change is immediate,
-  and returns `false` to cancel the vanilla slot change. Plain scroll is untouched.
+- **Adjustable flood radius (shift+scroll).** Gated by Debug
+  `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
+  `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
+  holding the stick (in either hand) and sneaking**, changes the radius by the
+  scroll direction (`adjustRadius`), re-floods from the last seed so the change
+  is immediate, and returns `false` to cancel the vanilla slot change. When the
+  option is off, that gesture is inactive — scroll never changes the radius.
   The radius is clamped `[0, 20]` and steps by **1 up to 10, then by 2** (`12, 14, …,
   20`) — the window grows quadratically, so coarse steps keep the high end usable.
   Each change pings `RadiusIndicatorOverlay`.
@@ -188,15 +177,19 @@ through-walls, depth-on `SKIRT` occluded).
   BFS depth from the flood seed — a cyclic hue band (`depthColor`, blue at depth 0,
   cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
   out-of-sequence color at a glance.
-- **Crouch-gated through-walls, depth-tested by default.** Seeing surfaces *through*
-  blocks is a debug aid, so the top is routed per-frame: **while sneaking** it goes
-  into the depth-off `FILLED` pipeline (`withDepthStencilState(Optional.empty())`) and
-  draws through walls (along with the borders); **otherwise** into the depth-on
-  `SKIRT` pipeline, occluded by terrain like a real surface.
+- **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
+  `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
+  surfaces *through* blocks is a debug aid, so when the option is on the top is
+  routed per-frame: **while sneaking** it goes into the depth-off `FILLED`
+  pipeline (`withDepthStencilState(Optional.empty())`) and draws through walls
+  (along with the borders); **otherwise** into the depth-on `SKIRT` pipeline,
+  occluded by terrain like a real surface. When the option is off, tops stay
+  depth-tested and crouch borders stay off.
 - **Border (debug, crouch-only).** A thin opaque border (4 clamped edge strips, both
   windings) separates adjacent surfaces and the sub-rects of one block (e.g. the
   4-rect ring around a fence post). It clutters the normal view, so it draws **only
-  while sneaking** (`crouching`, sampled in `extract`).
+  while sneaking** when `crouchSeeThroughWalls` is on (`crouching`, sampled in
+  `extract` — same gate as through-walls tops).
 - **Skirts: square, fading, depth-tested.** Each edge drops a double-winding vertical
   skirt of depth `reach + SKIRT_MARGIN` (~2), darker, **solid over its top half and
   fading to transparent over the bottom half** so a deep drop doesn't read as a hard

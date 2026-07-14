@@ -4,7 +4,8 @@ Reference/background for this repo. **`AGENTS.md` holds the rules you must
 follow; this file holds the project facts they operate on.** Read this when you
 need orientation (what the project is, where code lives, which versions to use);
 read the subsystem guides ([`rendering.md`](rendering.md),
-[`geometry.md`](geometry.md)) before touching those areas.
+[`geometry.md`](geometry.md), [`settings.md`](settings.md)) before touching
+those areas.
 
 ## What this project is
 
@@ -15,12 +16,13 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — Steps
-1–2 land MaLiLib/ModMenu plus Generic enable and default flood radius (live
-apply, save-on-close). The repo is a client-only Fabric Gradle project generated
+Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — Generic
+enable/radius plus Debug crouch-scroll and crouch see-through (flat list LABEL;
+live apply, save-on-close). The repo is a client-only Fabric Gradle project generated
 from `FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
 layout** below). `./gradlew build` passes (produces `build/libs/mobwalk-1.0.0.jar`).
-Rendering details live in [`rendering.md`](rendering.md).
+Rendering details live in [`rendering.md`](rendering.md); settings/config stack
+in [`settings.md`](settings.md).
 
 - **Milestone 1 — minimal working mod (HUD):** a HUD overlay framework
   (`Overlay` / `OverlayManager`); the current widget is `RadiusIndicatorOverlay`,
@@ -83,7 +85,9 @@ Rendering details live in [`rendering.md`](rendering.md).
   ledge gather.
 - **Milestone 7 — settings (in progress):** MaLiLib + ModMenu Configure entry;
   Generic options for overlay enable and default flood radius (0–30, default 20)
-  with live apply and save-on-close to `config/mobwalk.json`.
+  with live apply and save-on-close to `config/mobwalk.json`. Debug section
+  (flat list LABEL): crouch-to-scroll-radius and crouch-to-see-through-walls
+  (both default on; see [`settings.md`](settings.md)).
 
 ## Repository layout
 
@@ -217,6 +221,10 @@ relevant guide **before** touching that area; add a new guide as the project gro
 - **Surface / collision geometry:** [`geometry.md`](geometry.md) — the
   `StandableRect` representation, the rect/double-space (not pixel-raster)
   decision, the entity-width dilation model, and the entity-height headroom rule.
+- **Settings (MaLiLib config):** [`settings.md`](settings.md) — technical
+  reference for the config stack, live Generic/Debug options, screen layout
+  (flat list + LABEL sections), and MaLiLib option types (player-facing
+  settings help is a separate publish-time doc).
 
 ## Future work / roadmap
 
@@ -224,7 +232,7 @@ The overlay frameworks (see [`rendering.md`](rendering.md)) are designed to make
 these incremental:
 
 - **Configuration:** MaLiLib Generic options (enable, flood radius, profiles) via
-  Mods → Configure; live apply + save-on-close (see [`rendering.md`](rendering.md)).
+  Mods → Configure; live apply + save-on-close (see [`settings.md`](settings.md)).
 - **Keybinds:** `KeyBindingHelper` to toggle overlays.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
   in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.
