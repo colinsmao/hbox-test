@@ -15,11 +15,12 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–5 merged. The repo is a client-only Fabric
-Gradle project generated from `FabricMC/fabric-example-mod` and trimmed to
-client-only (see **Repository layout** below). `./gradlew build` passes (produces
-`build/libs/mobwalk-1.0.0.jar`). Rendering details live in
-[`rendering.md`](rendering.md).
+Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — Step 1
+(MaLiLib + ModMenu + empty Generic config screen) is the current landing.
+The repo is a client-only Fabric Gradle project generated from
+`FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
+layout** below). `./gradlew build` passes (produces `build/libs/mobwalk-1.0.0.jar`).
+Rendering details live in [`rendering.md`](rendering.md).
 
 - **Milestone 1 — minimal working mod (HUD):** a HUD overlay framework
   (`Overlay` / `OverlayManager`); the current widget is `RadiusIndicatorOverlay`,
@@ -78,7 +79,11 @@ client-only (see **Repository layout** below). `./gradlew build` passes (produce
   [`rendering.md`](rendering.md)). (4) **Flood seeds from the
   clicked block's tops**; other surfaces join only via walkable BFS hops.
   (5) **Player / Ravager `reach = 1.2522`** (documented jump peak); Point
-  `reach = 1.0`.
+  `reach = 1.0`. Milestone 6.5 added `/mobwalk dump` and occluders-from-below in
+  ledge gather.
+- **Milestone 7 — settings (in progress):** MaLiLib + ModMenu Configure entry;
+  empty Generic `GuiConfigs` screen; `Configs` (`IConfigHandler`) persists
+  `config/mobwalk.json` on screen close. Enable + default-radius options are next.
 
 ## Repository layout
 
@@ -94,9 +99,13 @@ it.
 └── src
   ├── main/java/dev/kelianmao/mobwalk/
   │   └── MobWalk.java                     # shared constants (MOD_ID, logger)
-  ├── main/resources/fabric.mod.json       # client-only; single client entrypoint
+  ├── main/resources/fabric.mod.json       # client-only; client + modmenu entrypoints
   ├── client/java/dev/kelianmao/mobwalk/client/
   │   ├── MobWalkClient.java               # ClientModInitializer (+ debug keybinds, /mobwalk dump)
+  │   ├── InitHandler.java                 # MaLiLib config + screen registration
+  │   ├── Configs.java                     # IConfigHandler → config/mobwalk.json
+  │   ├── GuiConfigs.java                  # MaLiLib GuiConfigsBase settings screen
+  │   ├── MobWalkModMenuIntegration.java   # ModMenu Configure → GuiConfigs
   │   ├── Overlay.java                     # HUD widget interface
   │   ├── OverlayManager.java              # HUD registry + render dispatch
   │   ├── WorldOverlay.java                # in-world widget interface
@@ -110,12 +119,14 @@ it.
   │   └── widgets/
   │       ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
   │       └── CollisionSurfaceOverlay.java  # standable-surface selection widget + drawing
+  ├── client/resources/assets/mobwalk/lang/en_us.json
   └── test/java/dev/kelianmao/mobwalk/client/ # pure-logic unit tests (fabric-loader-junit)
 ```
 
-`fabric.mod.json` sets `"environment": "client"`, declares **only** a `client`
-entrypoint (`dev.kelianmao.mobwalk.client.MobWalkClient`), and depends on
-`fabricloader >=0.19.2`, `minecraft ~26.1.2`, `java >=25`, and `fabric-api`.
+`fabric.mod.json` sets `"environment": "client"`, declares a `client` entrypoint
+(`dev.kelianmao.mobwalk.client.MobWalkClient`) and a `modmenu` entrypoint, and
+depends on `fabricloader >=0.19.2`, `minecraft ~26.1.2`, `java >=25`,
+`fabric-api`, and `malilib`; it suggests `modmenu`.
 
 ## Target versions
 
@@ -130,6 +141,8 @@ sources — live in `AGENTS.md` under **Key constraints**.)
 | Fabric Loader | `0.19.2`         |
 | Fabric Loom   | `1.16-SNAPSHOT`  |
 | Fabric API    | `0.149.1+26.1.2` |
+| MaLiLib       | `0.28.9`         |
+| ModMenu       | `18.0.0` (dev)   |
 | JDK           | `25`             |
 
 Authoritative sources (pin the version selector to `26.1.2`):
@@ -210,8 +223,8 @@ relevant guide **before** touching that area; add a new guide as the project gro
 The overlay frameworks (see [`rendering.md`](rendering.md)) are designed to make
 these incremental:
 
-- **Configuration:** a JSON config (later a Cloth Config / ModMenu screen) to
-  toggle individual overlays and set position/scale.
+- **Configuration:** MaLiLib Generic options (enable, flood radius, profiles) via
+  Mods → Configure; live apply + save-on-close (see [`rendering.md`](rendering.md)).
 - **Keybinds:** `KeyBindingHelper` to toggle overlays.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
   in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.

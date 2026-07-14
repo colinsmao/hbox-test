@@ -11,11 +11,17 @@ base {
 }
 
 repositories {
-	// Add repositories to retrieve artifacts from in here.
-	// You should only use this when depending on other mods because
-	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
-	// for more information about repositories.
+	maven {
+		url = "https://masa.dy.fi/maven/sakura-ryoko"
+		content { includeGroupAndSubgroups("fi.dy.masa") }
+	}
+	maven {
+		url = "https://maven.fallenbreath.me/releases"
+		content { includeGroupAndSubgroups("me.fallenbreath") }
+	}
+	// ModMenu jars on terraformersmc.com have been truncating mid-download;
+	// Modrinth mirrors the same 18.0.0 artifact reliably.
+	maven { url = "https://api.modrinth.com/maven" }
 }
 
 loom {
@@ -38,6 +44,16 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// MaLiLib (settings screen + config options). Plain implementation — this loom
+	// uses official 26.1 mappings (non-remapping), same as fabric-api above.
+	implementation "fi.dy.masa.malilib:malilib-fabric-${project.minecraft_version}:${project.malilib_version}"
+
+	// ModMenu (Configure button). compileOnly for the API; localRuntime so
+	// runClient shows Mods → Configure without bundling ModMenu into the jar.
+	// Resolved from Modrinth (see repositories) — terraformersmc.com truncates.
+	compileOnly "maven.modrinth:modmenu:${project.modmenu_version}"
+	localRuntime "maven.modrinth:modmenu:${project.modmenu_version}"
 
 	// Pure-logic unit tests (the surface geometry: rect ops, edge classification,
 	// headroom predicate). fabric-loader-junit boots the transforming classloader

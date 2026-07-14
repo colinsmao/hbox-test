@@ -13,7 +13,9 @@ launch / world load-unload / resize; client-only mod.
 
 ## Status
 
-**Next:** Step 1 — MaLiLib + ModMenu + minimal config screen.
+**Done:** Step 1 — MaLiLib + ModMenu + empty Generic config screen.
+
+**Next:** Step 2 — enable + default radius (live apply, save-on-close).
 
 ## Stack
 
@@ -35,7 +37,9 @@ Pause menu → Mods (ModMenu) → Configure → MaLiLib GuiConfigsBase
 ### Dependencies
 
 - MaLiLib **`0.28.9`** for MC `26.1.2` — `fi.dy.masa.malilib:malilib-fabric-26.1.2:0.28.9`
-  from `https://masa.dy.fi/maven/sakura-ryoko`; `depends.malilib`.
+  from `https://masa.dy.fi/maven/sakura-ryoko`; transitive
+  `me.fallenbreath:conditional-mixin-fabric` from
+  `https://maven.fallenbreath.me/releases`; `depends.malilib`.
 - ModMenu `18.0.0` — `maven.modrinth:modmenu`; `compileOnly` + `localRuntime`;
   `suggests.modmenu`.
 

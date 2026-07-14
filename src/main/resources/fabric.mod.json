@@ -16,12 +16,19 @@
 	"entrypoints": {
 		"client": [
 			"dev.kelianmao.mobwalk.client.MobWalkClient"
+		],
+		"modmenu": [
+			"dev.kelianmao.mobwalk.client.MobWalkModMenuIntegration"
 		]
 	},
 	"depends": {
 		"fabricloader": ">=0.19.2",
 		"minecraft": "~26.1.2",
 		"java": ">=25",
-		"fabric-api": "*"
+		"fabric-api": "*",
+		"malilib": "*"
+	},
+	"suggests": {
+		"modmenu": "*"
 	}
 }

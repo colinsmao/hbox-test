@@ -21,6 +21,21 @@ compiler and stale training data won't hand you.
   decoupled (`Overlay` / `WorldOverlay`); all Fabric-API and GPU contact lives in
   `OverlayManager` / `WorldOverlayManager`, so API churn touches one file.
 
+## Settings screen (Milestone 7)
+
+```
+Pause → Mods (ModMenu) → Configure → GuiConfigs (MaLiLib GuiConfigsBase)
+  → Configs (IConfigHandler) → config/mobwalk.json on screen close
+```
+
+- **MaLiLib `0.28.9`** (`fi.dy.masa.malilib.*`) is the settings UI and JSON
+  persistence stack (same family as MiniHUD / Litematica). Loom uses plain
+  `implementation` (non-remapping); ModMenu is `compileOnly` + `localRuntime`.
+- `InitHandler` registers the config handler and `Registry.CONFIG_SCREEN`
+  factory; `MobWalkClient` registers it via `InitializationHandler`.
+- Step 1 ships an empty Generic options list so the screen opens; enable /
+  default-radius options and live `setValueChangeCallback` apply land in Step 2.
+
 ## HUD rendering (Milestone 1)
 
 - Use the current **`HudElementRegistry`** API. The legacy `HudRenderCallback`

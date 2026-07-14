@@ -7,6 +7,8 @@ import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay.FloodDebugCo
 import com.mojang.blaze3d.platform.InputConstants;
 import org.lwjgl.glfw.GLFW;
 
+import fi.dy.masa.malilib.event.InitializationHandler;
+
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
@@ -30,6 +32,7 @@ public final class MobWalkClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		OverlayManager.bootstrap();
 		WorldOverlayManager.bootstrap();
+		InitializationHandler.getInstance().registerInitializationHandler(new InitHandler());
 
 		// Standalone debug key (default K): increments the occluder-marker style
 		// (tiny / half-block / full / bold-line, wrapping) so the final look can be
