@@ -16,9 +16,10 @@ frameworks so more overlay widgets are easy to add.
 
 ## Current status
 
-Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — Generic
-enable/radius plus Debug crouch-scroll and crouch see-through (flat list LABEL;
-live apply, save-on-close). The repo is a client-only Fabric Gradle project generated
+Milestones 1–6.5 merged; Milestone 7 (settings via MaLiLib) in progress — General
+LABEL + Generic enable / profile (Player default) / radius, plus Debug crouch-scroll,
+crouch see-through, and crouch-cycle-profile (flat list LABELs; live apply,
+save-on-close). The repo is a client-only Fabric Gradle project generated
 from `FabricMC/fabric-example-mod` and trimmed to client-only (see **Repository
 layout** below). `./gradlew build` passes (produces `build/libs/mobwalk-1.0.0.jar`).
 Rendering details live in [`rendering.md`](rendering.md); settings/config stack

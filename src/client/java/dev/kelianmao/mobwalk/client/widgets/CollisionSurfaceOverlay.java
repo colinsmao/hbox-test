@@ -165,11 +165,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private int selectionRadius = DEFAULT_RADIUS;
 	private BlockPos lastSeed;
 
-	// Active entity profile, cycled by sneak+right-click at nothing (see
-	// onUseItem). Point is a no-op for dilation, so it reproduces today's
-	// point-particle behavior. Written on the client thread (onUseItem), read on
-	// the render thread (emit, for the skirt depth), so volatile.
-	private volatile EntityProfile profile = EntityProfile.POINT;
+	// Active entity profile comes from Configs.entityProfile() (settings source of
+	// truth). Sneak+air-click may cycle it when Debug crouchCycleProfile is on.
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
 	// switch, disconnect/reconnect) empties the in-memory selection — a
@@ -295,7 +292,19 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		selectionRadius = updated;
 		Level level = Minecraft.getInstance().level;
 		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+			cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
+			publish();
+		}
+	}
+
+	/**
+	 * Live apply from MaLiLib profile control: re-flood an active selection so the
+	 * new entity size shows immediately.
+	 */
+	public void reselectWithCurrentProfile() {
+		Level level = Minecraft.getInstance().level;
+		if (level != null && lastSeed != null) {
+			cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
 			publish();
 		}
 	}
@@ -332,17 +341,18 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, selectionRadius, profile, useVisualTop);
+			cache.select(level, start, selectionRadius, Configs.entityProfile(), useVisualTop);
 			lastSeed = start;
 		} else {
-			// Right-click at nothing clears. Sneaking also advances the profile and
-			// pings the HUD; lastSeed stays null so there is no re-flood — the new
-			// profile takes effect on the next select.
+			// Right-click at nothing clears. When Debug crouchCycleProfile is on,
+			// sneaking also advances the settings profile and pings the HUD;
+			// lastSeed stays null so there is no re-flood — the new profile takes
+			// effect on the next select.
 			cache.clear();
 			lastSeed = null;
-			if (player.isShiftKeyDown()) {
-				profile = profile.next();
-				OverlayManager.radiusIndicator().showProfile(profile.name());
+			if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
+				EntityProfile next = Configs.cycleEntityProfile();
+				OverlayManager.radiusIndicator().showProfile(next.name());
 			}
 		}
 		publish();
@@ -377,7 +387,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			selectionRadius = updated;
 			Level level = Minecraft.getInstance().level;
 			if (level != null && lastSeed != null) {
-				cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+				cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
 				publish();
 			}
 		}
@@ -403,7 +413,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		useVisualTop = !useVisualTop;
 		Level level = Minecraft.getInstance().level;
 		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+			cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
 			publish();
 		}
 		return useVisualTop;
@@ -420,7 +430,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return null;
 		}
 		cache.requestDebugDump();
-		cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+		cache.select(level, lastSeed, selectionRadius, Configs.entityProfile(), useVisualTop);
 		publish();
 		return new FloodDebugCounts(
 			cache.allRects().size(),
@@ -441,7 +451,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		int limit = depthLimit;
-		float skirtDepth = (float) (profile.reach() + SKIRT_MARGIN);
+		float skirtDepth = (float) (Configs.entityProfile().reach() + SKIRT_MARGIN);
 
 		for (StandableRect rect : rects) {
 			float minX = (float) rect.minX();

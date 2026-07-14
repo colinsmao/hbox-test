@@ -42,17 +42,18 @@ Key files: `InitHandler.java`, `Configs.java`, `GuiConfigs.java`,
 Category key prefix: `mobwalk.config.generic` (`.apply(GENERIC_KEY)`). JSON
 category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 
-
-| Option          | Class           | Default                          | Behavior                                                                                                                            |
-| --------------- | --------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`       | `ConfigBoolean` | `true`                           | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood).                   |
+| Option | Class | Default | Behavior |
+| --- | --- | --- | --- |
+| `enabled` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
+| `profile` | `ConfigOptionList` | `Player` (`EntityProfile.Option`) | Cycles Point / Player / Ravager. Source of truth for the active flood profile; `setValueChangeCallback` → `reselectWithCurrentProfile` when a selection is active. |
 | `defaultRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | `setValueChangeCallback` → `CollisionSurfaceOverlay.applyDefaultRadius` (updates session radius and re-floods an active selection). |
 
+Helpers: `Configs.entityProfile()`, `Configs.cycleEntityProfile()`.
 
 Lang keys (prettyName reuses `name.*` so toggle messages share the label):
 
-- `mobwalk.config.generic.name.enabled` / `…name.defaultRadius`
-- `mobwalk.config.generic.comment.defaultRadius` (tooltip)
+- `mobwalk.config.generic.name.enabled` / `…name.profile` / `…name.defaultRadius`
+- `mobwalk.config.generic.comment.profile` / `…comment.defaultRadius` (tooltips)
 
 `config_version` (`1`) is written beside the category objects in `mobwalk.json`.
 
@@ -60,9 +61,10 @@ Lang keys (prettyName reuses `name.*` so toggle messages share the label):
 
 One scrolling list in `GuiConfigs.getConfigs()` (no category tabs):
 
-1. `Configs.Generic.OPTIONS`
-2. A MaLiLib **LABEL** row (`new ConfigOptionWrapper(…)`), lang `mobwalk.config.debug`
-3. `Configs.Debug.OPTIONS`
+1. A MaLiLib **LABEL** row, lang `mobwalk.config.general` → **"General"**
+2. `Configs.Generic.OPTIONS`
+3. A MaLiLib **LABEL** row, lang `mobwalk.config.debug` → **"Debug"**
+4. `Configs.Debug.OPTIONS`
 
 ## Live Debug options
 
@@ -73,14 +75,16 @@ name: `"Debug"`.
 | --- | --- | --- | --- |
 | `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: stick + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
+| `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: stick + crouch + right-click air advances `Configs.PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
 
-Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()` — read
-live each use (no value-change callbacks).
+Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
+`Configs.crouchCycleProfile()` — read live each use (no value-change callbacks).
 
 Lang keys:
 
-- `mobwalk.config.debug` (section LABEL)
-- `mobwalk.config.debug.name.crouchScrollRadius` / `…name.crouchSeeThroughWalls`
+- `mobwalk.config.general` / `mobwalk.config.debug` (section LABELs)
+- `mobwalk.config.debug.name.crouchScrollRadius` / `…name.crouchSeeThroughWalls` /
+  `…name.crouchCycleProfile`
 
 ## Adding an option
 

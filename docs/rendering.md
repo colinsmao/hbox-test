@@ -143,15 +143,16 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   `level.getMinY()`) to the first non-empty shape.
 - **Entity profiles + `reach`.** An `EntityProfile(name, width, height, reach)`
   selects the entity the flood/dilation/headroom use. Three ship, cycled in order
-  **Point** (`width 0`, `height 0`, default — reproduces the zero-width point-walker)
-  → **Player** (`0.6`, `1.8`, `reach 1.2522`) → **Ravager** (`1.95`, `2.2`,
+  **Point** (`width 0`, `height 0` — zero-width point-walker / oracle) → **Player**
+  (`0.6`, `1.8`, `reach 1.2522`, **settings default**) → **Ravager** (`1.95`, `2.2`,
   `reach 1.2522`); Point keeps `reach 1.0`. `reach` is `max(jump, step)` — Player/
-  Ravager use the documented jump peak `1.2522`. The profile cycle rides the
-  use-key dispatch — **sneak + right-click at nothing** clears *and* advances the
-  profile, then pings the HUD with the new name. The `profile` field is `volatile`
-  (read in `emit`); `width` drives dilation and `height` drives headroom (see
-  `geometry.md`). (The separate occluder-style debug key above is unrelated to the
-  profile cycle.)
+  Ravager use the documented jump peak `1.2522`. The active profile is
+  `Configs.entityProfile()` (Generic `profile` option). Changing it in the config
+  GUI re-floods an active selection. When Debug `crouchCycleProfile` is on,
+  **sneak + right-click at nothing** clears *and* advances that option, then pings
+  the HUD with the new name. `width` drives dilation and `height` drives headroom
+  (see `geometry.md`). (The separate occluder-style debug key above is unrelated
+  to the profile cycle.)
 - **Adjustable flood radius (shift+scroll).** Gated by Debug
   `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
   `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
@@ -312,7 +313,7 @@ through-walls, depth-on `SKIRT` occluded).
 ## Where the file-specific gotchas live (inline comments)
 
 - `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
-  right-click trigger (select/clear) + sneak-cycle of the active profile, the
+  right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the crouch-gated through-walls top + borders, the
   depth-based grey blend (`greyBlend`, keyed on `rect.depth()` vs `depthLimit`),
@@ -324,7 +325,7 @@ through-walls, depth-on `SKIRT` occluded).
   `HoleSpan`, into the depth-off `FILLED` layer) — `emit` no longer computes any edge
   spans per frame — the cyclic depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
   band), the level-identity reset,
-  `volatile` snapshot/occluder/down-skirt/hole/profile/crouch/style handoff, and the
+  `volatile` snapshot/occluder/down-skirt/hole/crouch/style handoff, and the
   double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.

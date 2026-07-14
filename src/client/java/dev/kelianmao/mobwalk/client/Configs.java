@@ -13,6 +13,7 @@ import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
+import fi.dy.masa.malilib.config.options.ConfigOptionList;
 import fi.dy.masa.malilib.util.FileUtils;
 import fi.dy.masa.malilib.util.data.json.JsonUtils;
 
@@ -32,11 +33,14 @@ public final class Configs implements IConfigHandler {
 	public static final class Generic {
 		public static final ConfigBoolean ENABLED =
 			new ConfigBoolean("enabled", true).apply(GENERIC_KEY);
+		public static final ConfigOptionList PROFILE =
+			new ConfigOptionList("profile", EntityProfile.Option.PLAYER).apply(GENERIC_KEY);
 		public static final ConfigInteger DEFAULT_RADIUS =
 			new ConfigInteger("defaultRadius", 20, 0, 30, true).apply(GENERIC_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			ENABLED,
+			PROFILE,
 			DEFAULT_RADIUS
 		);
 
@@ -44,6 +48,7 @@ public final class Configs implements IConfigHandler {
 			// GUI labels use name.*; point prettyName at the same key so toggle
 			// messages don't need a duplicate lang entry.
 			ENABLED.setPrettyName(GENERIC_KEY + ".name." + ENABLED.getCleanName());
+			PROFILE.setPrettyName(GENERIC_KEY + ".name." + PROFILE.getCleanName());
 			DEFAULT_RADIUS.setPrettyName(GENERIC_KEY + ".name." + DEFAULT_RADIUS.getCleanName());
 		}
 
@@ -55,10 +60,13 @@ public final class Configs implements IConfigHandler {
 			new ConfigBoolean("crouchScrollRadius", true).apply(DEBUG_KEY);
 		public static final ConfigBoolean CROUCH_SEE_THROUGH =
 			new ConfigBoolean("crouchSeeThroughWalls", true).apply(DEBUG_KEY);
+		public static final ConfigBoolean CROUCH_CYCLE_PROFILE =
+			new ConfigBoolean("crouchCycleProfile", true).apply(DEBUG_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			CROUCH_SCROLL_RADIUS,
-			CROUCH_SEE_THROUGH
+			CROUCH_SEE_THROUGH,
+			CROUCH_CYCLE_PROFILE
 		);
 
 		static {
@@ -66,6 +74,8 @@ public final class Configs implements IConfigHandler {
 				DEBUG_KEY + ".name." + CROUCH_SCROLL_RADIUS.getCleanName());
 			CROUCH_SEE_THROUGH.setPrettyName(
 				DEBUG_KEY + ".name." + CROUCH_SEE_THROUGH.getCleanName());
+			CROUCH_CYCLE_PROFILE.setPrettyName(
+				DEBUG_KEY + ".name." + CROUCH_CYCLE_PROFILE.getCleanName());
 		}
 
 		private Debug() {}
@@ -81,6 +91,12 @@ public final class Configs implements IConfigHandler {
 				collision.applyDefaultRadius(cfg.getIntegerValue());
 			}
 		});
+		Generic.PROFILE.setValueChangeCallback(cfg -> {
+			CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+			if (collision != null) {
+				collision.reselectWithCurrentProfile();
+			}
+		});
 	}
 
 	public static boolean isOverlayEnabled() {
@@ -91,12 +107,29 @@ public final class Configs implements IConfigHandler {
 		return Generic.DEFAULT_RADIUS.getIntegerValue();
 	}
 
+	/** Active entity profile (settings source of truth). */
+	public static EntityProfile entityProfile() {
+		return ((EntityProfile.Option) Generic.PROFILE.getOptionListValue()).profile();
+	}
+
+	/** Advance the profile option one step forward (Point → Player → Ravager → Point). */
+	public static EntityProfile cycleEntityProfile() {
+		EntityProfile.Option next =
+			(EntityProfile.Option) Generic.PROFILE.getOptionListValue().cycle(true);
+		Generic.PROFILE.setOptionListValue(next);
+		return next.profile();
+	}
+
 	public static boolean crouchScrollRadius() {
 		return Debug.CROUCH_SCROLL_RADIUS.getBooleanValue();
 	}
 
 	public static boolean crouchSeeThroughWalls() {
 		return Debug.CROUCH_SEE_THROUGH.getBooleanValue();
+	}
+
+	public static boolean crouchCycleProfile() {
+		return Debug.CROUCH_CYCLE_PROFILE.getBooleanValue();
 	}
 
 	@Override

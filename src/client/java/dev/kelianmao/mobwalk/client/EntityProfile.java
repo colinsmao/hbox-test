@@ -1,17 +1,18 @@
 package dev.kelianmao.mobwalk.client;
 
+import fi.dy.masa.malilib.config.IConfigOptionListEntry;
+
 /**
  * The size/reach of the entity the standable-surface flood is computed for. A
  * Minecraft hitbox is an axis-aligned {@code width x width} square footprint, so
  * {@code width} fully describes the horizontal extent; {@code reach} is the
  * walkable height threshold (see {@code docs/geometry.md} "Reachability model").
  *
- * <p>Three profiles ship, cycled in order ({@link #next()}): {@link #POINT}
- * (width 0, the default), {@link #PLAYER} (0.6), {@link #RAVAGER} (1.95).
- * {@code width 0} makes the (upcoming) config-space dilation a no-op, so
- * {@code POINT} reproduces the pre-profile point-particle behavior exactly — both
- * the safe default and an A/B baseline. {@code width} is carried but unused until
- * the dilation stages.
+ * <p>Three profiles ship, cycled in order ({@link #next()} / {@link Option}):
+ * {@link #POINT} (width 0), {@link #PLAYER} (0.6, the settings default),
+ * {@link #RAVAGER} (1.95). {@code width 0} makes config-space dilation a no-op, so
+ * {@code POINT} reproduces the pre-profile point-particle behavior — the oracle
+ * baseline. {@code width} drives dilation; {@code height} drives headroom.
  *
  * <p>{@code reach} is {@code max(jump, step)}: two surfaces connect when
  * {@code |dTopY| <= reach}. {@link #PLAYER} and {@link #RAVAGER} use
@@ -23,7 +24,7 @@ package dev.kelianmao.mobwalk.client;
  * <b>headroom</b> rule: a box top at {@code T} stays standable only where the
  * standing column {@code (T, T+height]} is clear of collision boxes. {@code POINT}
  * keeps {@code height 0} so it stays the pure point-walker (the headroom test then
- * reduces to today's buried test) and the oracle baseline.
+ * reduces to the buried test) and the oracle baseline.
  */
 public record EntityProfile(String name, double width, double height, double reach) {
 	/**
@@ -37,7 +38,7 @@ public record EntityProfile(String name, double width, double height, double rea
 	public static final EntityProfile PLAYER = new EntityProfile("Player", 0.6, 1.8, DEFAULT_JUMP_REACH);
 	public static final EntityProfile RAVAGER = new EntityProfile("Ravager", 1.95, 2.2, DEFAULT_JUMP_REACH);
 
-	// Cycle order for the sneak+right-click-at-nothing toggle.
+	// Cycle order for settings / sneak+right-click-at-nothing.
 	private static final EntityProfile[] CYCLE = {POINT, PLAYER, RAVAGER};
 
 	/** The next profile in the cycle ({@code Point -> Player -> Ravager -> Point}). */
@@ -47,6 +48,73 @@ public record EntityProfile(String name, double width, double height, double rea
 				return CYCLE[(i + 1) % CYCLE.length];
 			}
 		}
-		return POINT;
+		return PLAYER;
+	}
+
+	/**
+	 * MaLiLib {@link fi.dy.masa.malilib.config.options.ConfigOptionList} entries for
+	 * the shipped profiles. JSON ids are lowercase; display names match
+	 * {@link EntityProfile#name()}.
+	 */
+	public enum Option implements IConfigOptionListEntry {
+		POINT(EntityProfile.POINT, "point"),
+		PLAYER(EntityProfile.PLAYER, "player"),
+		RAVAGER(EntityProfile.RAVAGER, "ravager");
+
+		private final EntityProfile profile;
+		private final String id;
+
+		Option(EntityProfile profile, String id) {
+			this.profile = profile;
+			this.id = id;
+		}
+
+		public EntityProfile profile() {
+			return profile;
+		}
+
+		@Override
+		public String getStringValue() {
+			return id;
+		}
+
+		@Override
+		public String getDisplayName() {
+			return profile.name();
+		}
+
+		@Override
+		public IConfigOptionListEntry cycle(boolean forward) {
+			Option[] values = values();
+			int i = ordinal();
+			return values[forward
+				? (i + 1) % values.length
+				: (i - 1 + values.length) % values.length];
+		}
+
+		@Override
+		public IConfigOptionListEntry fromString(String value) {
+			if (value != null) {
+				for (Option option : values()) {
+					if (option.id.equalsIgnoreCase(value)
+						|| option.profile.name().equalsIgnoreCase(value)) {
+						return option;
+					}
+				}
+			}
+			return PLAYER;
+		}
+
+		/** Map a live {@link EntityProfile} to its option entry (unknown → Player). */
+		public static Option of(EntityProfile profile) {
+			if (profile != null) {
+				for (Option option : values()) {
+					if (option.profile.equals(profile)) {
+						return option;
+					}
+				}
+			}
+			return PLAYER;
+		}
 	}
 }

@@ -1,13 +1,19 @@
-{
-  "mobwalk.gui.title.configs": "MobWalk Configs",
-
-  "mobwalk.config.generic.name.enabled": "Enable overlay",
-
-  "mobwalk.config.generic.name.defaultRadius": "Flood radius",
-  "mobwalk.config.generic.comment.defaultRadius": "BFS flood depth limit. Large values may cause performance issues.",
-
-  "mobwalk.config.debug": "Debug",
-
-  "mobwalk.config.debug.name.crouchScrollRadius": "Crouch and scroll to adjust flood radius",
-  "mobwalk.config.debug.name.crouchSeeThroughWalls": "Crouch to see surfaces through walls"
-}
+{
+  "mobwalk.gui.title.configs": "MobWalk Configs",
+
+  "mobwalk.config.general": "General",
+
+  "mobwalk.config.generic.name.enabled": "Enable overlay",
+
+  "mobwalk.config.generic.name.profile": "Profile",
+  "mobwalk.config.generic.comment.profile": "Entity size used for flood dilation and headroom. Cycles Point, Player, Ravager.",
+
+  "mobwalk.config.generic.name.defaultRadius": "Flood radius",
+  "mobwalk.config.generic.comment.defaultRadius": "BFS flood depth limit. Large values may cause performance issues.",
+
+  "mobwalk.config.debug": "Debug",
+
+  "mobwalk.config.debug.name.crouchScrollRadius": "Crouch and scroll to adjust flood radius",
+  "mobwalk.config.debug.name.crouchSeeThroughWalls": "Crouch to see surfaces through walls",
+  "mobwalk.config.debug.name.crouchCycleProfile": "Crouch and right-click air to cycle profile"
+}

@@ -13,13 +13,14 @@ per [`AGENTS.md`](AGENTS.md)). When that chunk lands, distill durable facts into
 
 ## Shipped on this branch
 
-- MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs` (Generic).
-- Live options: overlay **enable**; **default flood radius** (0–30, default 20).
+- MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs`.
+- Flat list LABELs: **General** then **Debug**.
+- General: overlay **enable**; **profile** (Point/Player/Ravager, default Player);
+  **default flood radius** (0–30, default 20).
 - Save-on-close → `config/mobwalk.json`; lang `name.*` + `comment.*` (prettyName
   reuses `name.*`).
-- Debug section (flat list LABEL under Generic): **crouch to scroll radius**
-  (default on — off deactivates the gesture); **crouch to see through walls**
-  (default on; borders share that gate).
+- Debug: **crouch to scroll radius**; **crouch to see through walls**; **crouch
+  right-click air to cycle profile** (all default on).
 
 Stack (technical detail in [`docs/settings.md`](docs/settings.md)):
 
@@ -32,9 +33,11 @@ Mods → Configure → GuiConfigsBase → live config options → save on close 
 Add or reorder freely; pick items up via a temporary plan when ready.
 
 - Hotkey open for the config screen.
-- Profiles UI / hitbox library (seeded vanilla + custom; Player default).
+- Profiles UI / hitbox library (seeded vanilla + custom beyond the cycle list).
 - Show hole beams toggle.
 - Keybinds: toggle overlay; cycle profile (vanilla Controls or MaLiLib hotkeys).
+- Config UI: MaLiLib-style All/Generic/Debug filter tabs; camelCase `name.*` +
+  tooltip `comment.*`; rename `defaultRadius` → `floodRadius`.
 - Persist occluder style (K) and surface-height mode (V).
 - HUD settings (offset, duration, colour, anchor).
 - Activation item picker (stick today).

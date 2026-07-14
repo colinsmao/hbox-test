@@ -21,9 +21,10 @@ public final class GuiConfigs extends GuiConfigsBase {
 
 	@Override
 	public List<ConfigOptionWrapper> getConfigs() {
-		// One scrolling list: Generic options, then a Debug LABEL section header,
-		// then Debug options (MaLiLib ConfigOptionWrapper.Type.LABEL).
+		// One scrolling list: General LABEL + Generic options, then Debug LABEL +
+		// Debug options (MaLiLib ConfigOptionWrapper.Type.LABEL).
 		List<ConfigOptionWrapper> list = new ArrayList<>();
+		list.add(new ConfigOptionWrapper(StringUtils.translate("mobwalk.config.general")));
 		list.addAll(ConfigOptionWrapper.createFor(Configs.Generic.OPTIONS));
 		list.add(new ConfigOptionWrapper(StringUtils.translate("mobwalk.config.debug")));
 		list.addAll(ConfigOptionWrapper.createFor(Configs.Debug.OPTIONS));

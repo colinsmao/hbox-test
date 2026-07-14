@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 /**
- * Stage B1: pins the shipped {@link EntityProfile} values (incl. the new
- * {@code height}) and the cycle order. Point keeps {@code height 0} so it stays the
- * pure point-walker / oracle baseline.
+ * Pins the shipped {@link EntityProfile} values and the cycle / MaLiLib
+ * {@link EntityProfile.Option} entries. Point keeps {@code height 0} as the
+ * oracle baseline; settings default is Player.
  */
 final class EntityProfileTest {
 	private static final double EPS = 1.0e-9;
@@ -39,5 +39,36 @@ final class EntityProfileTest {
 		assertEquals(EntityProfile.PLAYER, EntityProfile.POINT.next());
 		assertEquals(EntityProfile.RAVAGER, EntityProfile.PLAYER.next());
 		assertEquals(EntityProfile.POINT, EntityProfile.RAVAGER.next());
+	}
+
+	@Test
+	void optionCycleForward() {
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.POINT.cycle(true));
+		assertEquals(EntityProfile.Option.RAVAGER, EntityProfile.Option.PLAYER.cycle(true));
+		assertEquals(EntityProfile.Option.POINT, EntityProfile.Option.RAVAGER.cycle(true));
+	}
+
+	@Test
+	void optionCycleBackward() {
+		assertEquals(EntityProfile.Option.RAVAGER, EntityProfile.Option.POINT.cycle(false));
+		assertEquals(EntityProfile.Option.POINT, EntityProfile.Option.PLAYER.cycle(false));
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.RAVAGER.cycle(false));
+	}
+
+	@Test
+	void optionFromString() {
+		assertEquals(EntityProfile.Option.POINT, EntityProfile.Option.PLAYER.fromString("point"));
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.POINT.fromString("Player"));
+		assertEquals(EntityProfile.Option.RAVAGER, EntityProfile.Option.POINT.fromString("ravager"));
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.POINT.fromString("nope"));
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.POINT.fromString(null));
+	}
+
+	@Test
+	void optionOfMapsProfile() {
+		assertEquals(EntityProfile.Option.POINT, EntityProfile.Option.of(EntityProfile.POINT));
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.of(EntityProfile.PLAYER));
+		assertEquals(EntityProfile.Option.RAVAGER, EntityProfile.Option.of(EntityProfile.RAVAGER));
+		assertEquals(EntityProfile.Option.PLAYER, EntityProfile.Option.of(null));
 	}
 }
