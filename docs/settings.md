@@ -45,7 +45,7 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `enabled` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
-| `mobProfile` | `ConfigOptionList` | `Player` (`EntityProfile.Option`) | Cycles Point / Player / Ravager. Source of truth for the active flood profile; `setValueChangeCallback` → `reselectWithMobProfile` when a selection is active. |
+| `mobProfile` | `ConfigOptionList` | `Player` (`EntityProfile.Option`) | Cycles the profiles defined in `EntityProfile.Option` (Point / Player / Ravager today). Source of truth for the active flood profile; `setValueChangeCallback` → `reselectWithMobProfile` when a selection is active. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
 
 Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`.

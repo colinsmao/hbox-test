@@ -21,12 +21,12 @@ compiler and stale training data won't hand you.
   decoupled (`Overlay` / `WorldOverlay`); all Fabric-API and GPU contact lives in
   `OverlayManager` / `WorldOverlayManager`, so API churn touches one file.
 
-## Settings (Milestone 7)
+## Settings
 
 Config UI, persistence, and MaLiLib option types live in
 [`settings.md`](settings.md). This file covers how overlays are drawn.
 
-## HUD rendering (Milestone 1)
+## HUD rendering
 
 - Use the current **`HudElementRegistry`** API. The legacy `HudRenderCallback`
   is **deprecated (Fabric API 0.116+) — do not use it.**
@@ -42,12 +42,12 @@ Config UI, persistence, and MaLiLib option types live in
   **single** root HUD element whose render iterates visible overlays. New HUD
   widgets implement `Overlay` and call `OverlayManager.register(...)` — one line.
 - **Transient widgets** gate `isVisible()` on a timer: `RadiusIndicatorOverlay`
-  (the current built-in widget; it replaced the original demo box) shows the
-  flood radius near the crosshair for ~1.5 s after a shift+scroll change, fading
-  out over the last 0.5 s. `show(...)` (client thread) writes `volatile`
-  radius/expiry that `render`/`isVisible` (render thread) read.
+  (the current built-in widget) shows the flood radius near the crosshair for
+  ~1.5 s after a shift+scroll change, fading out over the last 0.5 s.
+  `show(...)` (client thread) writes `volatile` radius/expiry that
+  `render`/`isVisible` (render thread) read.
 
-## In-world rendering (Milestone 2)
+## In-world rendering
 
 - Rendering is split into an **extraction** phase (read game state into an
   immutable snapshot) and a **drawing** phase (emit geometry). Register
@@ -104,10 +104,10 @@ Config UI, persistence, and MaLiLib option types live in
   cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
-  mid-session renderer reload). `CollisionSurfaceOverlay` (Milestone 3, below)
+  mid-session renderer reload). `CollisionSurfaceOverlay` (below)
   is the widget that currently exercises this framework.
 
-## Block-hitbox rendering (Milestone 3–4.5): `CollisionSurfaceOverlay` + `SurfaceSelection`
+## Block-hitbox rendering: `CollisionSurfaceOverlay` + `SurfaceSelection`
 
 Draws the **standable surfaces** of blocks — the upward-facing collision faces an
 entity of a chosen size can stand on — for a region the player selects with a
@@ -144,17 +144,14 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   **downward** (`MutableBlockPos.move(0,-1,0)`, capped and floored at
   `level.getMinY()`) to the first non-empty shape.
 - **Entity profiles + `reach`.** An `EntityProfile(name, width, height, reach)`
-  selects the entity the flood/dilation/headroom use. Three ship, cycled in order
-  **Point** (`width 0`, `height 0` — zero-width point-walker / oracle) → **Player**
-  (`0.6`, `1.8`, `reach 1.2522`, **settings default**) → **Ravager** (`1.95`, `2.2`,
-  `reach 1.2522`); Point keeps `reach 1.0`. `reach` is `max(jump, step)` — Player/
-  Ravager use the documented jump peak `1.2522`. The active profile is
-  `Configs.mobProfile()` (Generic `mobProfile` option). Changing it in the config
-  GUI re-floods an active selection. When Debug `crouchCycleProfile` is on,
-  **sneak + right-click at nothing** clears *and* advances that option, then pings
-  the HUD with the new name. `width` drives dilation and `height` drives headroom
-  (see `geometry.md`). (The separate occluder-style debug key above is unrelated
-  to the profile cycle.)
+  selects the entity the flood/dilation/headroom use (`width` drives dilation,
+  `height` headroom, `reach` the step threshold); the roster, values, and examples
+  live in [`geometry.md`](geometry.md) and are chosen from settings. The active
+  profile is `Configs.mobProfile()` (Generic `mobProfile` option, default
+  **Player**). Changing it in the config GUI re-floods an active selection. When
+  Debug `crouchCycleProfile` is on, **sneak + right-click at nothing** clears *and*
+  advances that option, then pings the HUD with the new name. (The separate
+  occluder-style debug key above is unrelated to the profile cycle.)
 - **Adjustable flood radius (shift+scroll).** Gated by Debug
   `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
   `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
@@ -162,8 +159,8 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   scroll direction (`adjustRadius`), re-floods from the last seed so the change
   is immediate, and returns `false` to cancel the vanilla slot change. When the
   option is off, that gesture is inactive — scroll never changes the radius.
-  The radius is clamped `[0, 20]` and steps by **1 up to 10, then by 2** (`12, 14, …,
-  20`) — the window grows quadratically, so coarse steps keep the high end usable.
+  The radius is clamped `[0, 30]` and steps by **1 up to 10, then by 2** (`12, 14, …,
+  30`) — the window grows quadratically, so coarse steps keep the high end usable.
   Each change pings `RadiusIndicatorOverlay`.
 - **Threading.** The selection is computed only on the client/extraction thread
   (`select`/`clear`); the render thread reads only the immutable snapshot via the
@@ -203,8 +200,8 @@ through-walls, depth-on `SKIRT` occluded).
   self-hide. (A **translucent** block writes no depth and so doesn't occlude a skirt —
   accepted limitation.) Tops/borders draw at **true rect bounds**; only the skirts are
   nudged out by a tiny `SKIRT_OFFSET` (0.002, square) to dodge z-fighting the coplanar
-  terrain face (`Y_OFFSET` is likewise 0.002). *A trapezoidal/dilated skirt was tried
-  and rejected — splaying clipped the block's upper edge and re-introduced overlap.*
+  terrain face (`Y_OFFSET` is likewise 0.002). *Skirts are square, not splayed: a
+  trapezoidal/dilated skirt clips the block's upper edge and re-introduces overlap.*
 - **Skirt-diff, computed compute-side (`computeDownSkirts` / `DownSkirtSpan`).** Any
   rectangle partition of a holed / L-shaped level has *internal* edges between
   equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
@@ -213,14 +210,14 @@ through-walls, depth-on `SKIRT` occluded).
   per-edge 1-D interval subtraction), **and** minus the wall/ceiling occluder sub-spans
   on that edge (they get an upward skirt instead). Partial sharing is handled (a big
   rect's edge shared with a sliver over only part of its length skirts just the unshared
-  remainder); true drops / hole outlines / unshared remainders keep their skirts. This
-  used to run **render-side every frame** (`openSpans`, an `O(n²)` scan over the merged
-  rects per frame — a real hitch on large/bumpy selections); as of **Milestone 5 Step 2**
-  it is computed **compute-side once per select** (`SurfaceSelection.computeDownSkirts`)
-  and published as `DownSkirtSpan`s (edge orientation, side, line, `[lo,hi]`, base `T`),
-  which `emit` just draws. This is the shared drop-edge pass the hole classifier plugs
-  into (a drop span is a hole candidate).
-- **Upward (occluder) skirts — wall-vs-drop classification (Milestone 4.5).** A
+  remainder); true drops / hole outlines / unshared remainders keep their skirts. It is
+  computed **compute-side once per select** (`SurfaceSelection.computeDownSkirts`) and
+  published as `DownSkirtSpan`s (edge orientation, side, line, `[lo,hi]`, base `T`),
+  which `emit` just draws — one pass per select keeps large/bumpy selections smooth
+  (the alternative, an `O(n²)` `openSpans` scan over the merged rects every frame,
+  hitches). This is the shared drop-edge pass the hole classifier plugs into (a drop
+  span is a hole candidate).
+- **Upward (occluder) skirts — wall-vs-drop classification.** A
   surface edge bordering a **wall** (a box rising above the surface) or a **ceiling**
   (an overhang within the entity's headroom) is *not* a drop, so a downward skirt
   there reads wrongly. Such edges instead draw an **upward** skirt — a wall face
@@ -228,9 +225,9 @@ through-walls, depth-on `SKIRT` occluded).
   marker top (every height fades out at the top). Because the wall/drop split needs
   collision-box data the render thread may not query, the classification is done
   **compute-side** (`SurfaceSelection.computeOccluders`, once per stick action) and
-  published as `OccluderSpan`s in the snapshot. As of **Milestone 5 Step 2** the
-  *downward* skirts are computed compute-side too (`computeDownSkirts`, above) with the
-  occluder sub-spans already subtracted, so an edge is never double-skirted; `emit`
+  published as `OccluderSpan`s in the snapshot. The *downward* skirts are computed
+  compute-side too (`computeDownSkirts`, above) with the occluder sub-spans already
+  subtracted, so an edge is never double-skirted; `emit`
   simply draws the published down spans (`emitDownSkirts`) and the published occluder
   spans as upward skirts (`emitOccluders`). Each span carries its orientation, **side**
   (so the
@@ -239,7 +236,7 @@ through-walls, depth-on `SKIRT` occluded).
   `[lo,hi]` interval, the base height `T`, and the occluder top. The marker sits at
   the **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
   `W = 0`, at the face). This per-edge wall-vs-drop classification is the
-  **prerequisite for Milestone 5 (hole detection)**: the drop-classified edges are the
+  **prerequisite for hole detection**: the drop-classified edges are the
   hole candidates.
 - **Occluder-marker debug style (`cycleOccluderStyle` + a keybind).** The final
   upward-marker look is being A/B'd in-game: a **standalone keybind** (default `K`,
@@ -270,9 +267,9 @@ through-walls, depth-on `SKIRT` occluded).
   the palette doesn't shift when toggling. Because the flag gates the compute,
   `toggleVisualTop()` **re-floods** from the last seed (cheap: toggling is rare) and
   pings the HUD (`surface: visible` / `surface: collision`). All walkability math is
-  unaffected (collision-top only); this is purely where the paint is drawn. Session-only
-  this milestone (resets to on at relaunch; a persisted setting lands with the Milestone
-  7 config).
+  unaffected (collision-top only); this is purely where the paint is drawn. The toggle
+  is session-only (resets to on at relaunch); a persisted setting can land with the
+  config stack.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
   `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
   blended toward **grey** (`greyBlend`), so a depth-cutoff reads differently from a
@@ -290,7 +287,7 @@ through-walls, depth-on `SKIRT` occluded).
   grey and perimeter suppression. Down-skirt spans and hole beams at the frontier
   (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
   real geometry.
-- **Hole beams (Milestone 5).** A drop edge the classifier labels a **hole** (a mob
+- **Hole beams.** A drop edge the classifier labels a **hole** (a mob
   leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **vertical
   beam** from the cliff-edge top `T`. Appearance `showBeamsThroughWalls` (default on)
   routes it to a dedicated depth-off `BEAM` layer (same pipeline as crouch-gated tops)
@@ -332,8 +329,8 @@ through-walls, depth-on `SKIRT` occluded).
   (`emitOccluders`, the side-based interior nudge, the four debug styles +
   `cycleOccluderStyle`), and the **hole beams** (`emitHoles`, from
   `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
-  `showBeamsThroughWalls`) — `emit` no longer computes any edge
-  spans per frame — the cyclic depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
+  `showBeamsThroughWalls`) — `emit` draws only the published spans — the cyclic
+  depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
   band), the level-identity reset,
   `volatile` snapshot/occluder/down-skirt/hole/crouch/style handoff, and the
   double-sided-winding requirement.
@@ -360,8 +357,8 @@ through-walls, depth-on `SKIRT` occluded).
   **compute-side occluder-span classification** (`computeOccluders` /
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
   `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
-  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **Milestone 5
-  hole classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
+  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **hole
+  classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
   strictly below the rim under the fall footprint, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,
   the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` / `holeSubSpans`
@@ -371,7 +368,7 @@ through-walls, depth-on `SKIRT` occluded).
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
 - `WorldOverlayManager.java`: three-layer setup (depth-off `FILLED` tops,
   depth-on `SKIRT`, depth-off `BEAM` last), single draw at `AFTER_TRANSLUCENT_TERRAIN` (ice/honey
-  composite; pond bottoms via crouch — see Milestone 2 translucent decision),
+  composite; pond bottoms via crouch — see the translucent-phase decision),
   per-layer buffer/GPU handoff, the through-walls debug aid, the
   `CLIENT_STOPPING`-vs-mixin GPU-cleanup trade-off, the camera-relative
   translate, and the use-key-edge-vs-`UseItemCallback` debounce.

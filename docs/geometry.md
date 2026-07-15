@@ -14,7 +14,7 @@ A standable surface is a
 coordinates (the owning `BlockPos` folded in). `topY` is the **collision** top that
 all math below is keyed on; `visualTopY` is a **draw-only** raise for blocks that
 render taller than they collide (see [Visible-face top vs collision
-top](#visible-face-top-vs-collision-top-milestone-6)) and equals `topY` for
+top](#visible-face-top-vs-collision-top)) and equals `topY` for
 everything else — nothing in the geometry layer reads it. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
 epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose: width dilation
@@ -170,14 +170,14 @@ the radius budget, which can cut off a very long winding path. So a shallow
 (`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
 the width rule you need a gap that is **deeper than `reach` or over the void**.
 **Entity-height headroom** is
-now modelled (rule 1 / Milestone 4.5: a top survives only where `(T, T+H]` is clear),
+modelled (rule 1: a top survives only where `(T, T+H]` is clear),
 so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
-classification builds on this in **Milestone 5** (below): the flood still only paints
+classification builds on this (below): the flood still only paints
 *coverage*, and a separate predicate reads that coverage to label each drop edge.
 
-## Hole classification (Milestone 5)
+## Hole classification
 
-Milestone 5 **reads the flood output** to label the
+Hole classification **reads the flood output** to label the
 **drop edges** of the selection (the `openSpans` edges that are neither equal-height
 merge seams nor wall/ceiling up-skirts). One pure predicate,
 `SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
@@ -233,7 +233,7 @@ matter extend at most ~1.5 upward from their block Y, so they sit in
 block's collision grows past that, or if a multi-block pillar's lowest piece sits
 further below.
 
-## Visible-face top vs collision top (Milestone 6)
+## Visible-face top vs collision top
 
 Everything above derives from `getCollisionShape`, so `StandableRect.topY` is the
 collision `yMax`. A handful of blocks **render taller than they collide** — soul
@@ -297,19 +297,21 @@ visual footprint if it ever becomes worth it.
 ## Entity profiles (size + headroom)
 
 `EntityProfile(name, width, height, reach)` selects the entity the flood is computed
-for. Three ship, cycled Point → Player → Ravager:
+for. The profile is chosen live via the `mobProfile` setting (see
+[`settings.md`](settings.md)); the shipped roster is defined in `EntityProfile.Option`,
+so it grows there rather than in a table duplicated here.
 
-| Profile | width `W` | height `H` | reach |
-| ------- | --------- | ---------- | ----- |
-| Point   | 0.0       | 0.0        | 1.0   |
-| Player  | 0.6       | 1.8        | 1.0   |
-| Ravager | 1.95      | 2.2        | 1.0   |
+Each field drives one part of the math: `W` drives dilation (above), `H` drives
+headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`, which also
+sets the downward-skirt depth and the upward-skirt clamp. Widths and heights are the
+vanilla hitbox sizes: doubles, not `1/16`-aligned, consistent with the rect-space
+model. Two examples anchor the range:
 
-`W` drives dilation (above); `H` drives headroom (rule 1); `reach` is the step
-threshold (and sets the downward-skirt depth + the upward-skirt clamp). Heights
-are the vanilla hitbox heights — doubles, not `1/16`-aligned, consistent with the
-rect-space model. **Point keeps `H = 0`** so it stays the pure point-walker and the
-eager-vs-lazy oracle baseline.
+- **Player** — `W = 0.6`, `H = 1.8`, `reach = 1.2522` (the documented living-entity
+  jump peak, shared by the larger Ravager).
+- **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
+  zero height reduces headroom to the buried test, so Point stays the pure
+  point-walker and the eager-vs-lazy oracle baseline.
 
 ## Appendix A: rejected pixel raster
 
