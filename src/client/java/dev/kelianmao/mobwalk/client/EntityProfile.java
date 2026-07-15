@@ -8,16 +8,19 @@ import fi.dy.masa.malilib.config.IConfigOptionListEntry;
  * {@code width} fully describes the horizontal extent; {@code reach} is the
  * walkable height threshold (see {@code docs/geometry.md} "Reachability model").
  *
- * <p>Three profiles ship, cycled in order ({@link #next()} / {@link Option}):
- * {@link #POINT} (width 0), {@link #PLAYER} (0.6, the settings default),
- * {@link #RAVAGER} (1.95). {@code width 0} makes config-space dilation a no-op, so
- * {@code POINT} reproduces the pre-profile point-particle behavior — the oracle
- * baseline. {@code width} drives dilation; {@code height} drives headroom.
+ * <p>Builtin seeds (roster order) live here as constants; enable flags and the
+ * live cycle are owned by {@link ProfileRoster}. {@link #next()} /
+ * {@link Option} still cycle the original three (Point / Player / Ravager) until
+ * settings wires the roster.
+ *
+ * <p>{@code width 0} makes config-space dilation a no-op, so {@link #POINT}
+ * reproduces the pre-profile point-particle behavior — the oracle baseline.
+ * {@code width} drives dilation; {@code height} drives headroom.
  *
  * <p>{@code reach} is {@code max(jump, step)}: two surfaces connect when
- * {@code |dTopY| <= reach}. {@link #PLAYER} and {@link #RAVAGER} use
- * {@link #DEFAULT_JUMP_REACH} (documented living-entity jump peak); {@link #POINT}
- * keeps {@code 1.0} as the geometric oracle.
+ * {@code |dTopY| <= reach}. Living-entity builtins use
+ * {@link #DEFAULT_JUMP_REACH}; {@link #POINT} keeps {@code 1.0} as the geometric
+ * oracle. Reach is the profile’s fixed vertical threshold only (see geometry.md).
  *
  * <p>{@code height} is the entity's hitbox height (vanilla values; doubles, not
  * {@code 1/16}-quantized — see {@code docs/geometry.md}). It drives the
@@ -37,8 +40,13 @@ public record EntityProfile(String name, double width, double height, double rea
 	public static final EntityProfile POINT = new EntityProfile("Point", 0.0, 0.0, 1.0);
 	public static final EntityProfile PLAYER = new EntityProfile("Player", 0.6, 1.8, DEFAULT_JUMP_REACH);
 	public static final EntityProfile RAVAGER = new EntityProfile("Ravager", 1.95, 2.2, DEFAULT_JUMP_REACH);
+	public static final EntityProfile WARDEN = new EntityProfile("Warden", 0.9, 2.9, DEFAULT_JUMP_REACH);
+	/** JE Zombie and Witch share {@code 0.6 × 1.95}. */
+	public static final EntityProfile ZOMBIE_WITCH =
+		new EntityProfile("Zombie/Witch", 0.6, 1.95, DEFAULT_JUMP_REACH);
+	public static final EntityProfile SKELETON = new EntityProfile("Skeleton", 0.6, 1.99, DEFAULT_JUMP_REACH);
 
-	// Cycle order for settings / sneak+right-click-at-nothing.
+	// Legacy three-way cycle for settings / sneak+right-click until ProfileRoster wires in.
 	private static final EntityProfile[] CYCLE = {POINT, PLAYER, RAVAGER};
 
 	/** The next profile in the cycle ({@code Point -> Player -> Ravager -> Point}). */

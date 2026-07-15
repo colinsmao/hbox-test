@@ -46,6 +46,13 @@ Config UI, persistence, and MaLiLib option types live in
   ~1.5 s after a shift+scroll change, fading out over the last 0.5 s.
   `show(...)` (client thread) writes `volatile` radius/expiry that
   `render`/`isVisible` (render thread) read.
+- **GUI scale:** `Overlay` widgets lay out in GUI coordinates
+  (`Window.getGuiScaledWidth` / `getGuiScaledHeight`, default `Font`) under
+  `HudElementRegistry`, so they track Video Settings **GUI Scale** (including
+  Auto) with the rest of the HUD — including the radius/profile toggle flash.
+  The applied integer factor (framebuffer pixels per GUI unit) is
+  `Window.getGuiScale()`; use it when converting between framebuffer and GUI
+  space.
 
 ## In-world rendering
 

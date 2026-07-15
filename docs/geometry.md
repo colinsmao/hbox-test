@@ -164,7 +164,10 @@ Reach is a **single threshold** (`profile.reach()` = `max(jump, step)`): two sur
 connect when their height difference is `<= reach`, anything deeper does not.
 **Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
 the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
-**`1.0`**. Reachability is plain yes/no — a location is reachable from the seed or it is not —
+**`1.0`**. That value is the profile’s fixed vertical threshold only — the flood
+does not model horizontal jump distance (parkour), and it does not apply block or
+effect modifiers to jump height (honey, slime-block bounce, Jump Boost, and
+similar). Reachability is plain yes/no — a location is reachable from the seed or it is not —
 so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
 the radius budget, which can cut off a very long winding path. So a shallow
 (`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
