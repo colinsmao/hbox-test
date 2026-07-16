@@ -25,7 +25,8 @@ The main widget is the **standable-surface selection** (`CollisionSurfaceOverlay
 walkable terrain within a spatial radius, painting every surface the chosen entity
 could stand on. The flood is **entity-size aware** — width dilation closes gaps
 smaller than the entity, and height headroom drops floors under low ceilings — for the
-profile chosen in settings (Point / Player / Ravager). The geometry and the
+profile chosen in settings (builtin roster: Point / Player / Ravager / Warden /
+Zombie-Witch / Skeleton, plus enable toggles). The geometry and the
 output-sensitive flood live in `[geometry.md](geometry.md)`.
 
 Each reached surface draws as a height-tinted top fill with edge markers that read the
@@ -47,7 +48,8 @@ radius, **sneak + right-click at nothing** cycles the profile, **crouch** reveal
 surfaces through walls, and `/mobwalk dump` writes a one-shot geometry dump. A HUD
 readout shows the flood radius after a change. Behavior is configured from a MaLiLib
 settings screen (General / Appearance / Debug) reachable via ModMenu → Configure and
-persisted to `config/mobwalk.json`; see `[settings.md](settings.md)`.
+persisted to `config/mobwalk.json`; General’s `Edit Built-in Profiles` button
+edits enables and cycle order; see `[settings.md](settings.md)`.
 
 ## Status & milestones
 
@@ -72,7 +74,8 @@ land here.
 compute-side and subdivided so only the unsafe portion of an edge beams.
 - **M6 / 6.5 — bug fixes**: 2-block grey cutoff ring, visible-face surface height, flood seeded from the clicked block's tops, the documented jump reach, and `/mobwalk dump`.
 - **M7 — settings (in progress)**: MaLiLib + ModMenu config screen with
-General / Appearance / Debug tabs, live apply, and save-on-close; see
+General / Appearance / Debug tabs, live apply, save-on-close, and General
+**Built-in Profiles** roster (enables + order, soft-disable); see
 `[settings.md](settings.md)`.
 
 
@@ -230,8 +233,8 @@ settings help is a separate publish-time doc).
 The overlay frameworks (see `[rendering.md](rendering.md)`) are designed to make
 these incremental:
 
-- **Custom entity profiles:** a settings-managed profile roster (seeded vanilla +
-custom sizes) beyond the shipped Point / Player / Ravager in `EntityProfile.Option`.
+- **Custom entity profiles:** up to three editable custom rows on the same
+Built-in Profiles dialog (Player-seeded defaults), beyond the shipped builtin roster.
 - **Keybinds:** `KeyBindingHelper` to toggle overlays; persist the occluder-style
 (`K`) and surface-height (`V`) toggles as settings.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;

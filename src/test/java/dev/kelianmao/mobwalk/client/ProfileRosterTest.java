@@ -157,7 +157,7 @@ final class ProfileRosterTest {
 	}
 
 	@Test
-	void sanitizeWrongBuiltinCountReseeds() {
+	void sanitizeWrongBuiltinCountAppendsMissingInSeedOrder() {
 		SanitizeResult result = ProfileRoster.sanitize(
 			List.of(new RawBuiltinRow("Player", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
 			List.of(),
@@ -165,8 +165,34 @@ final class ProfileRosterTest {
 		);
 		assertTrue(result.repaired());
 		assertEquals(6, result.roster().builtins().size());
+		assertEquals(
+			List.of("player", "point", "ravager", "warden", "zombie", "skeleton"),
+			result.roster().builtins().stream().map(ProfileRoster.Entry::id).toList()
+		);
 		assertTrue(enabled(result.roster(), "player"));
 		assertFalse(enabled(result.roster(), "point"));
+	}
+
+	@Test
+	void sanitizePreservesRawBuiltinOrderForCycle() {
+		List<RawBuiltinRow> reordered = defaultRawBuiltins();
+		// Player then Point … (swap first two)
+		RawBuiltinRow point = reordered.get(0);
+		RawBuiltinRow player = reordered.get(1);
+		reordered.set(0, player);
+		reordered.set(1, point);
+		SanitizeResult result = ProfileRoster.sanitize(reordered, List.of(), "player");
+		assertFalse(result.repaired());
+		ProfileRoster roster = result.roster();
+		assertEquals(
+			List.of("player", "point", "ravager", "warden", "zombie", "skeleton"),
+			roster.builtins().stream().map(ProfileRoster.Entry::id).toList()
+		);
+		assertEquals(
+			List.of("player", "ravager", "warden", "zombie"),
+			roster.enabledEntries().stream().map(ProfileRoster.Entry::id).toList()
+		);
+		assertEquals(Optional.of("ravager"), roster.cycle("player"));
 	}
 
 	@Test

@@ -44,30 +44,61 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `enabled` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
-| `mobProfile` | `ConfigOptionList` | `Player` (`EntityProfile.Option`) | Cycles the profiles defined in `EntityProfile.Option` (Point / Player / Ravager today). Source of truth for the active flood profile; `setValueChangeCallback` → `reselectWithMobProfile` when a selection is active. |
+| `enableRendering` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
+| `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
+| `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens MaLiLib `GuiTableEdit` (button `Edit Built-in Profiles`). **Not** dumped as a full table in JSON — see Builtin profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
 
-Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`.
+Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
+`Configs.roster()`, `Configs.hasEnabledProfile()`, `Configs.isRenderingEnabled()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
 entry still overrides. No `prettyName.*` — MaLiLib falls back to `splitCamelCase`
-for toggle messages.
+for toggle messages. Profiles button label:
+`mobwalk.config.profiles.button.builtinProfiles`.
 
-`config_version` (`1`) is written beside the category objects in `mobwalk.json`.
+`config_version` (`3`) is written beside the category objects in `mobwalk.json`.
+
+## Builtin profiles (General popup)
+
+JSON category `"Profiles"` holds slim `builtinProfiles`: an ordered array of
+`{"id","enabled"}` (geometry is code-owned). The General row button opens a
+`ConfigTable` dialog: On/Off + locked Name / Width / Height / Vertical Reach for
+Point, Player, Ravager, Warden, Zombie/Witch, Skeleton — rebuilt from
+`ProfileRoster.BUILTIN_SEEDS` plus that slim state on load.
+
+- **Roster order** follows current table row order (reorder is real for cycle /
+fallback). Sanitize keeps known rows in table order and appends any missing seeds.
+- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Point / Skeleton
+Off. Geometry is code-owned (seed sizes); only enables and order are player-editable.
+- **Hand-edit recovery:** unknown ids dropped; missing seed ids re-appended with
+default enables on load/sync.
+- **Soft-disable:** every profile Off → `hasEnabledProfile()` false; overlay select
+floods stay off; stick air- or block-click pings HUD `no profiles active`;
+`enableRendering` is unchanged. Shift+scroll radius still works.
+- **ConfigTable RESET enable:** MaLiLib `ConfigTable.isModified()` compares defaults
+to a stale `lastTable` after popup edits. Use `Configs.configTableIsModified(table)`
+(live rows vs defaults) for RESET enable on any ConfigTable. The
+`Edit Built-in Profiles` row uses Cancel (same spot) + Confirm (to the right) via
+`ConfirmResetConfigOption`; Confirm calls `resetToDefault()` then
+`Configs.syncAfterBuiltinProfilesReset()`.
+
+Key types: `ProfileRoster`, `RosterProfileOption`, `Configs.Profiles`.
 
 ## Screen layout
 
 `GuiConfigs` implements `IConfigGuiAllTab` with filter buttons (not inline LABELs):
 
 - **All** — General → Appearance → Debug (default tab)
-- **General** — `Configs.Generic.OPTIONS` (JSON category stays `"Generic"`)
+- **General** — `Configs.Generic.OPTIONS` (JSON category stays `"Generic"`; includes
+`Edit Built-in Profiles`)
 - **Appearance** — `Configs.Appearance.OPTIONS`
 - **Debug** — `Configs.Debug.OPTIONS`
 
 Tab button lang: `mobwalk.gui.button.config_gui.general` / `.appearance` / `.debug`
-(All uses MaLiLib’s `IConfigGuiAllTab` key).
+(All uses MaLiLib’s `IConfigGuiAllTab` key). ConfigTable RESET Cancel/Confirm:
+`mobwalk.gui.button.reset_cancel` / `.reset_confirm`.
 
 ## Live Appearance options
 

@@ -269,7 +269,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public boolean isVisible() {
-		return Configs.isOverlayEnabled() && holdingStick && !snapshot.isEmpty();
+		return Configs.isRenderingEnabled()
+			&& Configs.hasEnabledProfile()
+			&& holdingStick
+			&& !snapshot.isEmpty();
 	}
 
 	/**
@@ -282,11 +285,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return;
 		}
 		selectionRadius = updated;
-		Level level = Minecraft.getInstance().level;
-		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
-			publish();
-		}
+		reselectWithMobProfile();
 	}
 
 	/**
@@ -295,10 +294,18 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	 */
 	public void reselectWithMobProfile() {
 		Level level = Minecraft.getInstance().level;
-		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
+		var profile = Configs.mobProfile();
+		if (level != null && lastSeed != null && profile.isPresent()) {
+			cache.select(level, lastSeed, selectionRadius, profile.get(), useVisualTop);
 			publish();
 		}
+	}
+
+	/** Soft-disabled roster: drop any leftover selection so draw stays off. */
+	public void clearSelectionForSoftDisable() {
+		cache.clear();
+		lastSeed = null;
+		publish();
 	}
 
 	@Override
@@ -333,18 +340,28 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, selectionRadius, Configs.mobProfile(), useVisualTop);
-			lastSeed = start;
+			if (!Configs.hasEnabledProfile()) {
+				OverlayManager.radiusIndicator().showProfile("no profiles active");
+			} else {
+				var profile = Configs.mobProfile();
+				if (profile.isPresent()) {
+					cache.select(level, start, selectionRadius, profile.get(), useVisualTop);
+					lastSeed = start;
+				}
+			}
 		} else {
-			// Right-click at nothing clears. When Debug crouchCycleProfile is on,
-			// sneaking also advances the settings profile and pings the HUD;
-			// lastSeed stays null so there is no re-flood — the new profile takes
-			// effect on the next select.
+			// Right-click at nothing clears. Soft-disabled: HUD "no profiles active".
+			// Otherwise when Debug crouchCycleProfile is on, sneaking advances the
+			// roster profile and pings the HUD; lastSeed stays null so there is no
+			// re-flood — the new profile takes effect on the next select.
 			cache.clear();
 			lastSeed = null;
-			if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
-				EntityProfile next = Configs.cycleMobProfile();
-				OverlayManager.radiusIndicator().showProfile(next.name());
+			if (!Configs.hasEnabledProfile()) {
+				OverlayManager.radiusIndicator().showProfile("no profiles active");
+			} else if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
+				Configs.cycleMobProfile().ifPresent(next ->
+					OverlayManager.radiusIndicator().showProfile(next.name())
+				);
 			}
 		}
 		publish();
@@ -377,11 +394,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, selectionRadius + dir * step));
 		if (updated != selectionRadius) {
 			selectionRadius = updated;
-			Level level = Minecraft.getInstance().level;
-			if (level != null && lastSeed != null) {
-				cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
-				publish();
-			}
+			reselectWithMobProfile();
 		}
 		return selectionRadius;
 	}
@@ -403,11 +416,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Returns the new state for the on-screen ping.
 	public boolean toggleVisualTop() {
 		useVisualTop = !useVisualTop;
-		Level level = Minecraft.getInstance().level;
-		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
-			publish();
-		}
+		reselectWithMobProfile();
 		return useVisualTop;
 	}
 
@@ -418,11 +427,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	 */
 	public FloodDebugCounts dumpFloodDebug() {
 		Level level = Minecraft.getInstance().level;
-		if (level == null || lastSeed == null) {
+		var profile = Configs.mobProfile();
+		if (level == null || lastSeed == null || profile.isEmpty()) {
 			return null;
 		}
 		cache.requestDebugDump();
-		cache.select(level, lastSeed, selectionRadius, Configs.mobProfile(), useVisualTop);
+		cache.select(level, lastSeed, selectionRadius, profile.get(), useVisualTop);
 		publish();
 		return new FloodDebugCounts(
 			cache.allRects().size(),
@@ -444,7 +454,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		int limit = depthLimit;
-		float skirtDepth = (float) (Configs.mobProfile().reach() + SKIRT_MARGIN);
+		float skirtDepth = (float) (Configs.mobProfile()
+			.map(EntityProfile::reach)
+			.orElse(EntityProfile.DEFAULT_JUMP_REACH) + SKIRT_MARGIN);
 
 		for (StandableRect rect : rects) {
 			if (!Configs.showCutoffRing() && inCutoffRing(rect.depth(), limit)) {

@@ -1,62 +1,44 @@
 {
-
   "mobwalk.gui.title.configs": "MobWalk Configs",
 
-
-
-  "mobwalk.gui.button.config_gui.general": "General",
-
+	"mobwalk.gui.button.config_gui.general": "General",
   "mobwalk.gui.button.config_gui.appearance": "Appearance",
-
   "mobwalk.gui.button.config_gui.debug": "Debug",
 
+  "mobwalk.gui.button.reset_cancel": "Cancel",
+  "mobwalk.gui.button.reset_confirm": "Confirm",
 
+  "mobwalk.config.generic.comment.enableRendering": "If enabled, shows the standable-surface overlay when holding a stick.",
 
-  "mobwalk.config.generic.comment.enabled": "If enabled, shows the standable-surface overlay when holding a stick.",
-
-
-
-  "mobwalk.config.generic.comment.mobProfile": "Which mob hitbox and vertical jump distance the walkable area is calculated for. Does NOT account for horizontal movement when jumping (ie parkour).",
-
-
+  "mobwalk.config.generic.comment.mobProfile": "Which mob's hitbox and vertical reach to use when calculating walkable area. Cycles enabled mob profiles only. Does NOT account for horizontal movement when jumping (ie parkour).",
 
   "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block. Large values may impact performance.",
 
+  "mobwalk.config.profiles.button.builtinProfiles": "Edit Built-in Profiles",
 
+  "mobwalk.config.profiles.table.enabled": "Enabled",
+  "mobwalk.config.profiles.table.name": "Name",
+  "mobwalk.config.profiles.table.width": "Width",
+  "mobwalk.config.profiles.table.height": "Height",
+  "mobwalk.config.profiles.table.verticalReach": "Vertical Reach",
+
+  "mobwalk.config.profiles.comment.builtinProfiles": "Select built-in mob profiles (hitbox + vertical reach).",
 
   "mobwalk.config.appearance.comment.walkableColor": "Color and transparency of walkable surfaces.",
 
-
-
   "mobwalk.config.appearance.comment.showBeamsThroughWalls": "If enabled, shows beams through solid blocks.",
-
-
 
   "mobwalk.config.appearance.comment.showHoleBeams": "If enabled, draws vertical beams at holes (drops a mob cannot escape).",
 
-
-
   "mobwalk.config.appearance.comment.holeBeamColor": "Color and transparency of hole beams.",
-
-
 
   "mobwalk.config.debug.comment.crouchSeeThroughWalls": "If enabled, while crouching, shows walkable surfaces through walls.",
 
-
-
   "mobwalk.config.debug.comment.crouchScrollRadius": "If enabled, while crouching with a stick, scrolling changes the flood radius.",
-
-
 
   "mobwalk.config.debug.comment.crouchCycleProfile": "If enabled, while crouching with a stick, right-clicking air cycles the mob profile.",
 
-
-
   "mobwalk.config.debug.comment.shadeByDepth": "If enabled, colors surfaces by the BFS flood depth from the seed. Mostly for debugging connectivity, as the rainbow hues are distracting.",
 
-
-
-  "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the grey outermost flood-radius rings (inconclusive neighbor relationships)."
-
+  "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the outermost flood-radius ring in grey (inconclusive neighbor relationships)."
 }
-

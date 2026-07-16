@@ -7,12 +7,11 @@ import java.util.Optional;
 
 /**
  * Builtin + custom profile roster: enable flags, cycle order, active-id resolve,
- * and sanitize of raw table snapshots. UI / MaLiLib wiring lands in a later step;
- * this type is pure logic (unit-tested).
+ * and sanitize of raw table snapshots.
  *
- * <p>Roster order: Point → Player → Ravager → Warden → Zombie/Witch → Skeleton →
- * custom0… Soft-disabled when no entry is enabled ({@link #hasEnabledProfile()}
- * is false); flood/cycle callers gate on that.
+ * <p>Default builtin order is {@link #BUILTIN_SEEDS}; after load/edit, builtin
+ * order follows the Profiles table (reorder is real for cycle). Soft-disabled when
+ * no entry is enabled ({@link #hasEnabledProfile()} is false).
  */
 public final class ProfileRoster {
 	public static final int MAX_CUSTOMS = 3;
@@ -171,12 +170,20 @@ public final class ProfileRoster {
 	}
 
 	/**
-	 * Next enabled id after {@code currentId} (wrap). Same id when fewer than two
-	 * enabled entries; empty when soft-disabled. If {@code currentId} is missing
-	 * or disabled, returns the first enabled id (same as
+	 * Next enabled id after {@code currentId} (wrap forward). Same id when fewer
+	 * than two enabled entries; empty when soft-disabled. If {@code currentId} is
+	 * missing or disabled, returns the first enabled id (same as
 	 * {@link #resolveActiveId}).
 	 */
 	public Optional<String> cycle(String currentId) {
+		return cycle(currentId, true);
+	}
+
+	/**
+	 * Cycle enabled ids. {@code forward == false} walks backward. Empty when
+	 * soft-disabled; single enabled entry returns that id.
+	 */
+	public Optional<String> cycle(String currentId, boolean forward) {
 		List<Entry> enabled = enabledEntries();
 		if (enabled.isEmpty()) {
 			return Optional.empty();
@@ -194,7 +201,10 @@ public final class ProfileRoster {
 		if (idx < 0) {
 			return Optional.of(enabled.getFirst().id());
 		}
-		return Optional.of(enabled.get((idx + 1) % enabled.size()).id());
+		int next = forward
+			? (idx + 1) % enabled.size()
+			: (idx - 1 + enabled.size()) % enabled.size();
+		return Optional.of(enabled.get(next).id());
 	}
 
 	/**
@@ -211,9 +221,9 @@ public final class ProfileRoster {
 
 	/**
 	 * Repair raw table snapshots into a valid roster. Builtin geometry is always
-	 * overwritten from {@link #BUILTIN_SEEDS}; enables are preserved when a row
-	 * matches a seed by id or display name. Customs are capped at
-	 * {@link #MAX_CUSTOMS}; bad / non-finite sizes are clamped or dropped.
+	 * taken from {@link #BUILTIN_SEEDS}; enables and <b>row order</b> follow the
+	 * raw builtin list (unknown/duplicate rows dropped; missing seeds appended in
+	 * seed order). Customs are capped at {@link #MAX_CUSTOMS}.
 	 */
 	public static SanitizeResult sanitize(
 		List<RawBuiltinRow> rawBuiltins,
@@ -222,27 +232,40 @@ public final class ProfileRoster {
 	) {
 		boolean repaired = false;
 		List<Entry> builtins = new ArrayList<>(BUILTIN_SEEDS.size());
+		java.util.LinkedHashSet<String> seenIds = new java.util.LinkedHashSet<>();
 
-		if (rawBuiltins == null || rawBuiltins.size() != BUILTIN_SEEDS.size()) {
+		if (rawBuiltins == null) {
 			repaired = true;
+		} else {
+			for (RawBuiltinRow row : rawBuiltins) {
+				if (row == null) {
+					repaired = true;
+					continue;
+				}
+				BuiltinSeed seed = findSeedByName(row.name());
+				if (seed == null) {
+					repaired = true;
+					continue;
+				}
+				if (!seenIds.add(seed.id())) {
+					repaired = true;
+					continue;
+				}
+				if (!geometryMatches(row, seed.profile())) {
+					repaired = true;
+				}
+				if (!canonicalName(row.name(), seed)) {
+					repaired = true;
+				}
+				builtins.add(new Entry(seed.id(), seed.profile(), row.enabled(), true));
+			}
 		}
 
-		for (int i = 0; i < BUILTIN_SEEDS.size(); i++) {
-			BuiltinSeed seed = BUILTIN_SEEDS.get(i);
-			boolean enabled = seed.defaultEnabled();
-			RawBuiltinRow matched = matchBuiltin(rawBuiltins, seed);
-			if (matched != null) {
-				enabled = matched.enabled();
-				if (!geometryMatches(matched, seed.profile())) {
-					repaired = true;
-				}
-				if (!namesMatch(matched.name(), seed)) {
-					repaired = true;
-				}
-			} else {
+		for (BuiltinSeed seed : BUILTIN_SEEDS) {
+			if (seenIds.add(seed.id())) {
 				repaired = true;
+				builtins.add(new Entry(seed.id(), seed.profile(), seed.defaultEnabled(), true));
 			}
-			builtins.add(new Entry(seed.id(), seed.profile(), enabled, true));
 		}
 
 		List<Entry> customs = new ArrayList<>();
@@ -283,26 +306,27 @@ public final class ProfileRoster {
 				repaired = true;
 			}
 			if (kept.isEmpty() && resolved.isEmpty()) {
-				// Soft-disabled with a stale active id — treat as repair so save can clear it.
 				repaired = true;
 			}
 		}
 		return new SanitizeResult(roster, repaired, resolved);
 	}
 
-	private static RawBuiltinRow matchBuiltin(List<RawBuiltinRow> rawBuiltins, BuiltinSeed seed) {
-		if (rawBuiltins == null) {
+	private static BuiltinSeed findSeedByName(String name) {
+		if (name == null || name.isBlank()) {
 			return null;
 		}
-		for (RawBuiltinRow row : rawBuiltins) {
-			if (row == null) {
-				continue;
-			}
-			if (namesMatch(row.name(), seed)) {
-				return row;
+		for (BuiltinSeed seed : BUILTIN_SEEDS) {
+			if (namesMatch(name, seed)) {
+				return seed;
 			}
 		}
 		return null;
+	}
+
+	/** True when the raw name is already the canonical display name. */
+	private static boolean canonicalName(String name, BuiltinSeed seed) {
+		return name != null && name.trim().equals(seed.profile().name());
 	}
 
 	private static boolean namesMatch(String name, BuiltinSeed seed) {
@@ -313,7 +337,6 @@ public final class ProfileRoster {
 		if (n.equalsIgnoreCase(seed.id()) || n.equalsIgnoreCase(seed.profile().name())) {
 			return true;
 		}
-		// Accept "Zombie" / "Witch" as the combined seed.
 		if ("zombie".equals(seed.id())) {
 			return n.equalsIgnoreCase("Zombie")
 				|| n.equalsIgnoreCase("Witch")
