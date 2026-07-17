@@ -4,25 +4,30 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import net.minecraft.client.gui.screens.Screen;
+
 import fi.dy.masa.malilib.config.IConfigResettable;
 import fi.dy.masa.malilib.config.options.table.ConfigTable;
+import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.gui.button.IButtonActionListener;
+import fi.dy.masa.malilib.gui.interfaces.IConfigGui;
 import fi.dy.masa.malilib.gui.interfaces.IConfigGuiAllTab;
 import fi.dy.masa.malilib.gui.interfaces.IKeybindConfigGui;
 import fi.dy.masa.malilib.gui.widgets.WidgetConfigOption;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptions;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptionsBase;
+import fi.dy.masa.malilib.util.GuiUtils;
 import fi.dy.masa.malilib.util.StringUtils;
 
 import dev.kelianmao.mobwalk.MobWalk;
 
 /**
  * MaLiLib settings screen (ModMenu Configure entry). Filter tabs: All / General /
- * Appearance / Debug. "Edit Built-in Profiles" opens from General. ConfigTable
- * rows that need confirm-to-reset use {@link ConfirmResetConfigOption}.
+ * Appearance / Debug. "Edit Built-in Profiles" / "Edit Custom Profiles" open from
+ * General. ConfigTable rows that need confirm-to-reset use {@link ConfirmResetConfigOption}.
  */
 public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab {
 	private static ConfigGuiTab tab = ConfigGuiTab.ALL;
@@ -185,13 +190,14 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 		protected void addConfigButtonEntry(
 			int x, int y, IConfigResettable config, ButtonBase button
 		) {
-			if (!(config instanceof ConfigTable table) || config != Configs.Profiles.BUILTIN_PROFILES) {
+			if (!(config instanceof ConfigTable table)
+				|| (config != Configs.Profiles.BUILTIN_PROFILES
+					&& config != Configs.Profiles.CUSTOM_PROFILES)) {
 				super.addConfigButtonEntry(x, y, config, button);
 				return;
 			}
 
 			this.table = table;
-			this.configButton = button;
 			this.idleEntryWidth = this.getWidth();
 			this.resetButton = this.createResetButton(x, y, config);
 			this.resetIdleX = this.resetButton.getX();
@@ -199,9 +205,25 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 			// MaLiLib ConfigTable.isModified() is stale after popup edits; use live compare.
 			this.resetButton.setEnabled(Configs.configTableIsModified(this.table));
 
-			this.addButton(button, (btn, mouseButton) ->
-				this.resetButton.setEnabled(Configs.configTableIsModified(this.table))
+			// Both profile tables use ProfilesTableEdit (always-disabled per-row RESET).
+			String label = table.getDisplayString() != null
+				? table.getDisplayString()
+				: table.getName();
+			ButtonGeneric open = new ButtonGeneric(
+				button.getX(), button.getY(), button.getWidth(), 20, label
 			);
+			this.configButton = open;
+			this.addButton(open, (btn, mouseButton) -> {
+				if (this.host instanceof IConfigGui configGui) {
+					Screen parent = GuiUtils.getCurrentScreen();
+					if (config == Configs.Profiles.CUSTOM_PROFILES) {
+						GuiBase.openGui(new CustomProfilesTableEdit(configGui, null, parent));
+					} else {
+						GuiBase.openGui(new BuiltinProfilesTableEdit(configGui, null, parent));
+					}
+				}
+				this.resetButton.setEnabled(Configs.configTableIsModified(this.table));
+			});
 			this.addButton(this.resetButton, (btn, mouseButton) -> this.armReset());
 		}
 
@@ -259,10 +281,8 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 
 			if (confirm) {
 				this.table.resetToDefault();
-				// Builtin roster sync — ConfigTable.resetToDefault skips the value-change callback.
-				if (this.table == Configs.Profiles.BUILTIN_PROFILES) {
-					Configs.syncAfterBuiltinProfilesReset();
-				}
+				// ConfigTable.resetToDefault skips the value-change callback.
+				Configs.syncAfterProfilesTableReset();
 				if (this.host instanceof GuiConfigs gui) {
 					// Rebuild rows so dependent options (e.g. mobProfile cycle) re-read state.
 					gui.reloadConfigList();

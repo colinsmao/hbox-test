@@ -359,9 +359,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			if (!Configs.hasEnabledProfile()) {
 				OverlayManager.radiusIndicator().showProfile("no profiles active");
 			} else if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
-				Configs.cycleMobProfile().ifPresent(next ->
-					OverlayManager.radiusIndicator().showProfile(next.name())
-				);
+				if (Configs.cycleMobProfile().isPresent()) {
+					OverlayManager.radiusIndicator().showProfile(
+						Configs.profileDisplayLabel(Configs.activeProfileId())
+					);
+				}
 			}
 		}
 		publish();

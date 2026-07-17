@@ -106,19 +106,52 @@ final class ProfileRosterTest {
 	}
 
 	@Test
-	void blankCustomNameDoesNotParticipate() {
-		ProfileRoster roster = ProfileRoster.sanitize(
+	void blankCustomNameRestoresPreviousOrFallback() {
+		List<ProfileRoster.Entry> prior = ProfileRoster.sanitize(
+			null,
+			List.of(new RawCustomRow("Tall", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		).roster().customs();
+
+		SanitizeResult restored = ProfileRoster.sanitize(
+			null,
+			List.of(new RawCustomRow("", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player",
+			prior
+		);
+		assertTrue(restored.repaired());
+		assertEquals("Tall", restored.roster().customs().getFirst().profile().name());
+		assertTrue(restored.roster().customs().getFirst().participates());
+
+		SanitizeResult fallback = ProfileRoster.sanitize(
 			null,
 			List.of(new RawCustomRow("", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
 			"player"
-		).roster();
-		assertEquals(1, roster.customs().size());
-		assertTrue(roster.customs().getFirst().enabled());
-		assertFalse(roster.customs().getFirst().participates());
-		assertEquals(
-			List.of("player", "ravager", "warden", "zombie"),
-			roster.enabledEntries().stream().map(ProfileRoster.Entry::id).toList()
 		);
+		assertTrue(fallback.repaired());
+		assertEquals(
+			ProfileRoster.FALLBACK_CUSTOM_NAME,
+			fallback.roster().customs().getFirst().profile().name()
+		);
+		assertTrue(fallback.roster().customs().getFirst().participates());
+	}
+
+	@Test
+	void blankCustomNameRestoresThenUniquifiesAgainstBuiltin() {
+		List<ProfileRoster.Entry> prior = ProfileRoster.sanitize(
+			null,
+			List.of(new RawCustomRow("Ravager (1)", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		).roster().customs();
+
+		SanitizeResult restored = ProfileRoster.sanitize(
+			null,
+			List.of(new RawCustomRow("", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player",
+			prior
+		);
+		assertTrue(restored.repaired());
+		assertEquals("Ravager (1)", restored.roster().customs().getFirst().profile().name());
 	}
 
 	@Test
@@ -132,6 +165,206 @@ final class ProfileRosterTest {
 		assertEquals(Optional.of("custom0"), roster.cycle("zombie"));
 		assertEquals(Optional.of("player"), roster.cycle("custom0"));
 		assertEquals(2.5, roster.findById("custom0").orElseThrow().profile().height(), EPS);
+	}
+
+	@Test
+	void addBeforeExistingDoesNotReindexStableName() {
+		List<ProfileRoster.Entry> prior = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(new RawCustomRow("Player (1)", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		).roster().customs();
+		assertEquals("Player (1)", prior.getFirst().profile().name());
+
+		// MaLiLib ADD inserts before the row: new Player clone, then existing Player (1).
+		SanitizeResult result = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(
+				new RawCustomRow("Player", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Player (1)", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player",
+			prior
+		);
+		assertTrue(result.repaired());
+		assertEquals("Player (2)", result.roster().customs().get(0).profile().name());
+		assertEquals("Player (1)", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void renameOneOfTwoDoesNotTouchSibling() {
+		List<ProfileRoster.Entry> prior = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(
+				new RawCustomRow("Ravager (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Ravager (2)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player"
+		).roster().customs();
+
+		SanitizeResult result = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(
+				new RawCustomRow("Ravager (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Ravager", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player",
+			prior
+		);
+		assertTrue(result.repaired());
+		assertEquals("Ravager (1)", result.roster().customs().get(0).profile().name());
+		assertEquals("Ravager (2)", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void collidingCustomNamesGetStoredSuffixes() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			null,
+			List.of(
+				new RawCustomRow("Ravager", 1.95, 2.2, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Ravager", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"zombie"
+		);
+		assertTrue(result.repaired());
+		ProfileRoster roster = result.roster();
+		assertEquals(Optional.of("custom0"), roster.cycle("zombie"));
+		assertEquals(Optional.of("custom1"), roster.cycle("custom0"));
+		assertEquals(Optional.of("player"), roster.cycle("custom1"));
+		// Builtin Ravager taken → customs are Ravager (1) and Ravager (2).
+		assertEquals("Ravager (1)", roster.customs().get(0).profile().name());
+		assertEquals("Ravager (2)", roster.customs().get(1).profile().name());
+		assertEquals("Ravager (1)", roster.displayLabel("custom0"));
+		assertEquals("Ravager (2)", roster.displayLabel("custom1"));
+		assertEquals("Player", roster.displayLabel("player"));
+	}
+
+	@Test
+	void disabledBuiltinStillForcesCustomSuffix() {
+		List<RawBuiltinRow> builtins = defaultRawBuiltins();
+		EntityProfile ravager = ProfileRoster.BUILTIN_SEEDS.get(2).profile();
+		builtins.set(2, new RawBuiltinRow(
+			ravager.name(), ravager.width(), ravager.height(), ravager.reach(), false
+		));
+		SanitizeResult result = ProfileRoster.sanitize(
+			builtins,
+			List.of(new RawCustomRow("Ravager", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		);
+		assertTrue(result.repaired());
+		ProfileRoster roster = result.roster();
+		assertFalse(enabled(roster, "ravager"));
+		assertEquals("Ravager (1)", roster.customs().getFirst().profile().name());
+		assertEquals("Ravager (1)", roster.displayLabel("custom0"));
+		assertEquals("Ravager", roster.displayLabel("ravager"));
+	}
+
+	@Test
+	void stemAwareUniqueWhenCopyingSuffixedName() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			null,
+			List.of(
+				new RawCustomRow("Ravager (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Ravager (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player"
+		);
+		assertTrue(result.repaired());
+		assertEquals("Ravager (1)", result.roster().customs().get(0).profile().name());
+		assertEquals("Ravager (2)", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void typedRavagerAfterRavager1BecomesRavager2() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			null,
+			List.of(
+				new RawCustomRow("Ravager (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Ravager", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player"
+		);
+		assertTrue(result.repaired());
+		assertEquals("Ravager (1)", result.roster().customs().get(0).profile().name());
+		assertEquals("Ravager (2)", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void twoFoosWithoutBuiltinFoo() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			null,
+			List.of(
+				new RawCustomRow("Foo", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Foo", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player"
+		);
+		assertTrue(result.repaired());
+		assertEquals("Foo", result.roster().customs().get(0).profile().name());
+		assertEquals("Foo (1)", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void bareFooFreeWhenOnlyFoo1Taken() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(
+				new RawCustomRow("Foo (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Foo", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player"
+		);
+		assertFalse(result.repaired());
+		assertEquals("Foo (1)", result.roster().customs().get(0).profile().name());
+		assertEquals("Foo", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void freeFoo1StaysWhenNoCollision() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(new RawCustomRow("Foo (1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		);
+		assertFalse(result.repaired());
+		assertEquals("Foo (1)", result.roster().customs().getFirst().profile().name());
+	}
+
+	@Test
+	void noSpaceSuffixIsSeparateSeries() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			null,
+			List.of(
+				new RawCustomRow("Ravager(1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true),
+				new RawCustomRow("Ravager(1)", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)
+			),
+			"player"
+		);
+		assertTrue(result.repaired());
+		assertEquals("Ravager(1)", result.roster().customs().get(0).profile().name());
+		assertEquals("Ravager(1) (1)", result.roster().customs().get(1).profile().name());
+	}
+
+	@Test
+	void uniqueNamesAreCaseSensitive() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			defaultRawBuiltins(),
+			List.of(new RawCustomRow("ravager", 1.0, 1.0, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		);
+		assertFalse(result.repaired());
+		assertEquals("ravager", result.roster().customs().getFirst().profile().name());
+	}
+
+	@Test
+	void trailingSpacesStrippedFromCustomName() {
+		SanitizeResult result = ProfileRoster.sanitize(
+			null,
+			List.of(new RawCustomRow("Tall  ", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
+			"player"
+		);
+		assertTrue(result.repaired());
+		assertEquals("Tall", result.roster().customs().getFirst().profile().name());
 	}
 
 	@Test
@@ -196,20 +429,22 @@ final class ProfileRosterTest {
 	}
 
 	@Test
-	void sanitizeCapsCustomsAndClamps() {
+	void sanitizeClampsNonFiniteCustomsUncapped() {
 		List<RawCustomRow> many = List.of(
 			new RawCustomRow("A", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true),
 			new RawCustomRow("B", -1.0, 1.0, 1.0, true),
 			new RawCustomRow("C", Double.NaN, 1.0, 1.0, true),
 			new RawCustomRow("D", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true),
-			new RawCustomRow("E", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)
+			new RawCustomRow("E", 10.0, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)
 		);
 		SanitizeResult result = ProfileRoster.sanitize(null, many, "player");
 		assertTrue(result.repaired());
-		assertEquals(3, result.roster().customs().size());
+		assertEquals(5, result.roster().customs().size());
 		assertEquals(0.0, result.roster().customs().get(1).profile().width(), EPS);
 		assertEquals(EntityProfile.PLAYER.width(), result.roster().customs().get(2).profile().width(), EPS);
 		assertEquals("C", result.roster().customs().get(2).profile().name());
+		assertEquals(ProfileRoster.MAX_CUSTOM_WIDTH, result.roster().customs().get(4).profile().width(), EPS);
+		assertEquals("E", result.roster().customs().get(4).profile().name());
 	}
 
 	@Test

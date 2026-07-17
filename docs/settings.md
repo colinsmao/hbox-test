@@ -45,9 +45,10 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `enableRendering` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
-| `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
-| `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens MaLiLib `GuiTableEdit` (button `Edit Built-in Profiles`). **Not** dumped as a full table in JSON — see Builtin profiles. |
-| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
+| `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
+| `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
+| `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
+| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
 
 Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
 `Configs.roster()`, `Configs.hasEnabledProfile()`, `Configs.isRenderingEnabled()`.
@@ -55,18 +56,27 @@ Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadi
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
 entry still overrides. No `prettyName.*` — MaLiLib falls back to `splitCamelCase`
-for toggle messages. Profiles button label:
-`mobwalk.config.profiles.button.builtinProfiles`.
+for toggle messages. Profiles button labels:
+`mobwalk.config.profiles.button.builtinProfiles` /
+`mobwalk.config.profiles.button.customProfiles`.
 
 `config_version` (`3`) is written beside the category objects in `mobwalk.json`.
 
-## Builtin profiles (General popup)
+## Profiles (General popups)
 
-JSON category `"Profiles"` holds slim `builtinProfiles`: an ordered array of
-`{"id","enabled"}` (geometry is code-owned). The General row button opens a
-`ConfigTable` dialog: On/Off + locked Name / Width / Height / Vertical Reach for
-Point, Player, Ravager, Warden, Zombie/Witch, Skeleton — rebuilt from
-`ProfileRoster.BUILTIN_SEEDS` plus that slim state on load.
+JSON category `"Profiles"` holds slim `builtinProfiles` (ordered `{"id","enabled"}`;
+geometry is code-owned) and the full `customProfiles` ConfigTable dump. Both General
+row buttons open `ProfilesTableEdit` dialogs (`BuiltinProfilesTableEdit` /
+`CustomProfilesTableEdit`) with always-disabled per-row RESET. List-level
+Cancel|Confirm RESET on General is unchanged. `Configs.syncRosterFromTables`
+(via table value-change callbacks) runs `ProfileRoster.sanitize` on both tables,
+then clamps / soft-disables / reselects.
+
+### Built-in Profiles
+
+On/Off + locked Name / Width / Height / Vertical Reach for Point, Player, Ravager,
+Warden, Zombie/Witch, Skeleton — rebuilt from `ProfileRoster.BUILTIN_SEEDS` plus
+slim JSON on load.
 
 - **Roster order** follows current table row order (reorder is real for cycle /
 fallback). Sanitize keeps known rows in table order and appends any missing seeds.
@@ -74,15 +84,39 @@ fallback). Sanitize keeps known rows in table order and appends any missing seed
 Off. Geometry is code-owned (seed sizes); only enables and order are player-editable.
 - **Hand-edit recovery:** unknown ids dropped; missing seed ids re-appended with
 default enables on load/sync.
-- **Soft-disable:** every profile Off → `hasEnabledProfile()` false; overlay select
-floods stay off; stick air- or block-click pings HUD `no profiles active`;
-`enableRendering` is unchanged. Shift+scroll radius still works.
+
+### Custom Profiles
+
+On/Off + editable Name (STRING) / Width / Height / Vertical Reach (DOUBLE).
+`allowNewEntry=true`; row count is uncapped. ADD clones the **clicked** row
+(enabled + name + sizes) and inserts the copy **below** it; with no source row
+(empty table / trailing dummy) it falls back to the active profile (`Configs.mobProfile()`,
+or Player when soft-disabled) On. REMOVE deletes a row. List-level Confirm RESET
+clears the table to empty. Width is clamped to `[0, 4]` (Ghast-scale flood guard);
+height/reach only repair non-finite → Player sizes and negatives → `0`. Blank names
+are not kept: sanitize strips trailing spaces, restores the previous non-empty name
+at that index (else `"Custom"`), then rewrites **new or renamed** colliding customs
+to `Name (1)`, `Name (2)`, … (builtins count, including disabled). Existing names
+that still appear are left unchanged. An open `CustomProfilesTableEdit` rebuilds so
+repaired fields show without closing. Blank-name `participates()` skip remains a
+safety net. Custom ids are `custom0`, `custom1`, … in table order.
+
+### Shared roster behavior
+
+- **Cycle order:** enabled builtins (table order), then enabled participating customs.
+New/renamed colliding names are uniquified into the stored Name (ids `custom0`,
+`custom1`, …); existing names are not reindexed. `Configs.profileDisplayLabel` /
+settings button use that stored name. Cycle still skips disabled.
+- **Soft-disable:** every participating profile Off → `hasEnabledProfile()` false;
+overlay select floods stay off; stick air- or block-click pings HUD
+`no profiles active`; `enableRendering` is unchanged. Shift+scroll radius still works.
 - **ConfigTable RESET enable:** MaLiLib `ConfigTable.isModified()` compares defaults
 to a stale `lastTable` after popup edits. Use `Configs.configTableIsModified(table)`
-(live rows vs defaults) for RESET enable on any ConfigTable. The
-`Edit Built-in Profiles` row uses Cancel (same spot) + Confirm (to the right) via
-`ConfirmResetConfigOption`; Confirm calls `resetToDefault()` then
-`Configs.syncAfterBuiltinProfilesReset()`.
+(live rows vs defaults) for RESET enable on any ConfigTable. Both
+`Edit Built-in Profiles` and `Edit Custom Profiles` rows use Cancel (same spot) +
+Confirm (to the right) via `ConfirmResetConfigOption`; Confirm calls
+`resetToDefault()` then `Configs.syncAfterProfilesTableReset()`. Builtin RESET
+restores seed enables/order; custom RESET clears the table to empty.
 
 Key types: `ProfileRoster`, `RosterProfileOption`, `Configs.Profiles`.
 
@@ -92,7 +126,7 @@ Key types: `ProfileRoster`, `RosterProfileOption`, `Configs.Profiles`.
 
 - **All** — General → Appearance → Debug (default tab)
 - **General** — `Configs.Generic.OPTIONS` (JSON category stays `"Generic"`; includes
-`Edit Built-in Profiles`)
+`Edit Built-in Profiles` and `Edit Custom Profiles`)
 - **Appearance** — `Configs.Appearance.OPTIONS`
 - **Debug** — `Configs.Debug.OPTIONS`
 

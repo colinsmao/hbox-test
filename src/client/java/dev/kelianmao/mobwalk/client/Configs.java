@@ -13,6 +13,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
+import net.minecraft.client.Minecraft;
+
 import fi.dy.masa.malilib.config.ConfigUtils;
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
@@ -24,8 +26,10 @@ import fi.dy.masa.malilib.config.options.table.ConfigTable;
 import fi.dy.masa.malilib.config.options.table.Label;
 import fi.dy.masa.malilib.config.options.table.TableRow;
 import fi.dy.masa.malilib.config.options.table.type.BooleanEntry;
+import fi.dy.masa.malilib.config.options.table.type.DoubleEntry;
 import fi.dy.masa.malilib.config.options.table.type.EntryTypes;
 import fi.dy.masa.malilib.config.options.table.type.LabelEntry;
+import fi.dy.masa.malilib.config.options.table.type.StringEntry;
 import fi.dy.masa.malilib.util.FileUtils;
 import fi.dy.masa.malilib.util.StringUtils;
 import fi.dy.masa.malilib.util.data.Color4f;
@@ -46,8 +50,16 @@ public final class Configs implements IConfigHandler {
 	private static final String DEBUG_KEY = MobWalk.MOD_ID + ".config.debug";
 	private static final int CONFIG_VERSION = 3;
 
-	/** Cached roster rebuilt from the builtins table (customs empty until part 3). */
+	/** Cached roster rebuilt from builtin slim state + custom table. */
 	private static ProfileRoster cachedRoster = ProfileRoster.defaults();
+	/** Guards re-entrant setTable while seeding a newly ADDed custom row. */
+	private static boolean seedingCustomAdd;
+	/**
+	 * Prior custom-table row identities. MaLiLib ADD inserts a dummy
+	 * <em>before</em> the clicked row (not append), so new rows are detected by
+	 * reference rather than by trailing index.
+	 */
+	private static List<TableRow> lastCustomRows = List.of();
 
 	public static final class Generic {
 		public static final ConfigBoolean ENABLE_RENDERING =
@@ -56,6 +68,8 @@ public final class Configs implements IConfigHandler {
 			new ConfigOptionList("mobProfile", RosterProfileOption.player()).apply(GENERIC_KEY);
 		/** Same instance as {@link Profiles#BUILTIN_PROFILES}; shown on General. */
 		public static final ConfigTable BUILTIN_PROFILES = Profiles.BUILTIN_PROFILES;
+		/** Same instance as {@link Profiles#CUSTOM_PROFILES}; shown on General. */
+		public static final ConfigTable CUSTOM_PROFILES = Profiles.CUSTOM_PROFILES;
 		public static final ConfigInteger FLOOD_RADIUS =
 			new ConfigInteger("floodRadius", 20, 0, 30, true).apply(GENERIC_KEY);
 
@@ -64,10 +78,11 @@ public final class Configs implements IConfigHandler {
 			ENABLE_RENDERING,
 			MOB_PROFILE,
 			BUILTIN_PROFILES,
+			CUSTOM_PROFILES,
 			FLOOD_RADIUS
 		);
 
-		/** Generic JSON category — table lives under Profiles. */
+		/** Generic JSON category — profile tables live under Profiles. */
 		static final ImmutableList<IConfigBase> FILE_OPTIONS = ImmutableList.of(
 			ENABLE_RENDERING,
 			MOB_PROFILE,
@@ -78,7 +93,8 @@ public final class Configs implements IConfigHandler {
 	}
 
 	public static final class Profiles {
-		private static final String BUTTON_LABEL_KEY = PROFILES_KEY + ".button.builtinProfiles";
+		private static final String BUILTIN_BUTTON_KEY = PROFILES_KEY + ".button.builtinProfiles";
+		private static final String CUSTOM_BUTTON_KEY = PROFILES_KEY + ".button.customProfiles";
 		private static final String[] COLUMN_LABEL_KEYS = {
 			PROFILES_KEY + ".table.enabled",
 			PROFILES_KEY + ".table.name",
@@ -88,13 +104,15 @@ public final class Configs implements IConfigHandler {
 		};
 
 		public static final ConfigTable BUILTIN_PROFILES = buildBuiltinTable();
+		public static final ConfigTable CUSTOM_PROFILES = buildCustomTable();
 
 		/**
-		 * GUI / display-name refresh only. Builtin enables+order are read/written
-		 * as slim JSON (not via {@link ConfigUtils} / full {@link ConfigTable} dump).
+		 * GUI / display-name refresh. Builtin enables+order are slim JSON; customs
+		 * use the full {@link ConfigTable} dump under the same Profiles category.
 		 */
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-			BUILTIN_PROFILES
+			BUILTIN_PROFILES,
+			CUSTOM_PROFILES
 		);
 
 		private Profiles() {}
@@ -114,10 +132,26 @@ public final class Configs implements IConfigHandler {
 			)
 				.setAllowAddNewEntry(false)
 				.setShowEntryNumbers(false)
-				// Baked once at class load; refreshDisplayNames() re-applies after language loads.
-				.setDisplayString(StringUtils.translate(BUTTON_LABEL_KEY))
+				.setDisplayString(StringUtils.translate(BUILTIN_BUTTON_KEY))
 				.setLabels(translatedColumnLabels())
 				.setDefaultValue(rows)
+				.build()
+				.apply(PROFILES_KEY);
+		}
+
+		private static ConfigTable buildCustomTable() {
+			return new ConfigTable.Builder(
+				"customProfiles",
+				EntryTypes.BOOLEAN,
+				EntryTypes.STRING,
+				EntryTypes.DOUBLE,
+				EntryTypes.DOUBLE,
+				EntryTypes.DOUBLE
+			)
+				.setAllowAddNewEntry(true)
+				.setShowEntryNumbers(false)
+				.setDisplayString(StringUtils.translate(CUSTOM_BUTTON_KEY))
+				.setLabels(translatedColumnLabels())
 				.build()
 				.apply(PROFILES_KEY);
 		}
@@ -140,6 +174,15 @@ public final class Configs implements IConfigHandler {
 				LabelEntry.of(formatDouble(p.height())),
 				LabelEntry.of(formatDouble(p.reach()))
 			);
+		}
+
+		static TableRow customRow(EntityProfile p, boolean enabled) {
+			return CustomProfileTableRows.customRow(p, enabled);
+		}
+
+		/** Clone a custom table row (enabled + name + sizes). */
+		static TableRow copyCustomRow(TableRow source) {
+			return CustomProfileTableRows.copyCustomRow(source);
 		}
 	}
 
@@ -215,7 +258,7 @@ public final class Configs implements IConfigHandler {
 		fallbackNameToOptionId(Profiles.OPTIONS, PROFILES_KEY);
 		fallbackNameToOptionId(Appearance.OPTIONS, APPEARANCE_KEY);
 		fallbackNameToOptionId(Debug.OPTIONS, DEBUG_KEY);
-		refreshBuiltinProfilesTableStrings();
+		refreshProfileTableStrings();
 	}
 
 	/**
@@ -223,8 +266,18 @@ public final class Configs implements IConfigHandler {
 	 * reflectively once language is available. Missing keys surface as the key
 	 * itself (no hardcoded fallback).
 	 */
-	private static void refreshBuiltinProfilesTableStrings() {
-		String buttonLabel = StringUtils.translate(Profiles.BUTTON_LABEL_KEY);
+	private static void refreshProfileTableStrings() {
+		refreshOneTableStrings(
+			Profiles.BUILTIN_PROFILES,
+			StringUtils.translate(Profiles.BUILTIN_BUTTON_KEY)
+		);
+		refreshOneTableStrings(
+			Profiles.CUSTOM_PROFILES,
+			StringUtils.translate(Profiles.CUSTOM_BUTTON_KEY)
+		);
+	}
+
+	private static void refreshOneTableStrings(ConfigTable table, String buttonLabel) {
 		List<Label> columnLabels = new ArrayList<>(Profiles.COLUMN_LABEL_KEYS.length);
 		for (Object label : Profiles.translatedColumnLabels()) {
 			columnLabels.add(Label.of((String) label));
@@ -232,14 +285,15 @@ public final class Configs implements IConfigHandler {
 		try {
 			var displayField = ConfigTable.class.getDeclaredField("displayString");
 			displayField.setAccessible(true);
-			displayField.set(Profiles.BUILTIN_PROFILES, buttonLabel);
+			displayField.set(table, buttonLabel);
 
 			var labelsField = ConfigTable.class.getDeclaredField("labels");
 			labelsField.setAccessible(true);
-			labelsField.set(Profiles.BUILTIN_PROFILES, List.copyOf(columnLabels));
+			labelsField.set(table, List.copyOf(columnLabels));
 		} catch (ReflectiveOperationException e) {
 			MobWalk.LOGGER.warn(
-				"Could not refresh builtinProfiles table strings (button='{}')",
+				"Could not refresh {} table strings (button='{}')",
+				table.getName(),
 				buttonLabel,
 				e
 			);
@@ -274,7 +328,8 @@ public final class Configs implements IConfigHandler {
 				collision.reselectWithMobProfile();
 			}
 		});
-		Profiles.BUILTIN_PROFILES.setValueChangeCallback(cfg -> onBuiltinProfilesChanged());
+		Profiles.BUILTIN_PROFILES.setValueChangeCallback(cfg -> onProfilesChanged());
+		Profiles.CUSTOM_PROFILES.setValueChangeCallback(cfg -> onCustomProfilesChanged());
 	}
 
 	/**
@@ -293,8 +348,40 @@ public final class Configs implements IConfigHandler {
 		}
 	}
 
-	private static void onBuiltinProfilesChanged() {
-		syncRosterFromTable(true);
+	/** Snapshot custom-table row identities after load/sync/seed. */
+	private static void rememberCustomRows() {
+		lastCustomRows = List.copyOf(Profiles.CUSTOM_PROFILES.getTable());
+	}
+
+	private static boolean isKnownCustomRow(TableRow row) {
+		return CustomProfileTableRows.isKnownCustomRow(row, lastCustomRows);
+	}
+
+	/**
+	 * After ADD: replace newly inserted dummies by cloning the clicked row
+	 * (MaLiLib inserts <em>before</em> it), then swap so the clone sits below.
+	 * No source row (empty table / trailing dummy) → active profile On.
+	 */
+	private static void onCustomProfilesChanged() {
+		if (seedingCustomAdd) {
+			return;
+		}
+		List<TableRow> table = Profiles.CUSTOM_PROFILES.getTable();
+		if (table.size() > lastCustomRows.size()) {
+			EntityProfile fallback = mobProfile().orElse(EntityProfile.PLAYER);
+			seedingCustomAdd = true;
+			try {
+				CustomProfileTableRows.seedNewCustomRows(table, lastCustomRows, fallback);
+			} finally {
+				seedingCustomAdd = false;
+			}
+		}
+		rememberCustomRows();
+		onProfilesChanged();
+	}
+
+	private static void onProfilesChanged() {
+		syncRosterFromTables();
 		CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
 		if (collision == null) {
 			return;
@@ -309,10 +396,11 @@ public final class Configs implements IConfigHandler {
 	/**
 	 * MaLiLib {@code ConfigTable.resetToDefault()} does not fire the value-change
 	 * callback (setTable skips it when the new rows equal the defaults argument).
-	 * Call after "Edit Built-in Profiles" RESET confirm so roster / cycle match the table.
+	 * Call after a profiles-table RESET confirm so roster / cycle match the tables.
 	 */
-	static void syncAfterBuiltinProfilesReset() {
-		onBuiltinProfilesChanged();
+	static void syncAfterProfilesTableReset() {
+		rememberCustomRows();
+		onProfilesChanged();
 	}
 
 	/**
@@ -324,7 +412,7 @@ public final class Configs implements IConfigHandler {
 		return !table.getTable().equals(table.getDefaultTable());
 	}
 
-	/** Live roster (builtins from the Profiles table; customs empty until part 3). */
+	/** Live roster (builtins + customs). */
 	public static ProfileRoster roster() {
 		return cachedRoster;
 	}
@@ -345,6 +433,14 @@ public final class Configs implements IConfigHandler {
 
 	public static int floodRadius() {
 		return Generic.FLOOD_RADIUS.getIntegerValue();
+	}
+
+	/**
+	 * Player-facing label for a roster id (stored profile name; sanitize keeps
+	 * custom names unique). Ids {@code custom0}/{@code custom1} already differ.
+	 */
+	public static String profileDisplayLabel(String id) {
+		return cachedRoster.displayLabel(id);
 	}
 
 	/** Active mob profile when the roster has an enabled entry. */
@@ -424,7 +520,7 @@ public final class Configs implements IConfigHandler {
 	private static void loadFromFile() {
 		Path configFile = FileUtils.getConfigDirectory().resolve(CONFIG_FILE_NAME);
 		if (!Files.isRegularFile(configFile)) {
-			applyBuiltinRoster(ProfileRoster.defaults());
+			applyRoster(ProfileRoster.defaults());
 			return;
 		}
 		JsonElement element = JsonUtils.parseJsonFile(configFile);
@@ -433,50 +529,65 @@ public final class Configs implements IConfigHandler {
 			ConfigUtils.readConfigBase(root, "Generic", Generic.FILE_OPTIONS);
 			ConfigUtils.readConfigBase(root, "Appearance", Appearance.OPTIONS);
 			ConfigUtils.readConfigBase(root, "Debug", Debug.OPTIONS);
-			loadBuiltinProfilesSlim(root);
+			loadProfiles(root);
 		} else {
-			applyBuiltinRoster(ProfileRoster.defaults());
+			applyRoster(ProfileRoster.defaults());
 		}
 	}
 
 	/**
-	 * Rebuild {@link #cachedRoster} from the builtins table; rewrite the table
-	 * only when sanitize repaired geometry/row-set (preserves user row order).
+	 * Rebuild {@link #cachedRoster} from both profile tables; rewrite tables when
+	 * sanitize repaired (preserves user row order when clean).
 	 */
-	private static void syncRosterFromTable(boolean writeBackIfRepaired) {
-		List<ProfileRoster.RawBuiltinRow> raw = readRawBuiltinsFromTable();
-		String activeId = activeProfileId();
-		ProfileRoster.SanitizeResult result = ProfileRoster.sanitize(raw, List.of(), activeId);
+	private static void syncRosterFromTables() {
+		List<ProfileRoster.RawBuiltinRow> rawBuiltins = readRawBuiltinsFromTable();
+		List<ProfileRoster.RawCustomRow> rawCustoms = readRawCustomsFromTable();
+		ProfileRoster.SanitizeResult result =
+			ProfileRoster.sanitize(
+				rawBuiltins, rawCustoms, activeProfileId(), cachedRoster.customs()
+			);
 		cachedRoster = result.roster();
-		if (result.repaired() && writeBackIfRepaired) {
+		if (result.repaired()) {
 			writeBuiltinTableFromRoster(cachedRoster);
-		} else if (result.repaired()) {
-			writeBuiltinTableFromRoster(cachedRoster);
+			writeCustomTableFromRoster(cachedRoster);
 		}
+		rememberCustomRows();
 		clampMobProfileToEnabled();
 	}
 
-	private static void applyBuiltinRoster(ProfileRoster roster) {
+	private static void applyRoster(ProfileRoster roster) {
 		cachedRoster = roster;
 		writeBuiltinTableFromRoster(roster);
+		writeCustomTableFromRoster(roster);
+		rememberCustomRows();
 		clampMobProfileToEnabled();
 	}
 
-	/**
-	 * Load ordered {@code {id, enabled}} under {@code Profiles.builtinProfiles}.
-	 * Geometry always comes from {@link ProfileRoster#BUILTIN_SEEDS}.
-	 */
-	private static void loadBuiltinProfilesSlim(JsonObject root) {
+	private static void loadProfiles(JsonObject root) {
 		if (!root.has("Profiles") || !root.get("Profiles").isJsonObject()) {
-			applyBuiltinRoster(ProfileRoster.defaults());
+			applyRoster(ProfileRoster.defaults());
 			return;
 		}
 		JsonObject profiles = root.getAsJsonObject("Profiles");
-		if (!profiles.has("builtinProfiles") || !profiles.get("builtinProfiles").isJsonArray()) {
-			applyBuiltinRoster(ProfileRoster.defaults());
-			return;
+		if (profiles.has("customProfiles")) {
+			Profiles.CUSTOM_PROFILES.setValueFromJsonElement(profiles.get("customProfiles"));
+		} else {
+			Profiles.CUSTOM_PROFILES.setTable(List.of());
 		}
+		List<ProfileRoster.RawBuiltinRow> rawBuiltins = parseSlimBuiltins(profiles);
+		List<ProfileRoster.RawCustomRow> rawCustoms = readRawCustomsFromTable();
+		ProfileRoster.SanitizeResult result =
+			ProfileRoster.sanitize(
+				rawBuiltins, rawCustoms, activeProfileId(), cachedRoster.customs()
+			);
+		applyRoster(result.roster());
+	}
+
+	private static List<ProfileRoster.RawBuiltinRow> parseSlimBuiltins(JsonObject profiles) {
 		List<ProfileRoster.RawBuiltinRow> raw = new ArrayList<>();
+		if (!profiles.has("builtinProfiles") || !profiles.get("builtinProfiles").isJsonArray()) {
+			return raw;
+		}
 		for (JsonElement el : profiles.getAsJsonArray("builtinProfiles")) {
 			if (!el.isJsonObject()) {
 				continue;
@@ -485,20 +596,16 @@ public final class Configs implements IConfigHandler {
 			if (!row.has("id") || !row.has("enabled")) {
 				continue;
 			}
-			String id = row.get("id").getAsString();
-			boolean enabled = row.get("enabled").getAsBoolean();
-			ProfileRoster.BuiltinSeed seed = seedById(id);
+			ProfileRoster.BuiltinSeed seed = seedById(row.get("id").getAsString());
 			if (seed == null) {
 				continue;
 			}
 			EntityProfile p = seed.profile();
 			raw.add(new ProfileRoster.RawBuiltinRow(
-				p.name(), p.width(), p.height(), p.reach(), enabled
+				p.name(), p.width(), p.height(), p.reach(), row.get("enabled").getAsBoolean()
 			));
 		}
-		ProfileRoster.SanitizeResult result =
-			ProfileRoster.sanitize(raw, List.of(), activeProfileId());
-		applyBuiltinRoster(result.roster());
+		return raw;
 	}
 
 	private static ProfileRoster.BuiltinSeed seedById(String id) {
@@ -513,7 +620,7 @@ public final class Configs implements IConfigHandler {
 		return null;
 	}
 
-	private static void writeBuiltinProfilesSlim(JsonObject root) {
+	private static void writeProfilesCategory(JsonObject root) {
 		JsonObject profiles = new JsonObject();
 		JsonArray arr = new JsonArray();
 		for (ProfileRoster.Entry entry : cachedRoster.builtins()) {
@@ -523,6 +630,7 @@ public final class Configs implements IConfigHandler {
 			arr.add(row);
 		}
 		profiles.add("builtinProfiles", arr);
+		profiles.add("customProfiles", Profiles.CUSTOM_PROFILES.getAsJsonElement());
 		root.add("Profiles", profiles);
 	}
 
@@ -543,6 +651,23 @@ public final class Configs implements IConfigHandler {
 		return raw;
 	}
 
+	private static List<ProfileRoster.RawCustomRow> readRawCustomsFromTable() {
+		List<ProfileRoster.RawCustomRow> raw = new ArrayList<>();
+		for (TableRow row : Profiles.CUSTOM_PROFILES.getTable()) {
+			try {
+				boolean enabled = Boolean.TRUE.equals(row.getBoolean(0));
+				String name = row.getString(1);
+				double width = row.getDouble(2);
+				double height = row.getDouble(3);
+				double reach = row.getDouble(4);
+				raw.add(new ProfileRoster.RawCustomRow(name, width, height, reach, enabled));
+			} catch (RuntimeException ignored) {
+				// Sanitize repairs or drops corrupt rows.
+			}
+		}
+		return raw;
+	}
+
 	private static void writeBuiltinTableFromRoster(ProfileRoster roster) {
 		List<TableRow> rows = new ArrayList<>(roster.builtins().size());
 		for (ProfileRoster.Entry entry : roster.builtins()) {
@@ -558,6 +683,38 @@ public final class Configs implements IConfigHandler {
 		Profiles.BUILTIN_PROFILES.setTable(rows);
 	}
 
+	private static void writeCustomTableFromRoster(ProfileRoster roster) {
+		List<TableRow> rows = new ArrayList<>(roster.customs().size());
+		for (ProfileRoster.Entry entry : roster.customs()) {
+			rows.add(Profiles.customRow(entry.profile(), entry.enabled()));
+		}
+		seedingCustomAdd = true;
+		try {
+			Profiles.CUSTOM_PROFILES.setTable(rows);
+		} finally {
+			seedingCustomAdd = false;
+		}
+		// MaLiLib GuiTableEdit keeps text fields; rebuild so clamps / name restore show.
+		refreshOpenCustomProfilesEditor();
+	}
+
+	/**
+	 * After {@link #writeCustomTableFromRoster}, rebuild an open customs editor so
+	 * sanitized values (width cap, blank-name restore) appear without closing it.
+	 * Deferred to the next tick so we are outside MaLiLib's applyPending stack.
+	 */
+	private static void refreshOpenCustomProfilesEditor() {
+		Minecraft client = Minecraft.getInstance();
+		if (client == null) {
+			return;
+		}
+		client.execute(() -> {
+			if (client.screen instanceof CustomProfilesTableEdit edit) {
+				edit.initGui();
+			}
+		});
+	}
+
 	private static void saveToFile() {
 		Path dir = FileUtils.getConfigDirectory();
 		if (!Files.exists(dir)) {
@@ -567,10 +724,10 @@ public final class Configs implements IConfigHandler {
 			MobWalk.LOGGER.error("Config folder '{}' is missing", dir.toAbsolutePath());
 			return;
 		}
-		syncRosterFromTable(true);
+		syncRosterFromTables();
 		JsonObject root = new JsonObject();
 		ConfigUtils.writeConfigBase(root, "Generic", Generic.FILE_OPTIONS);
-		writeBuiltinProfilesSlim(root);
+		writeProfilesCategory(root);
 		ConfigUtils.writeConfigBase(root, "Appearance", Appearance.OPTIONS);
 		ConfigUtils.writeConfigBase(root, "Debug", Debug.OPTIONS);
 		root.add("config_version", new JsonPrimitive(CONFIG_VERSION));

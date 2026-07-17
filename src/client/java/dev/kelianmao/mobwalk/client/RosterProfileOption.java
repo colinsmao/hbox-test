@@ -31,9 +31,7 @@ public final class RosterProfileOption implements IConfigOptionListEntry {
 
 	@Override
 	public String getDisplayName() {
-		return Configs.roster().findById(id)
-			.map(e -> e.profile().name())
-			.orElse(id);
+		return Configs.profileDisplayLabel(id);
 	}
 
 	@Override

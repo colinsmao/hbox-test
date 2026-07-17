@@ -12,9 +12,10 @@
 
   "mobwalk.config.generic.comment.mobProfile": "Which mob's hitbox and vertical reach to use when calculating walkable area. Cycles enabled mob profiles only. Does NOT account for horizontal movement when jumping (ie parkour).",
 
-  "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block. Large values may impact performance.",
+  "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block, in flood steps. Large values may impact performance, especially with a large mob hitbox (must check farther per step).",
 
   "mobwalk.config.profiles.button.builtinProfiles": "Edit Built-in Profiles",
+  "mobwalk.config.profiles.button.customProfiles": "Edit Custom Profiles",
 
   "mobwalk.config.profiles.table.enabled": "Enabled",
   "mobwalk.config.profiles.table.name": "Name",
@@ -23,6 +24,7 @@
   "mobwalk.config.profiles.table.verticalReach": "Vertical Reach",
 
   "mobwalk.config.profiles.comment.builtinProfiles": "Select built-in mob profiles (hitbox + vertical reach).",
+  "mobwalk.config.profiles.comment.customProfiles": "Add custom mob profiles (hitbox + vertical reach). Names must be unique.",
 
   "mobwalk.config.appearance.comment.walkableColor": "Color and transparency of walkable surfaces.",
 
