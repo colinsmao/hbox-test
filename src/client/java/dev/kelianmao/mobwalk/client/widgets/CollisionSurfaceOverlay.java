@@ -45,9 +45,10 @@ import fi.dy.masa.malilib.util.data.Color4f;
  * radius and stays colored, so a radius cutoff reads differently from a
  * true boundary. By default tops (and their skirts/beams) draw on each block's
  * <b>visible face</b> ({@code visualTopY}) so blocks that render taller than they
- * collide (soul sand, mud) aren't buried; a standalone key (default {@code V})
- * toggles this against the true collision height ({@link #toggleVisualTop}), which
- * re-floods since the visible top is gathered compute-side. Each edge drops a
+ * collide (soul sand, mud) aren't buried; Appearance {@code drawOnVisibleFace}
+ * switches to the collision height, which re-floods since the visible top is
+ * gathered compute-side (gated on the flag; see {@code SurfaceSelection.visibleTop}).
+ * Each edge drops a
  * <b>depth-tested vertical skirt</b> so the
  * selection reads as a 3D mesh and a real drop reads as an open wall, but
  * <b>skirt-diffed</b>: the parts of an edge shared with an equal-height neighbour
@@ -172,16 +173,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// See SurfaceSelection.computeHoles.
 	private volatile List<HoleSpan> holeSnapshot = List.of();
 
-	// Whether standable tops render on the block's VISIBLE face rather than the
-	// collision top, so render-taller-than-collide blocks (soul sand, mud) aren't
-	// buried. Default on (the fix). This is a COMPUTE-side flag, not a per-draw one: it
-	// is passed into select() (the visible top is gathered there, gated on it — see
-	// SurfaceSelection.visibleTop) and the chosen height is baked into each rect's
-	// visualTopY, which emit always draws. Toggling therefore re-floods from lastSeed
-	// (toggleVisualTop). Touched only on the client thread (select/toggle); emit no
-	// longer reads it, so volatile is just belt-and-suspenders.
-	private volatile boolean useVisualTop = true;
-
 	// Depth-based greying: surfaces near the flood's BFS-depth cutoff (the last 2
 	// depth rings) blend toward grey to signal "increase the depth limit"; a
 	// selection bounded by a real drop stops short of the limit so it stays colored,
@@ -279,7 +270,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		Level level = Minecraft.getInstance().level;
 		var profile = Configs.mobProfile();
 		if (level != null && lastSeed != null && profile.isPresent()) {
-			cache.select(level, lastSeed, selectionRadius, profile.get(), useVisualTop);
+			cache.select(level, lastSeed, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
 			publish();
 		}
 	}
@@ -328,7 +319,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			} else {
 				var profile = Configs.mobProfile();
 				if (profile.isPresent()) {
-					cache.select(level, start, selectionRadius, profile.get(), useVisualTop);
+					cache.select(level, start, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
 					lastSeed = start;
 				}
 			}
@@ -384,18 +375,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		return selectionRadius;
 	}
 
-	// Flip the visible-face-top render mode (soul sand / mud drawn on the face you see
-	// vs at their true collision top) and re-flood from the last seed. This MUST
-	// recompute: the visible top is gathered compute-side and gated on this flag
-	// (see SurfaceSelection.visibleTop), so the snapshot has to be rebuilt.
-	// Toggling is rare, so the re-flood cost is a non-issue. Returns the new state
-	// for the on-screen ping.
-	public boolean toggleVisualTop() {
-		useVisualTop = !useVisualTop;
-		reselectWithMobProfile();
-		return useVisualTop;
-	}
-
 	/**
 	 * One-shot flood geometry dump for {@code /mobwalk dump}: re-selects from
 	 * {@code lastSeed} with debug logging armed. Returns null if there is no
@@ -408,7 +387,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return null;
 		}
 		cache.requestDebugDump();
-		cache.select(level, lastSeed, selectionRadius, profile.get(), useVisualTop);
+		cache.select(level, lastSeed, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
 		publish();
 		return new FloodDebugCounts(
 			cache.allRects().size(),

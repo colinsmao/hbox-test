@@ -26,8 +26,18 @@ Cancel|Confirm RESET → empty).
 table (geometry for builtins from code).
 - Appearance: **walkableColor** (`#8066CC66`); **showBeamsThroughWalls** (default
 on); **showHoleBeams** (default on); **holeBeamColor** (`#80F2261A`);
-**downSkirtHeight** (0–4, default `2`); **upwardSkirtHeight** (0–4, default `0.25`).
-K occluder-style cycle removed (heights are Appearance doubles).
+**downSkirtHeight** (0–4, default `2`); **upwardSkirtHeight** (0–4, default `0.25`);
+**drawOnVisibleFace** (default on — draws standable tops on the visible block
+face for taller-than-collision blocks like soul sand). K occluder-style cycle
+removed (heights are Appearance doubles).
+- **Visible-surface-top** (`drawOnVisibleFace`, gate-at-compute): the flag is
+threaded into `select` as `computeVisualTop`, so the visible-top read is gated and a
+value-change callback **re-floods** (the one Appearance option that touches compute).
+Skirts/holes are split into two `computeDownSkirts` passes — `topY`-keyed
+`dropEdges` feeds hole classification, `visualTopY`-keyed spans render (second pass
+only when some rect is actually raised). Covers path-over-soul-sand (raise only the
+overlap's `visualTopY`, collision `topY` untouched). Details in
+`[docs/geometry.md](docs/geometry.md)` / `[docs/rendering.md](docs/rendering.md)`.
 - Debug: **crouchSeeThroughWalls**; **crouchScrollRadius**; **crouchCycleProfile**
 (default on); **shadeByDepth** (default off); **showCutoffRing** (default on).
 - Save-on-close → `config/mobwalk.json`; player-facing `comment.*` tooltips;
@@ -41,11 +51,17 @@ Mods → Configure → GuiConfigsBase (All/General/Appearance/Debug) → live op
 
 
 
+## Current plan
+
+Nothing in flight. Visible-surface-top (incl. path-over-raised-outline and the
+skirt/hole domain split) has landed and is distilled into `docs/`.
+
 ## Ideas / backlog
 
 Add or reorder freely; pick items up via a temporary plan when ready.
 
-- Surface-height mode as Appearance toggle + drop V (see **Plan archive**).
+- Chunked / multi-tick flood so one raised block doesn't repay a full-flood scan
+  (deferred with the general flood-perf frame-slicing below).
 - Activation item picker (stick today).
 - Flood perf hardening (timeout, threading, frame-slicing).
 - Settings tooltip UX pass (tone/length).
@@ -53,33 +69,6 @@ Add or reorder freely; pick items up via a temporary plan when ready.
 ## Plan archive
 
 Parked executable outlines; promote back to **Current plan** when picking them up.
-
-### Surface-height Appearance toggle + drop V
-
-Appearance **`ConfigBoolean useVisibleSurfaceTop`** (default **on** = visible face).
-Wire overlay to the config (re-flood on change). Then remove the V keybind so the
-mode is Appearance-only. After that, MobWalk registers zero `KeyMapping`s (K
-already gone with skirt heights).
-
-**Step A — Appearance toggle (keep V flipping the config)**
-
-- `Configs.java`: `USE_VISIBLE_SURFACE_TOP` on Appearance; helper; value-change
-  callback → re-flood.
-- `CollisionSurfaceOverlay.java`: read config at select/reselect; drop session
-  `useVisualTop` / thin `toggleVisualTop` to flip config.
-- `MobWalkClient.java`: keep `surfaceHeightKey`; flip config + HUD ping.
-- `en_us.json`: `comment.useVisibleSurfaceTop` (`If enabled,` …).
-
-Checklist: Appearance On by default; soul sand visible vs collision; V stays in
-sync with the row; persists across relaunch; skirts/regression unchanged.
-
-**Step B — Drop V**
-
-- Remove `surfaceHeightKey` + tick handler from `MobWalkClient.java`.
-
-Checklist: no Controls row; V inert; Appearance toggle still works.
-
-**Docs when promoted:** settings/rendering/project + clear this archive entry.
 
 
 

@@ -24,6 +24,21 @@ hitboxes are axis-aligned squares that never rotate, so the Minkowski sum of two
 axis-aligned rects is again an axis-aligned rect — dilation is **exact and closed
 over rectangles**, no rounding and no new primitive.
 
+**Merge class — the equality tuple.** Two coplanar rects union (rule 3 below) only
+when they agree on every component of their **merge class**: the per-rect attributes
+the renderer must draw distinctly and therefore may not blend across. Today the tuple
+is **`(topY, visualTopY)`** — `topY` because different collision levels are genuinely
+different surfaces, `visualTopY` because a raised patch and a flush neighbour draw at
+different heights. The tuple is deliberately **extensible**: the next planned
+component is a **stand-on hazard class** (soul sand, magma), which lets benign terrain
+still merge into one rect while fencing a hazard region onto its own rects. Adding a
+component is a one-field change to the record plus one comparator in `mergeCoplanar` /
+`mergeCoplanarSplitFrontier`; while a component is uniform (e.g. hazards off ⇒ every
+rect `NONE`) the grouping collapses to the smaller-tuple behaviour at zero cost.
+`depth` is outside the tuple — it is aggregated by min over the covered nodes, not
+matched on. This is the durable idea behind every "group by …" description below:
+those descriptions name the *current* components of one growing equality tuple.
+
 ## What the selection is (the computed result)
 
 `SurfaceSelection.select(level, seed, radius, profile)` produces the set of
@@ -54,8 +69,10 @@ defined by four rules:
 2. **Entity-width dilation** (see [below](#entity-width-dilation)): every footprint
    is grown by the profile half-width `W/2` before the spans-above test, so gaps and
    walls eat into the standable area by the entity's size.
-3. **Merge.** Coplanar (`|dTopY| < EPS`) rects are unioned into maximal rectangles
-   (`mergeCoplanar`: group by `topY`, re-cut each level to a non-overlapping
+3. **Merge.** Coplanar (`|dTopY| < EPS`) rects that share a **merge class** are
+   unioned into maximal rectangles (`mergeCoplanar`: group by the merge class — the
+   extensible equality tuple, **currently `(topY, visualTopY)`**, see [Merge
+   class](#representation-rectdouble-space) — re-cut each group to a non-overlapping
    `union`, then greedy strip-merge equal-span abutting rects along X then Z to a
    fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
    skirts, fewer quads. Greedy is not a minimal partition, but a missed merge only
@@ -254,11 +271,14 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   which a mod or future block would break. Instead `visibleTop` memoizes the block's
   outline top per `BlockState` in a static cache (`OUTLINE_TOP_REL`, `NaN` = "no
   separate outline"), so the shape is read **at most once per distinct state ever
-  seen** and every later occurrence is a map lookup. It is still gated by the render
-  toggle (`computeVisualTop`, threaded from the overlay's `useVisualTop` into
+  seen** and every later occurrence is a map lookup. It is gated by the render
+  toggle (`computeVisualTop`, threaded from `Configs.drawOnVisibleFace()` into
   `select`): off ⇒ `blockOutlineTop = blockCollisionTop`, nothing lifts and no lookup
-  is done. Because the flag gates the compute, **toggling the render setting
-  re-floods** from the last seed (cheap: toggling is rare). The memo treats the
+  is done. Because the flag gates the compute, **toggling the Appearance setting
+  re-floods** from the last seed via `reselectWithMobProfile` (cheap: toggling is
+  rare). This is the one Appearance option that touches compute, an accepted exception
+  to "Appearance is draw-only" given the raise is inherently a compute-side read (it
+  joins `floodRadius` / profile changes, which already re-flood). The memo treats the
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
   Occluder-only / ledge scans leave the auxiliary-constructor default (`= yMax`), so
@@ -271,13 +291,35 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   stair's lower tread is not the block's top; a fence's outline is *shorter* than its
   `1.5` collision top, so `blockOutlineTop > topY` is false). Only full-render-but-
   short-collision tops lift.
-- **Through merge and skirts.** `mergeCoplanar` groups by collision `topY` and
-  carries the group's **max** `visualTopY` (a raised patch merged with a flush
-  neighbour stays raised, not re-buried). `DownSkirtSpan` / `OccluderSpan` /
-  `HoleSpan` each gain a `visualBaseY` (auxiliary constructor defaulting to `baseY`)
-  set from the source rect's `visualTopY`, so when the renderer draws on the visible
-  face the skirts/beams hang from that same face. All of this is inert until the
-  render toggle uses it — the compute step is behavior-preserving.
+- **Through merge.** `visualTopY` is a component of the [merge
+  class](#representation-rectdouble-space), so a raised patch and a flush coplanar
+  neighbour fall into **different** classes and stay separate rects — the raised paint
+  keeps its own height. `DownSkirtSpan` / `OccluderSpan` / `HoleSpan` each carry a
+  `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
+- **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
+  the merged rects keyed on a chosen height: **collision `topY`** (`dropEdges`, the
+  hole-classifier substrate — an equal-`topY` abutting neighbour is a merge seam, not a
+  drop) or **`visualTopY`** (the rendered down-skirts — an equal-`visualTopY` neighbour
+  is a flush continuation). They differ only where a raise happened, so a visible step
+  between two rects at the same collision `topY` but different `visualTopY` (a path lip
+  on a soul-sand cube top) gets its skirt, while soul sand's own remnant abutting that
+  lip at the same `visualTopY` gets none. `select` computes `dropEdges` once and, only
+  when some rect is raised (`hasRaisedRect`; never when the toggle gates the raise off),
+  runs the second `visualTopY` pass — otherwise the single pass feeds both holes and
+  skirts. Both heights on a span are **load-bearing**: collision `baseY` for the
+  hole/geometry pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs
+  every skirt/beam from `visualBaseY`, keying color on the collision `depth`).
+- **Neighbour-overlap raise (a merge-class split).** A dilated rect owned by block A
+  can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
+  reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine
+  A surface at A's collision `topY`, but where it overlaps B's footprint the paint
+  would sit **inside B's taller mesh**. The raise lifts `visualTopY` to B's outline top
+  **only on that intersection**, splitting the one rect into two pieces:
+  `(topY_A, B.outlineTop)` over B and `(topY_A, topY_A)` elsewhere. Because
+  `visualTopY` is a merge-class component, the two pieces are automatically different
+  classes — the split is literally "reassign the overlap subregion to another equality
+  class." Collision `topY` (hence all walkability) is untouched, and B's own exposed
+  remnant keeps its own raise, so the covered face reads at one height.
 
 ### Known limitation — horizontal inset (not fixed)
 
@@ -296,6 +338,12 @@ keeps the inset footprint. Fixing it would need a full **visual footprint** (fou
 extra `StandableRect` coords + skirt re-draw + merge-seam handling) for a ~1px border
 on a few blocks — poor cost/benefit. The `visualTopY` mechanism generalizes to a
 visual footprint if it ever becomes worth it.
+
+### Known limitation — Point profile (not fixed)
+
+The zero-width **Point** profile (debug/oracle baseline) has a few edge-case
+draw bugs that do not show up on the shipped dilated profiles. Left unfixed on
+purpose.
 
 ## Entity profiles (size + headroom)
 

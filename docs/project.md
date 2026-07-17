@@ -183,12 +183,14 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    intermediate ledge does (the ledge would trap the mob). A long dangerous rim shows a
    row of beams. Tops are colored violet (low) → orange (high), never red. Skirts and
    beams at the very outermost radius edge are not drawn.
-6. **Surface height (V):** on a **soul sand / mud** block (renders full-height but
-  collides at 15/16), the standable top draws on the **visible top face** by default;
-   pressing **V** drops it to the true collision height (buried inside the block) and the
-   HUD reads `surface: collision`, pressing again restores `surface: visible`; ordinary
-   full blocks / slabs / stairs look identical in both modes, and the height colors don't
-   shift when toggling.
+6. **Surface height (Appearance `drawOnVisibleFace`, default on):** on a **soul
+   sand / mud** block (renders full-height but collides at 15/16), the standable top
+   draws on the **visible top face** by default; turning the Appearance option off
+   drops it to the true collision height (buried inside the block) and re-floods;
+   turning it on restores the visible face. A dilated path lip reaching over a soul-sand
+   cube paints on the cube top (with its own down-skirt at the step), while its collision
+   stays a path. Ordinary full blocks / slabs / stairs look identical in both modes, and
+   the height colors don't shift when toggling.
 7. **Through water:** right-clicking the bottom of a pond paints its surface,
   visible through the water (water-tinted) **without** crouching; a surface behind
    opaque terrain (a hill) is still occluded unless crouching. (Water itself is not
@@ -234,8 +236,7 @@ settings help is a separate publish-time doc).
 The overlay frameworks (see `[rendering.md](rendering.md)`) are designed to make
 these incremental:
 
-- **Keybinds:** persist the surface-height (`V`) toggle as an Appearance setting
-  (see `PLAN.md` archive); optional MaLiLib hotkeys for overlay toggle later.
+- **Keybinds:** optional MaLiLib hotkeys for overlay toggles later.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
 in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.
 - **Anchored layout system:** corner/anchor + offset model for consistent HUD

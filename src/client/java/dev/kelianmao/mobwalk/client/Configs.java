@@ -190,6 +190,8 @@ public final class Configs implements IConfigHandler {
 	public static final class Appearance {
 		public static final ConfigColor WALKABLE_COLOR =
 			new ConfigColor("walkableColor", "#8066CC66").apply(APPEARANCE_KEY);
+		public static final ConfigBoolean DRAW_ON_VISIBLE_FACE =
+			new ConfigBoolean("drawOnVisibleFace", true).apply(APPEARANCE_KEY);
 		public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
 			new ConfigBoolean("showBeamsThroughWalls", true).apply(APPEARANCE_KEY);
 		public static final ConfigBoolean SHOW_HOLE_BEAMS =
@@ -207,7 +209,8 @@ public final class Configs implements IConfigHandler {
 			SHOW_HOLE_BEAMS,
 			HOLE_BEAM_COLOR,
 			DOWN_SKIRT_HEIGHT,
-			UPWARD_SKIRT_HEIGHT
+			UPWARD_SKIRT_HEIGHT,
+			DRAW_ON_VISIBLE_FACE
 		);
 
 		private Appearance() {}
@@ -330,6 +333,14 @@ public final class Configs implements IConfigHandler {
 		});
 		Generic.MOB_PROFILE.setValueChangeCallback(cfg -> {
 			clampMobProfileToEnabled();
+			CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+			if (collision != null) {
+				collision.reselectWithMobProfile();
+			}
+		});
+		// drawOnVisibleFace gates the visible-top read compute-side (see
+		// SurfaceSelection.visibleTop), so flipping it must re-flood from the last seed.
+		Appearance.DRAW_ON_VISIBLE_FACE.setValueChangeCallback(cfg -> {
 			CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
 			if (collision != null) {
 				collision.reselectWithMobProfile();
@@ -480,6 +491,10 @@ public final class Configs implements IConfigHandler {
 
 	public static Color4f walkableColor() {
 		return Appearance.WALKABLE_COLOR.getColor();
+	}
+
+	public static boolean drawOnVisibleFace() {
+		return Appearance.DRAW_ON_VISIBLE_FACE.getBooleanValue();
 	}
 
 	public static boolean showBeamsThroughWalls() {

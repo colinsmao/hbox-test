@@ -38,6 +38,8 @@
 
   "mobwalk.config.appearance.comment.upwardSkirtHeight": "How tall upward wall-edge markers rise from walkable edges, in blocks. 0 hides them.",
 
+  "mobwalk.config.appearance.comment.drawOnVisibleFace": "If enabled, draws walkable surfaces on a block's visible face. Mostly affects blocks that have a larger visual size than hitbox, like soul sand, so the drawn surfaces aren't buried. This does mean the drawn walkable surfaces will not be truly aligned to hitboxes, but you will be able to see all surfaces properly. The actual geometry calculations still use the real hitboxes.",
+
   "mobwalk.config.debug.comment.crouchSeeThroughWalls": "If enabled, while crouching, shows walkable surfaces through walls.",
 
   "mobwalk.config.debug.comment.crouchScrollRadius": "If enabled, while crouching with a stick, scrolling changes the flood radius.",

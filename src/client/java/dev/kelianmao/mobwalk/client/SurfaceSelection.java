@@ -196,10 +196,13 @@ public final class SurfaceSelection {
 	 * {@link #PROFILE_FLOOD} on, both run and are compared (coverage oracle) and
 	 * timed; see the field docs.
 	 *
-	 * <p>{@code computeVisualTop} controls whether the extra visible/outline-top read
-	 * (for render-taller-than-collide blocks; see {@code exposeBox}) is done. It is a
-	 * per-block cost paid only for blocks colliding below a full cube, so it is off
-	 * unless the render toggle wants it — flipping the toggle re-runs {@code select}.
+	 * <p>{@code computeVisualTop} controls whether the extra visible/outline-top
+	 * read (for render-taller-than-collide blocks; see {@code visibleTop} /
+	 * {@code exposeBox}) is done. Off, every block's outline top collapses to its
+	 * collision top, so nothing raises and the neighbour split never fires
+	 * ({@code visualTopY == topY} on every rect). It is a per-block cost paid only
+	 * when the Appearance render toggle wants it, so flipping the toggle re-runs
+	 * {@code select} (see {@code CollisionSurfaceOverlay}).
 	 */
 	public void select(Level level, BlockPos start, int radius, EntityProfile profile,
 			boolean computeVisualTop) {
@@ -220,8 +223,9 @@ public final class SurfaceSelection {
 				}
 			}
 			occluders = computeOccluders(level, result, profile);
-			downSkirts = computeDownSkirts(result, occluders);
-			holes = computeHoles(level, result, downSkirts, profile, radius);
+			List<DownSkirtSpan> dropEdges = computeDownSkirts(result, occluders, false);
+			downSkirts = skirtSpansFor(result, occluders, dropEdges, computeVisualTop);
+			holes = computeHoles(level, result, dropEdges, profile, radius);
 			if (dump) {
 				logFloodDebug(profile, start, radius, computeVisualTop);
 				debugDumpOnce = false;
@@ -259,8 +263,9 @@ public final class SurfaceSelection {
 			debugReachedPreMerge = LAZY ? lazy.preMergeReached() : result;
 		}
 		occluders = computeOccluders(level, result, profile);
-		downSkirts = computeDownSkirts(result, occluders);
-		holes = computeHoles(level, result, downSkirts, profile, radius);
+		List<DownSkirtSpan> dropEdges = computeDownSkirts(result, occluders, false);
+		downSkirts = skirtSpansFor(result, occluders, dropEdges, computeVisualTop);
+		holes = computeHoles(level, result, dropEdges, profile, radius);
 		if (dump) {
 			logFloodDebug(profile, start, radius, computeVisualTop);
 			debugDumpOnce = false;
@@ -279,20 +284,22 @@ public final class SurfaceSelection {
 		MobWalk.LOGGER.info("[flood-debug] occluders={}", occluders.size());
 		for (OccluderSpan s : occluders) {
 			MobWalk.LOGGER.info(
-				"[flood-debug]   occ alongX={} side={} line={} [{},{}] baseY={} topY={}",
-				s.alongX(), s.positiveSide(), s.line(), s.lo(), s.hi(), s.baseY(), s.topY());
+				"[flood-debug]   occ alongX={} side={} line={} [{},{}] baseY={} visualBaseY={} topY={}",
+				s.alongX(), s.positiveSide(), s.line(), s.lo(), s.hi(),
+				s.baseY(), s.visualBaseY(), s.topY());
 		}
 		MobWalk.LOGGER.info("[flood-debug] downskirts={}", downSkirts.size());
 		for (DownSkirtSpan s : downSkirts) {
 			MobWalk.LOGGER.info(
-				"[flood-debug]   drop alongX={} maxSide={} line={} [{},{}] baseY={}",
-				s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(), s.baseY());
+				"[flood-debug]   drop alongX={} maxSide={} line={} [{},{}] baseY={} visualBaseY={}",
+				s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(), s.baseY(), s.visualBaseY());
 		}
 		MobWalk.LOGGER.info("[flood-debug] holes={}", holes.size());
 		for (HoleSpan s : holes) {
 			MobWalk.LOGGER.info(
-				"[flood-debug]   hole alongX={} maxSide={} line={} [{},{}] baseY={} fall={}",
-				s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(), s.baseY(), s.fallDistance());
+				"[flood-debug]   hole alongX={} maxSide={} line={} [{},{}] baseY={} visualBaseY={} fall={}",
+				s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(),
+				s.baseY(), s.visualBaseY(), s.fallDistance());
 		}
 	}
 
@@ -300,8 +307,9 @@ public final class SurfaceSelection {
 		MobWalk.LOGGER.info("[flood-debug] {}={}", label, rects.size());
 		for (StandableRect r : rects) {
 			MobWalk.LOGGER.info(
-				"[flood-debug]   {} [{},{}]x[{},{}] topY={} depth={}",
-				label, r.minX(), r.maxX(), r.minZ(), r.maxZ(), r.topY(), r.depth());
+				"[flood-debug]   {} [{},{}]x[{},{}] topY={} visualTopY={} depth={}",
+				label, r.minX(), r.maxX(), r.minZ(), r.maxZ(),
+				r.topY(), r.visualTopY(), r.depth());
 		}
 	}
 
@@ -541,39 +549,39 @@ public final class SurfaceSelection {
 				&& (Math.abs(a.maxZ() - b.minZ()) < EPS || Math.abs(b.maxZ() - a.minZ()) < EPS);
 	}
 
-	// Merge coplanar (same topY) rects into maximal rects. Group by topY, then
-	// within each group first re-cut to a NON-OVERLAPPING union (union, below) —
-	// dilated neighbor tops grow into each other, and overlapping translucent quads
-	// double-blend into darker seams — then greedily merge abutting equal-span
-	// strips along X then Z (repeated until stable), collapsing the grid back to
-	// whole rectangles. Greedy is not a minimal partition, but any miss only costs
-	// an extra interior skirt, never reachability.
+	// Merge coplanar rects into maximal rects. Group by collision topY AND
+	// visualTopY (within EPS), then within each group re-cut to a NON-OVERLAPPING
+	// union (union, below) — dilated neighbor tops grow into each other, and
+	// overlapping translucent quads double-blend into darker seams — then greedily
+	// merge abutting equal-span strips along X then Z (repeated until stable),
+	// collapsing the grid back to whole rectangles. Grouping on visualTopY keeps
+	// raised paint (honey/cactus at 15/16→1.0) from contaminating flush coplanar
+	// neighbours (dirt path at 15/16→15/16). Greedy is not a minimal partition, but
+	// any miss only costs an extra interior skirt, never reachability.
 	static List<StandableRect> mergeCoplanar(List<StandableRect> input) {
 		if (input.size() < 2) {
 			return input;
 		}
 		List<StandableRect> sorted = new ArrayList<>(input);
-		sorted.sort(Comparator.comparingDouble(StandableRect::topY));
+		sorted.sort(Comparator
+			.comparingDouble(StandableRect::topY)
+			.thenComparingDouble(StandableRect::visualTopY));
 
 		List<StandableRect> out = new ArrayList<>();
 		int i = 0;
 		while (i < sorted.size()) {
 			double topY = sorted.get(i).topY();
+			double visualTopY = sorted.get(i).visualTopY();
 			int j = i + 1;
-			while (j < sorted.size() && sorted.get(j).topY() - topY <= EPS) {
+			while (j < sorted.size()
+					&& sorted.get(j).topY() - topY <= EPS
+					&& Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
 				j++;
 			}
 
 			List<Rect> rects = new ArrayList<>();
-			// A coplanar group shares one collision topY; carry the group's max
-			// visible top so a raised block (soul sand) still draws on its face after
-			// merging with equal-collision-top neighbours. Mixed visible tops in one
-			// group are rare (equal collision top, different render height) and the
-			// max keeps the raised block visible rather than re-burying it.
-			double groupVisualTop = topY;
 			for (StandableRect r : sorted.subList(i, j)) {
 				rects.add(new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ()));
-				groupVisualTop = Math.max(groupVisualTop, r.visualTopY());
 			}
 			rects = union(rects);
 			int before;
@@ -584,7 +592,7 @@ public final class SurfaceSelection {
 			} while (rects.size() < before);
 
 			for (Rect r : rects) {
-				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY, groupVisualTop));
+				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY, visualTopY));
 			}
 			i = j;
 		}
@@ -598,6 +606,7 @@ public final class SurfaceSelection {
 	// where dilated surfaces grow into each other). Result: the frontier ring
 	// keeps its real depth and is never collapsed into the inner blob, so the
 	// renderer's depth-based perimeter suppression and grey-blend work correctly.
+	// Groups by collision topY and visualTopY (same as mergeCoplanar).
 	// Package-private for unit tests.
 	static List<StandableRect> mergeCoplanarSplitFrontier(
 			List<StandableRect> nodes, int[] nodeDepths, int limit) {
@@ -610,7 +619,9 @@ public final class SurfaceSelection {
 		for (int i = 0; i < idx.length; i++) {
 			idx[i] = i;
 		}
-		Arrays.sort(idx, Comparator.comparingDouble(a -> nodes.get(a).topY()));
+		Arrays.sort(idx, Comparator
+			.comparingDouble((Integer a) -> nodes.get(a).topY())
+			.thenComparingDouble(a -> nodes.get(a).visualTopY()));
 		for (int i = 0; i < idx.length; i++) {
 			sorted.set(i, nodes.get(idx[i]));
 			sortedDepths[i] = nodeDepths[idx[i]];
@@ -620,17 +631,18 @@ public final class SurfaceSelection {
 		int i = 0;
 		while (i < sorted.size()) {
 			double topY = sorted.get(i).topY();
+			double visualTopY = sorted.get(i).visualTopY();
 			int j = i + 1;
-			while (j < sorted.size() && sorted.get(j).topY() - topY <= EPS) {
+			while (j < sorted.size()
+					&& sorted.get(j).topY() - topY <= EPS
+					&& Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
 				j++;
 			}
 
-			double groupVisualTop = topY;
 			List<Rect> innerRaw = new ArrayList<>();
 			List<Rect> frontierRaw = new ArrayList<>();
 			for (int k = i; k < j; k++) {
 				StandableRect r = sorted.get(k);
-				groupVisualTop = Math.max(groupVisualTop, r.visualTopY());
 				Rect rect = new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ());
 				if (sortedDepths[k] >= limit) {
 					frontierRaw.add(rect);
@@ -666,11 +678,11 @@ public final class SurfaceSelection {
 					}
 				}
 				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-					topY, groupVisualTop, best));
+					topY, visualTopY, best));
 			}
 			for (Rect r : frontierMerged) {
 				out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-					topY, groupVisualTop, limit));
+					topY, visualTopY, limit));
 			}
 			i = j;
 		}
@@ -842,6 +854,14 @@ public final class SurfaceSelection {
 			target.maxX() + halfW, target.maxZ() + halfW);
 
 		List<Rect> occluders = new ArrayList<>();
+		// Neighbours that render taller than they collide (soul sand, mud, …) and
+		// taller than this top: a dilated footprint that sits over their undilated
+		// column would paint buried under their full-cube mesh, so those cores raise
+		// visualTopY on the overlap only (collision topY stays). Collected in the
+		// same column window as occluders — they are often not occluders (their
+		// collision top is below T, e.g. path 15/16 over soul sand 14/16).
+		List<Rect> raiseCores = new ArrayList<>();
+		List<Double> raiseOutlines = new ArrayList<>();
 		int[] win = occluderColumns(target, halfW);
 		for (int cx = win[0]; cx <= win[1]; cx++) {
 			for (int cz = win[2]; cz <= win[3]; cz++) {
@@ -866,13 +886,77 @@ public final class SurfaceSelection {
 							other.minX() - halfW, other.minZ() - halfW,
 							other.maxX() + halfW, other.maxZ() + halfW));
 					}
+					if (other.blockOutlineTop() > other.blockCollisionTop() + EPS
+							&& other.blockOutlineTop() > topY + EPS) {
+						raiseCores.add(new Rect(
+							other.minX(), other.minZ(), other.maxX(), other.maxZ()));
+						raiseOutlines.add(other.blockOutlineTop());
+					}
 				}
 			}
 		}
 
 		for (Rect exposed : subtractRects(base, occluders)) {
-			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(), topY, visualTopY));
+			emitWithNeighborVisualRaise(exposed, topY, visualTopY, raiseCores, raiseOutlines, out);
 		}
+	}
+
+	// Split an exposed standable rect so the parts that sit over a raised-outline
+	// neighbour's undilated footprint draw at that neighbour's outline top (paint on
+	// the cube), while the rest keep {@code visualTopY}. Collision {@code topY} is
+	// unchanged on every piece. When several neighbours cover a region, the highest
+	// outline wins (claimed high→low so lower cores do not re-cover).
+	private static void emitWithNeighborVisualRaise(Rect exposed, double topY, double visualTopY,
+			List<Rect> raiseCores, List<Double> raiseOutlines, List<StandableRect> out) {
+		if (raiseCores.isEmpty()) {
+			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(),
+				topY, visualTopY));
+			return;
+		}
+		List<Integer> hit = new ArrayList<>();
+		List<Rect> coresHere = new ArrayList<>();
+		for (int i = 0; i < raiseCores.size(); i++) {
+			Rect core = raiseCores.get(i);
+			if (intersectRect(exposed, core) != null) {
+				hit.add(i);
+				coresHere.add(core);
+			}
+		}
+		if (hit.isEmpty()) {
+			out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(),
+				topY, visualTopY));
+			return;
+		}
+		for (Rect remnant : subtractRects(exposed, coresHere)) {
+			out.add(new StandableRect(remnant.minX(), remnant.minZ(), remnant.maxX(), remnant.maxZ(),
+				topY, visualTopY));
+		}
+		hit.sort((a, b) -> Double.compare(raiseOutlines.get(b), raiseOutlines.get(a)));
+		List<Rect> claimed = new ArrayList<>();
+		for (int i : hit) {
+			Rect inter = intersectRect(exposed, raiseCores.get(i));
+			if (inter == null) {
+				continue;
+			}
+			double outline = raiseOutlines.get(i);
+			for (Rect piece : subtractRects(inter, claimed)) {
+				out.add(new StandableRect(piece.minX(), piece.minZ(), piece.maxX(), piece.maxZ(),
+					topY, outline));
+			}
+			claimed.add(inter);
+		}
+	}
+
+	// Positive-area intersection of two XZ rects, or null if they miss / only touch.
+	private static Rect intersectRect(Rect a, Rect b) {
+		double minX = Math.max(a.minX(), b.minX());
+		double maxX = Math.min(a.maxX(), b.maxX());
+		double minZ = Math.max(a.minZ(), b.minZ());
+		double maxZ = Math.min(a.maxZ(), b.maxZ());
+		if (maxX - minX <= EPS || maxZ - minZ <= EPS) {
+			return null;
+		}
+		return new Rect(minX, minZ, maxX, maxZ);
 	}
 
 	// The source block's visible top (world Y), used to raise a standable surface to
@@ -880,11 +964,13 @@ public final class SurfaceSelection {
 	// cactus, honey, and any modded/future block with the same property). No heuristic:
 	// EVERY block state is checked, but the outline shape (getShape) is read at most
 	// once per distinct BlockState and memoized in OUTLINE_TOP_REL, so the per-block
-	// cost is a map lookup. Returns the collision top unchanged when the toggle is off
-	// or the state has no separate outline (NaN memo). The exposeBox raise rule then
-	// decides whether to actually lift (only its block's topmost collision surface, and
-	// only when the outline is strictly higher), so a fence (outline 1.0 < collision
-	// 1.5) is returned here but not raised there.
+	// cost is a map lookup. Returns the collision top when the state has no separate
+	// outline (NaN memo). The exposeBox raise rule then decides whether to actually
+	// lift (only its block's topmost collision surface, and only when the outline is
+	// strictly higher), so a fence (outline 1.0 < collision 1.5) is returned here but
+	// not raised there. Gated on computeVisualTop (the Appearance render toggle): off,
+	// it returns the collision top without the outline read, so no rect raises and the
+	// neighbour split never fires.
 	private static double visibleTop(Level level, BlockPos pos, BlockState state,
 			double blockCollisionTop, boolean computeVisualTop) {
 		if (!computeVisualTop) {
@@ -1094,6 +1180,32 @@ public final class SurfaceSelection {
 		return new DropClassification(DropClass.BENIGN, topY - landY);
 	}
 
+	// The rendered down-skirts: the visualTopY-keyed pass when any rect draws above its
+	// collision top, else the already-computed collision drop edges (identical then, so
+	// one pass suffices). The render toggle off keeps every visualTopY == topY, so the
+	// gate makes the common case take the shared pass for free — one soul sand in view
+	// is what forks it (see docs/geometry.md; a localized diff is the escalation if it
+	// ever profiles hot).
+	private static List<DownSkirtSpan> skirtSpansFor(List<StandableRect> rects,
+			List<OccluderSpan> occluders, List<DownSkirtSpan> dropEdges, boolean computeVisualTop) {
+		if (computeVisualTop && hasRaisedRect(rects)) {
+			return computeDownSkirts(rects, occluders, true);
+		}
+		return dropEdges;
+	}
+
+	// True iff some rect draws above its collision top (an own or neighbour visual
+	// raise), so the visualTopY-keyed skirt pass can diverge from the collision drop
+	// pass. False in the common case (no render-taller-than-collide block, or toggle off).
+	private static boolean hasRaisedRect(List<StandableRect> rects) {
+		for (StandableRect r : rects) {
+			if (Math.abs(r.visualTopY() - r.topY()) > EPS) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// Compute the downward drop-skirt spans of the whole reached set, once per
 	// select. For each merged rect edge: the edge minus the parts covered by an
 	// equal-height neighbour abutting across it (a merge seam, not a drop) minus the
@@ -1102,15 +1214,30 @@ public final class SurfaceSelection {
 	// render-side scan (openSpans/upIntervalsOnEdge, O(n^2) every frame) with one
 	// compute-side pass; the result must be pixel-identical. Package-private for unit
 	// tests (synthetic rects, no world).
-	static List<DownSkirtSpan> computeDownSkirts(List<StandableRect> rects, List<OccluderSpan> occluders) {
+	// visual=false keys the seam/occluder-coverage tests on the collision topY — the
+	// genuine collision drop edges, which are the hole-classifier substrate. visual=true
+	// keys them on visualTopY (the render height), so a visible step between two rects at
+	// the same collision topY but different visualTopY (a path lip drawn on a soul-sand
+	// cube top) gets its skirt, while abutting rects at the same visualTopY do not. Two
+	// passes over one merged set: skirts are a rendering pass, holes a geometry pass (see
+	// docs/geometry.md "Visible-face top vs collision top").
+	static List<DownSkirtSpan> computeDownSkirts(List<StandableRect> rects,
+			List<OccluderSpan> occluders, boolean visual) {
 		List<DownSkirtSpan> out = new ArrayList<>();
 		for (StandableRect r : rects) {
-			edgeDownSpans(rects, occluders, r, true, false, out);  // -Z edge
-			edgeDownSpans(rects, occluders, r, true, true, out);   // +Z edge
-			edgeDownSpans(rects, occluders, r, false, false, out); // -X edge
-			edgeDownSpans(rects, occluders, r, false, true, out);  // +X edge
+			edgeDownSpans(rects, occluders, r, true, false, visual, out);  // -Z edge
+			edgeDownSpans(rects, occluders, r, true, true, visual, out);   // +Z edge
+			edgeDownSpans(rects, occluders, r, false, false, visual, out); // -X edge
+			edgeDownSpans(rects, occluders, r, false, true, visual, out);  // +X edge
 		}
 		return out;
+	}
+
+	// Collision-keyed drop edges (visual=false): the hole-candidate substrate and the
+	// backward-compatible entry point for the unit tests.
+	static List<DownSkirtSpan> computeDownSkirts(List<StandableRect> rects,
+			List<OccluderSpan> occluders) {
+		return computeDownSkirts(rects, occluders, false);
 	}
 
 	// Append the drop sub-spans of one rect edge (see computeDownSkirts). alongX: the
@@ -1120,14 +1247,18 @@ public final class SurfaceSelection {
 	// order-independent, so unioning then subtracting matches the old two-stage
 	// openSpans-then-occluder subtraction).
 	private static void edgeDownSpans(List<StandableRect> rects, List<OccluderSpan> occluders,
-			StandableRect r, boolean alongX, boolean maxSide, List<DownSkirtSpan> out) {
+			StandableRect r, boolean alongX, boolean maxSide, boolean visual, List<DownSkirtSpan> out) {
 		double lo = alongX ? r.minX() : r.minZ();
 		double hi = alongX ? r.maxX() : r.maxZ();
 		double line = alongX ? (maxSide ? r.maxZ() : r.minZ()) : (maxSide ? r.maxX() : r.minX());
+		// The height two rects/occluders must share to count as a continuation (seam)
+		// rather than a step: collision topY for the drop pass, visualTopY for the skirt
+		// pass. Only this key differs between the passes; the geometry is identical.
+		double rKey = visual ? r.visualTopY() : r.topY();
 
 		List<double[]> covered = new ArrayList<>();
 		for (StandableRect nb : rects) {
-			if (nb == r || Math.abs(nb.topY() - r.topY()) > EPS) {
+			if (nb == r || Math.abs((visual ? nb.visualTopY() : nb.topY()) - rKey) > EPS) {
 				continue;
 			}
 			boolean abuts;
@@ -1150,7 +1281,8 @@ public final class SurfaceSelection {
 			if (s.alongX() != alongX || s.positiveSide() != maxSide) {
 				continue;
 			}
-			if (Math.abs(s.line() - line) > EPS || Math.abs(s.baseY() - r.topY()) > EPS) {
+			if (Math.abs(s.line() - line) > EPS
+					|| Math.abs((visual ? s.visualBaseY() : s.baseY()) - rKey) > EPS) {
 				continue;
 			}
 			double clo = Math.max(s.lo(), lo);
@@ -1558,7 +1690,8 @@ public final class SurfaceSelection {
 		private final double reach;
 		// Chebyshev neighbour-search radius in cells = floor(W)+1 (see class doc).
 		private final int neighbour;
-		// Whether to pay the visible/outline-top read (render toggle; see visibleTop).
+		// Whether to pay the visible/outline-top read (Appearance render toggle; see
+		// visibleTop). Off, nothing raises and the neighbour split never fires.
 		private final boolean computeVisualTop;
 		private final int yLo;
 		private final int yHi;

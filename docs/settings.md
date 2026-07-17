@@ -147,10 +147,12 @@ category name: `"Appearance"`.
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 | `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `emit`. |
 | `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `emit`. |
+| `drawOnVisibleFace` | `ConfigBoolean` | `true` | When on: standable tops of taller-than-collision blocks (soul sand, mud) draw on the visible block face; when off, at the collision height. **Compute-side** — passed into `select` as `computeVisualTop`, so a value-change callback re-floods (the one Appearance option that touches compute). See `[geometry.md](geometry.md)` / `[rendering.md](rendering.md)`. |
 
 Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
 `Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`,
-`Configs.downSkirtHeight()`, `Configs.upwardSkirtHeight()`.
+`Configs.downSkirtHeight()`, `Configs.upwardSkirtHeight()`,
+`Configs.drawOnVisibleFace()`.
 
 ## Live Debug options
 

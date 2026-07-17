@@ -256,23 +256,23 @@ through-walls, depth-on `SKIRT` occluded).
   downskirts → holes), and posts a short chat summary (`merged=… occluders=…
   skirts=… holes=… (see latest.log)`). With an empty selection: chat
   `flood-debug: no selection`. Armed by `/mobwalk dump`.
-- **Surface-height toggle (visible face vs collision top; default `V`).** Blocks that
+- **Surface-height toggle (Appearance `drawOnVisibleFace`, default on).** Blocks that
   render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
-  their standable top *buried* at the collision height. A standalone key (default `V`,
-  registered in `MobWalkClient`) flips `useVisualTop` (default **on** — the fix). It is
-  a **compute-side** flag: it is passed into `select`, where the
-  visible top is gathered (gated on it, memoized per `BlockState` — see
-  [`geometry.md`](geometry.md) "Visible-face top vs collision top") and **baked into
-  each rect's `visualTopY` / span `visualBaseY`**. `emit` then *always* draws the top
-  fill, borders, and the up/down/hole skirts at that baked render height
-  — and it equals the collision top when the mode is off (the raise isn't
+  their standable top *buried* at the collision height. The Appearance boolean
+  `drawOnVisibleFace` (default **on** — the fix) controls it. It is a
+  **compute-side** flag: `Configs.drawOnVisibleFace()` is passed into `select` as
+  `computeVisualTop`, where the visible top is gathered (gated on it, memoized per
+  `BlockState` — see [`geometry.md`](geometry.md) "Visible-face top vs collision top")
+  and **written into each rect's `visualTopY` / span `visualBaseY`**. `emit` then
+  *always* draws the top fill, borders, and the up/down/hole skirts at that render
+  height — which equals the collision top when the setting is off (the raise isn't
   computed then). The height-gradient **color stays keyed on the collision `topY`**, so
-  the palette doesn't shift when toggling. Because the flag gates the compute,
-  `toggleVisualTop()` **re-floods** from the last seed (cheap: toggling is rare) and
-  pings the HUD (`surface: visible` / `surface: collision`). All walkability math is
-  unaffected (collision-top only); this is purely where the paint is drawn. The toggle
-  is session-only (resets to on at relaunch); a persisted setting can land with the
-  config stack.
+  the palette doesn't shift when toggling. Because the flag gates the compute, a
+  value-change callback (`Configs.initCallbacks`) **re-floods** from the last seed via
+  `reselectWithMobProfile` (cheap: toggling is rare). This is the one Appearance option
+  that touches compute — an accepted exception to "Appearance is draw-only," since the
+  raise is inherently a compute-side read. All walkability math is unaffected
+  (collision-top only); this is purely where the paint is drawn.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
   `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
   blended toward **grey** (`greyBlend`), so a depth-cutoff reads differently from a
@@ -341,13 +341,9 @@ through-walls, depth-on `SKIRT` occluded).
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
-  scroll input to the world overlay's radius and the HUD indicator — the
-  surface-height keybind (`KeyMappingHelper.registerKeyMapping`,
-  `KeyMapping(..., KeyMapping.Category.MISC)`, `consumeClick` in `END_CLIENT_TICK`),
-  and the `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
+  scroll input to the world overlay's radius and the HUD indicator — and the
+  `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
-  Note `26.1.2` uses the `keymapping` API (not `keybinding`) and `KeyMapping.Category`
-  (not a `String` category).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
   BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
