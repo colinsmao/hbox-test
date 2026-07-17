@@ -34,6 +34,10 @@
 
   "mobwalk.config.appearance.comment.holeBeamColor": "Color and transparency of hole beams.",
 
+  "mobwalk.config.appearance.comment.downSkirtHeight": "How far downward drop skirts hang from walkable edges, in blocks. 0 hides them.",
+
+  "mobwalk.config.appearance.comment.upwardSkirtHeight": "How tall upward wall-edge markers rise from walkable edges, in blocks. 0 hides them.",
+
   "mobwalk.config.debug.comment.crouchSeeThroughWalls": "If enabled, while crouching, shows walkable surfaces through walls.",
 
   "mobwalk.config.debug.comment.crouchScrollRadius": "If enabled, while crouching with a stick, scrolling changes the flood radius.",

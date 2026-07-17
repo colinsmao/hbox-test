@@ -20,6 +20,7 @@ import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
 import fi.dy.masa.malilib.config.options.ConfigColor;
+import fi.dy.masa.malilib.config.options.ConfigDouble;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
 import fi.dy.masa.malilib.config.options.ConfigOptionList;
 import fi.dy.masa.malilib.config.options.table.ConfigTable;
@@ -195,12 +196,18 @@ public final class Configs implements IConfigHandler {
 			new ConfigBoolean("showHoleBeams", true).apply(APPEARANCE_KEY);
 		public static final ConfigColor HOLE_BEAM_COLOR =
 			new ConfigColor("holeBeamColor", "#80F2261A").apply(APPEARANCE_KEY);
+		public static final ConfigDouble DOWN_SKIRT_HEIGHT =
+			new ConfigDouble("downSkirtHeight", 2.0, 0.0, 4.0, true).apply(APPEARANCE_KEY);
+		public static final ConfigDouble UPWARD_SKIRT_HEIGHT =
+			new ConfigDouble("upwardSkirtHeight", 0.25, 0.0, 4.0, true).apply(APPEARANCE_KEY);
 
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			WALKABLE_COLOR,
 			SHOW_BEAMS_THROUGH_WALLS,
 			SHOW_HOLE_BEAMS,
-			HOLE_BEAM_COLOR
+			HOLE_BEAM_COLOR,
+			DOWN_SKIRT_HEIGHT,
+			UPWARD_SKIRT_HEIGHT
 		);
 
 		private Appearance() {}
@@ -485,6 +492,14 @@ public final class Configs implements IConfigHandler {
 
 	public static Color4f holeBeamColor() {
 		return Appearance.HOLE_BEAM_COLOR.getColor();
+	}
+
+	public static double downSkirtHeight() {
+		return Appearance.DOWN_SKIRT_HEIGHT.getDoubleValue();
+	}
+
+	public static double upwardSkirtHeight() {
+		return Appearance.UPWARD_SKIRT_HEIGHT.getDoubleValue();
 	}
 
 	public static boolean crouchScrollRadius() {

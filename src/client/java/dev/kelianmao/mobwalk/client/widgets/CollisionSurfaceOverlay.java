@@ -99,11 +99,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final double FLAT_EPS = 1.0e-6;
 
 	// Vertical skirts dropped from each surface edge so the selection reads as a
-	// 3D mesh. Depth = profile.reach() + SKIRT_MARGIN (~2): a region boundary is
-	// always a drop > reach, so this clears the reachable zone, and the
-	// depth-tested skirt pipeline then occludes the buried part. Skirts are shaded
-	// darker than the top for legibility.
-	private static final double SKIRT_MARGIN = 1.0;
+	// 3D mesh. Draw height comes from Appearance downSkirtHeight (0 skips draw).
+	// Skirts are shaded darker than the top for legibility.
 	private static final float SKIRT_SHADE = 0.55f;
 	private static final float SKIRT_ALPHA = 0.6f;
 	// Tiny uniform outward push of the (square) skirt edges — NOT a dilation: just
@@ -115,19 +112,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Upward (occluder) skirts: drawn where a surface edge borders a wall/ceiling
 	// (the compute-side OccluderSpans), solid at the surface top and fading to
 	// transparent at the marker top. A lighter shade than the (darker) downward drop
-	// skirts so the two read distinctly. Four debug styles cycle on a keybind
-	// (cycleOccluderStyle) so the final look can be A/B'd in-game; the heights below
-	// are the candidate looks (tiny default).
+	// skirts so the two read distinctly. Draw height from Appearance upwardSkirtHeight
+	// (0 skips draw), clamped to the available wall above the surface.
 	private static final float UP_SKIRT_SHADE = 0.85f;
 	private static final float UP_SKIRT_ALPHA = 0.7f;
-	private static final int OCC_STYLE_COUNT = 4;
-	private static final int OCC_STYLE_TINY = 0;
-	private static final int OCC_STYLE_HALF = 1;
-	private static final int OCC_STYLE_FULL = 2;
-	private static final int OCC_STYLE_BOLD = 3;
-	private static final double OCC_TINY_HEIGHT = 0.15;
-	private static final double OCC_HALF_HEIGHT = 0.5;
-	private static final double OCC_BOLD_HEIGHT = 0.1;
 
 	// Hole beam: a vertical marker rising from the cliff-edge top of a hole span.
 	// Routed to the depth-off BEAM layer or depth-tested SKIRT layer by Appearance
@@ -183,11 +171,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
 	// See SurfaceSelection.computeHoles.
 	private volatile List<HoleSpan> holeSnapshot = List.of();
-	// Debug A/B style for the occluder markers (tiny / half-block / full / bold-line),
-	// incremented by a standalone keybind (cycleOccluderStyle, client thread), read in
-	// emit (render thread). A render-thread-only choice, so it does not touch the
-	// published spans.
-	private volatile int occluderStyle = OCC_STYLE_TINY;
 
 	// Whether standable tops render on the block's VISIBLE face rather than the
 	// collision top, so render-taller-than-collide blocks (soul sand, mud) aren't
@@ -401,21 +384,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		return selectionRadius;
 	}
 
-	// Advance the occluder-marker debug style (wrapping). Bound to a standalone key in
-	// MobWalkClient; a pure render-thread choice, so it does not touch the published
-	// spans (no re-flood). Returns the new style index for the on-screen ping.
-	public int cycleOccluderStyle() {
-		int next = (occluderStyle + 1) % OCC_STYLE_COUNT;
-		occluderStyle = next;
-		return next;
-	}
-
 	// Flip the visible-face-top render mode (soul sand / mud drawn on the face you see
-	// vs at their true collision top) and re-flood from the last seed. Unlike the pure
-	// render-side cycleOccluderStyle, this MUST recompute: the visible top is gathered
-	// compute-side and gated on this flag (see SurfaceSelection.visibleTop), so the
-	// snapshot has to be rebuilt. Toggling is rare, so the re-flood cost is a non-issue.
-	// Returns the new state for the on-screen ping.
+	// vs at their true collision top) and re-flood from the last seed. This MUST
+	// recompute: the visible top is gathered compute-side and gated on this flag
+	// (see SurfaceSelection.visibleTop), so the snapshot has to be rebuilt.
+	// Toggling is rare, so the re-flood cost is a non-issue. Returns the new state
+	// for the on-screen ping.
 	public boolean toggleVisualTop() {
 		useVisualTop = !useVisualTop;
 		reselectWithMobProfile();
@@ -456,9 +430,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		int limit = depthLimit;
-		float skirtDepth = (float) (Configs.mobProfile()
-			.map(EntityProfile::reach)
-			.orElse(EntityProfile.DEFAULT_JUMP_REACH) + SKIRT_MARGIN);
 
 		for (StandableRect rect : rects) {
 			if (!Configs.showCutoffRing() && inCutoffRing(rect.depth(), limit)) {
@@ -495,12 +466,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		// drawn once per span into the depth-tested layer, pushed out by a tiny
 		// SKIRT_OFFSET so they clear the coplanar terrain face without z-fighting.
 		// Each span carries its edge line, [lo,hi], side, base height, and its
-		// surface's flood-depth (the debug color, fade, and skirt depth derive here).
-		emitDownSkirts(skirtBuffer, positionMatrix, skirtDepth);
+		// surface's flood-depth (the debug color and fade derive here).
+		emitDownSkirts(skirtBuffer, positionMatrix);
 
 		// Upward (occluder) skirts: drawn once per published span, into the same
-		// depth-tested layer, in the active debug style.
-		emitOccluders(skirtBuffer, positionMatrix, skirtDepth);
+		// depth-tested layer, at Appearance upwardSkirtHeight.
+		emitOccluders(skirtBuffer, positionMatrix);
 
 		// Hole beams: depth-off beam layer when showBeamsThroughWalls, else
 		// depth-tested skirt layer (occluded by terrain). Emit after skirts so
@@ -556,8 +527,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// to transparent over the bottom half (so a deep drop doesn't read as a hard
 	// floating wall), depth-colored (inherited from its surface) and shaded darker.
 	// Spans at the outermost depth ring are suppressed (depth-cutoff artifacts).
-	private void emitDownSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-			float skirtDepth) {
+	// Appearance downSkirtHeight <= 0 skips the draw entirely.
+	private void emitDownSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix) {
+		float skirtDepth = (float) Configs.downSkirtHeight();
+		if (skirtDepth <= 0.0f) {
+			return;
+		}
 		List<DownSkirtSpan> spans = downSkirtSnapshot;
 		if (spans.isEmpty()) {
 			return;
@@ -592,18 +567,21 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 	}
 
-	// Draw every published upward (occluder) skirt span in the active debug style.
-	// Solid at the surface top (baseY), fading to transparent at the marker top, the
+	// Draw every published upward (occluder) skirt span at Appearance upwardSkirtHeight,
+	// solid at the surface top and fading to transparent at the marker top, the
 	// marker pulled toward the surface interior by SKIRT_OFFSET to clear the wall face.
 	// Spans at the outermost depth ring are suppressed (depth-cutoff artifacts).
-	private void emitOccluders(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-			float skirtClamp) {
+	// upwardSkirtHeight <= 0 skips the draw entirely.
+	private void emitOccluders(BufferBuilder skirtBuffer, Matrix4fc positionMatrix) {
+		float configuredHeight = (float) Configs.upwardSkirtHeight();
+		if (configuredHeight <= 0.0f) {
+			return;
+		}
 		List<OccluderSpan> spans = occluderSnapshot;
 		if (spans.isEmpty()) {
 			return;
 		}
 		int limit = depthLimit;
-		int style = occluderStyle;
 		float o = (float) SKIRT_OFFSET;
 		for (OccluderSpan span : spans) {
 			if (span.depth() >= limit) {
@@ -619,13 +597,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			if (available <= 0.0f) {
 				continue;
 			}
-			float markerHeight = switch (style) {
-				case OCC_STYLE_HALF -> (float) OCC_HALF_HEIGHT;
-				case OCC_STYLE_FULL -> skirtClamp;
-				case OCC_STYLE_BOLD -> (float) OCC_BOLD_HEIGHT;
-				default -> (float) OCC_TINY_HEIGHT;
-			};
-			markerHeight = Math.min(markerHeight, available);
+			float markerHeight = Math.min(configuredHeight, available);
 			float yTopMarker = base + markerHeight;
 
 			float[] rgb = greyBlend(surfaceRgb(span.depth()), span.depth(), limit);
@@ -654,15 +626,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 				xb = line;
 			}
 
-			if (style == OCC_STYLE_BOLD) {
-				// A crisp opaque line (no fade), marking the wall edge.
-				vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
-					r, g, b, BORDER_ALPHA, BORDER_ALPHA);
-			} else {
-				// Solid at the base (T), fading to transparent at the marker top.
-				vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
-					r, g, b, 0.0f, UP_SKIRT_ALPHA);
-			}
+			// Solid at the base (T), fading to transparent at the marker top.
+			vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
+				r, g, b, 0.0f, UP_SKIRT_ALPHA);
 		}
 	}
 

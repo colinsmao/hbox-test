@@ -305,8 +305,9 @@ for. The profile is chosen live via the `mobProfile` setting (see
 so it grows there rather than in a table duplicated here.
 
 Each field drives one part of the math: `W` drives dilation (above), `H` drives
-headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`, which also
-sets the downward-skirt depth and the upward-skirt clamp. Widths and heights are the
+headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`. Skirt
+*draw* heights are Appearance `downSkirtHeight` / `upwardSkirtHeight` (not `reach`).
+Widths and heights are the
 vanilla hitbox sizes: doubles, not `1/16`-aligned, consistent with the rect-space
 model. Two examples anchor the range:
 

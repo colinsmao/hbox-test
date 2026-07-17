@@ -145,9 +145,12 @@ category name: `"Appearance"`.
 | `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
 | `showHoleBeams` | `ConfigBoolean` | `true` | When on: `emitHoles` draws beams at hole rims. When off: beams are skipped. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
+| `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `emit`. |
+| `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `emit`. |
 
 Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
-`Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`.
+`Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`,
+`Configs.downSkirtHeight()`, `Configs.upwardSkirtHeight()`.
 
 ## Live Debug options
 

@@ -157,8 +157,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   profile is `Configs.mobProfile()` (Generic `mobProfile` option, default
   **Player**). Changing it in the config GUI re-floods an active selection. When
   Debug `crouchCycleProfile` is on, **sneak + right-click at nothing** clears *and*
-  advances that option, then pings the HUD with the new name. (The separate
-  occluder-style debug key above is unrelated to the profile cycle.)
+  advances that option, then pings the HUD with the new name.
 - **Adjustable flood radius (shift+scroll).** Gated by Debug
   `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
   `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
@@ -200,15 +199,16 @@ through-walls, depth-on `SKIRT` occluded).
   while sneaking** when `crouchSeeThroughWalls` is on (`crouching`, sampled in
   `extract` — same gate as through-walls tops).
 - **Skirts: square, fading, depth-tested.** Each edge drops a double-winding vertical
-  skirt of depth `reach + SKIRT_MARGIN` (~2), darker, **solid over its top half and
-  fading to transparent over the bottom half** so a deep drop doesn't read as a hard
-  floating wall. Skirts always live in the depth-tested `SKIRT` layer, so a step reads
-  as a riser, a real drop as an open wall, and interior skirts on solid-backed floors
-  self-hide. (A **translucent** block writes no depth and so doesn't occlude a skirt —
-  accepted limitation.) Tops/borders draw at **true rect bounds**; only the skirts are
-  nudged out by a tiny `SKIRT_OFFSET` (0.002, square) to dodge z-fighting the coplanar
-  terrain face (`Y_OFFSET` is likewise 0.002). *Skirts are square, not splayed: a
-  trapezoidal/dilated skirt clips the block's upper edge and re-introduces overlap.*
+  skirt of height Appearance `downSkirtHeight` (default `2`; `0` skips draw), darker,
+  **solid over its top half and fading to transparent over the bottom half** so a deep
+  drop doesn't read as a hard floating wall. Skirts always live in the depth-tested
+  `SKIRT` layer, so a step reads as a riser, a real drop as an open wall, and interior
+  skirts on solid-backed floors self-hide. (A **translucent** block writes no depth and
+  so doesn't occlude a skirt — accepted limitation.) Tops/borders draw at **true rect
+  bounds**; only the skirts are nudged out by a tiny `SKIRT_OFFSET` (0.002, square) to
+  dodge z-fighting the coplanar terrain face (`Y_OFFSET` is likewise 0.002). *Skirts are
+  square, not splayed: a trapezoidal/dilated skirt clips the block's upper edge and
+  re-introduces overlap.*
 - **Skirt-diff, computed compute-side (`computeDownSkirts` / `DownSkirtSpan`).** Any
   rectangle partition of a holed / L-shaped level has *internal* edges between
   equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
@@ -245,15 +245,11 @@ through-walls, depth-on `SKIRT` occluded).
   `W = 0`, at the face). This per-edge wall-vs-drop classification is the
   **prerequisite for hole detection**: the drop-classified edges are the
   hole candidates.
-- **Occluder-marker debug style (`cycleOccluderStyle` + a keybind).** The final
-  upward-marker look is being A/B'd in-game: a **standalone keybind** (default `K`,
-  registered in `MobWalkClient` via `KeyMappingHelper`, separate from the
-  scroll/use handlers) increments a `volatile` style index (tiny / half-block / full /
-  bold-line, wrapping). Pure render-thread choice: leaves published spans and the
-  flood alone. The `full` style clamps to `reach + SKIRT_MARGIN` so a
-  tall wall isn't a giant curtain. **Deferred:** baseline style + whether to keep the
-  toggle lands in a later appearance-focused milestone (see [`project.md`](project.md)
-  roadmap); the `K` toggle and the four styles stay as-is until then.
+- **Upward (occluder) skirts.** Drawn from published `OccluderSpan`s at Appearance
+  `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to the available wall
+  above the surface, solid at the base and fading to transparent at the tip. Same
+  depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
+  `SKIRT_OFFSET`.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a stick
   selection active it re-runs `select` once with a one-shot flag, writes a single
   `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
@@ -333,20 +329,20 @@ through-walls, depth-on `SKIRT` occluded).
   the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`),
   drawing the **published** down-skirt spans (`emitDownSkirts`, from `DownSkirtSpan`;
   frontier spans `depth >= limit` suppressed), **upward occluder skirts**
-  (`emitOccluders`, the side-based interior nudge, the four debug styles +
-  `cycleOccluderStyle`), and the **hole beams** (`emitHoles`, from
+  (`emitOccluders`, Appearance `upwardSkirtHeight`, side-based interior nudge), and the
+  **hole beams** (`emitHoles`, from
   `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
   `showBeamsThroughWalls`) — `emit` draws only the published spans — the cyclic
   depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
   band), the level-identity reset,
-  `volatile` snapshot/occluder/down-skirt/hole/crouch/style handoff, and the
+  `volatile` snapshot/occluder/down-skirt/hole/crouch handoff, and the
   double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the world overlay's radius and the HUD indicator — the
-  standalone occluder-style debug keybind (`KeyMappingHelper.registerKeyMapping`,
+  surface-height keybind (`KeyMappingHelper.registerKeyMapping`,
   `KeyMapping(..., KeyMapping.Category.MISC)`, `consumeClick` in `END_CLIENT_TICK`),
   and the `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).

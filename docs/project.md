@@ -170,7 +170,8 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    click — holding does not spam) while swinging the acting arm; breaking/replacing a
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward
-   skirt; the debug key (K) cycles the upward-marker style. `/mobwalk dump` one-shots
+   skirt. Appearance `downSkirtHeight` / `upwardSkirtHeight` set those draw heights
+   (`0` hides). `/mobwalk dump` one-shots
    the flood pipeline to `latest.log` and posts a short chat summary.
 4. **Headroom:** with Player/Ravager selected, a floor under a low ceiling (gap
   `< H`) is **not** painted (its lost headroom shows as an upward skirt marking the
@@ -233,8 +234,8 @@ settings help is a separate publish-time doc).
 The overlay frameworks (see `[rendering.md](rendering.md)`) are designed to make
 these incremental:
 
-- **Keybinds:** `KeyBindingHelper` to toggle overlays; persist the occluder-style
-(`K`) and surface-height (`V`) toggles as settings.
+- **Keybinds:** persist the surface-height (`V`) toggle as an Appearance setting
+  (see `PLAN.md` archive); optional MaLiLib hotkeys for overlay toggle later.
 - **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
 in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.
 - **Anchored layout system:** corner/anchor + offset model for consistent HUD
@@ -243,11 +244,6 @@ positioning across resolutions and GUI scales.
 client tick events for values that change over time.
 - **Distribution:** `fabric.mod.json` metadata, license, and a Modrinth/
 CurseForge publish pipeline.
-- **Settle a single skirt/occluder rendering baseline (deferred from 4.5).** The
-`K`-key `cycleOccluderStyle` debug toggle (tiny / half-block / full / bold-line)
-shipped in 4.5 for A/B'ing the upward-marker look; choosing a baseline style and
-whether to keep the toggle is deferred to a later appearance-focused milestone;
-see `[rendering.md](rendering.md)`.
 - **Fall-damage / tall-drop warning.** Every benign drop
 already carries its fall distance (`T − landY` from `classifyDrop`). A drop onto
 reachable ground that is nonetheless tall enough to hurt (fall-damage threshold, or a
