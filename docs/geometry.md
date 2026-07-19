@@ -121,16 +121,11 @@ makes the output-sensitive flood possible.
 
 ## How it is computed: the output-sensitive (lazy) flood
 
-`select` dispatches to **`selectLazy`** (the production path, `LAZY = true`). A
-full-window reference implementation, **`selectEager`** (enumerate the whole
-`radius + margin` cube → dilate all → merge → flood), is kept behind a flag as the
-**correctness oracle**; a `PROFILE_FLOOD` switch runs both per call, asserts they
-cover the same area, and logs timing/exposure counts. The lazy path is verified
-**set-equal** to eager for Point/Player/Ravager at radii `0..20`.
-
-`LazyFlood` is a **surface BFS that exposes geometry only as it reaches it**, so
-cost tracks the reachable set (and its occluder shells) rather than the window
-volume — a large win in caves / against walls, and asymptotically on open ground.
+`select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
+reaches it, so cost tracks the reachable set (and its occluder shells) rather
+than the window volume — a large win in caves / against walls, and asymptotically
+on open ground. (During M4 it was cross-checked against a full-window eager scan;
+see [`project.md`](project.md) milestones.)
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the
@@ -140,8 +135,8 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   cells are within Chebyshev `floor(W) + 1` of `c` (`1` for Point/Player, `2` for
   Ravager). This is the cell distance at which two dilated tops can still bridge or
   abut (raw gap `Δ-1 <= W`). It is **not** `ceil(W)`: that is `0` for Point and would
-  never connect adjacent floor tiles. The same `floor(W)+1` is the eager occluder
-  margin too — one reach everywhere.
+  never connect adjacent floor tiles. The same `floor(W)+1` is the occluder-shell
+  reach used when exposing neighbours — one reach everywhere.
 - **Lazy in XZ.** A cell's collision boxes are queried on first touch and cached
   per-column, so a column is exposed at most once and only reachable columns (plus
   the occluder shells around them) are ever touched.
@@ -167,10 +162,10 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   column `(cx,*)` spans `[cx, cx+1]`, dilated to `[cx-W/2, cx+1+W/2]`, which overlaps
   the target's dilated footprint iff `floor(min - W) <= cx <= ceil(max + W) - 1` per
   axis. This is the exact (full-block-conservative) window — for Point (`W=0`) it
-  collapses to the box's own column. It is shared by `exposeBox` (so the eager path
-  shifts identically) and `LazyFlood.ensureRows`, keeping the index and the scan in
-  lock-step. Tightening it is **result-preserving**: the dropped columns abut with
-  zero overlap and trimmed nothing.
+  collapses to the box's own column. It is shared by `exposeBox` and
+  `LazyFlood.ensureRows`, keeping the index and the scan in lock-step. Tightening
+  it is **result-preserving**: the dropped columns abut with zero overlap and
+  trimmed nothing.
 
 Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
 first factor; lazy-Y trims the second — orthogonal, and they compose.
@@ -282,8 +277,8 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
   Occluder-only / ledge scans leave the auxiliary-constructor default (`= yMax`), so
-  they never raise. Both tops are computed at the two node-producing scan sites only
-  (the eager oracle and `LazyFlood.ensureRows`).
+  they never raise. Both tops are computed at the node-producing scan site
+  (`LazyFlood.ensureRows`).
 - **The raise rule (`exposeBox`).**
   `visualTopY = (|topY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > topY) ?
   blockOutlineTop : topY`. Gating on *"this sub-box is the block's topmost collision
@@ -363,7 +358,7 @@ model. Two examples anchor the range:
   jump peak, shared by the larger Ravager).
 - **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
   zero height reduces headroom to the buried test, so Point stays the pure
-  point-walker and the eager-vs-lazy oracle baseline.
+  point-walker and geometric baseline.
 
 ## Appendix A: rejected pixel raster
 

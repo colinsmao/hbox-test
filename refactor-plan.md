@@ -4,7 +4,7 @@ overview: 'Refactor the client surface/overlay pipeline: delete the dead eager-f
 todos:
   - id: drop-oracle
     content: 'Delete the eager-flood oracle from SurfaceSelection: selectEager, the LAZY/PROFILE_FLOOD flags, and the eager-only compare harness (coverageMatches/groupByTop/levelCoversSame/zSpan/intervalsEqual). Keep /mobwalk dump (logFloodDebug*) and the static flood + its SurfaceGeometryTest cases as the reachability-rule guard.'
-    status: pending
+    status: completed
   - id: rectmath
     content: 'Extract pure rect/interval algebra out of SurfaceSelection into a new RectMath class file (holds the Rect record). Repoint SurfaceGeometryTest. Gate on ./gradlew test.'
     status: pending

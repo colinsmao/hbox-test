@@ -350,11 +350,11 @@ through-walls, depth-on `SKIRT` occluded).
   BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
   **`mergeCoplanarSplitFrontier`** — union inner and frontier separately, subtract
-  inner from frontier so they tile cleanly), the `selectEager` oracle +
-  `PROFILE_FLOOD` parity/timing harness, dilation + **headroom** occlusion in
+  inner from frontier so they tile cleanly), dilation + **headroom** occlusion in
   `exposeBox` (the `(T, T+H]` standing-column predicate, guillotine
-  `subtractRects`), the `union` re-cut + `mergeCoplanar` strip-merge (used by eager
-  path), the `footprintAdjacent` edge test + profile-`reach` gate, the
+  `subtractRects`), the `union` re-cut + `mergeCoplanar` strip-merge (unit-tested
+  algebra; production merge-after-flood uses `mergeCoplanarSplitFrontier`), the
+  `footprintAdjacent` edge test + profile-`reach` gate, the
   **compute-side occluder-span classification** (`computeOccluders` /
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
   `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /

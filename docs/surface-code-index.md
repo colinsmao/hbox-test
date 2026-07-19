@@ -288,8 +288,8 @@ record DropClassification(kind, fallDistance)  // return type of classifyDrop
 
 ```
 void select(level, start, radius, profile, computeVisualTop)
-  // Runs selectLazy or selectEager (LAZY / PROFILE_FLOOD flags), then
-  // computeOccluders → computeDownSkirts → computeHoles; optional debug dump
+  // Runs LazyFlood, then computeOccluders → computeDownSkirts → computeHoles;
+  // optional debug dump
 void clear()                                   // empties the four result lists
 List<StandableRect>  allRects()
 List<OccluderSpan>   allOccluders()
@@ -301,8 +301,6 @@ void requestDebugDump()                        // next select logs a [flood-debu
 ### Flood
 
 ```
-selectLazy(...)                                // builds LazyFlood and returns its run()
-selectEager(...)                               // scans the full radius window, then floods
 static flood(rects, seeds, reach)              // BFS over a StandableRect list by adjacency
 LazyFlood                                      // nested class: surface BFS with on-demand expose
   run()                                        // seed → BFS → mergeCoplanarSplitFrontier
@@ -310,7 +308,7 @@ LazyFlood                                      // nested class: surface BFS with
   collect(cx, cz, topLo, topHi)                // tops in a column inside a height window
   tops(box)                                    // memoized exposeBox for one WorldBox
   ensureRows(cx, cz, a, b)                     // query collision shapes for rows [a,b] once
-  columnsExposed() / rowsScanned() / preMergeReached()
+  preMergeReached()                            // raw BFS set for /mobwalk dump
 ```
 
 ### Expose (dilation + occlusion + visual top)
@@ -379,12 +377,10 @@ static gatherLedges(level, cursor, fp, landY, topY, halfW, height, out)
 static spanBreakpoints / addCut / fixedAxisOverlaps / subBand
 ```
 
-### Debug and coverage compare
+### Debug dump
 
 ```
 logFloodDebug / logFloodDebugRects             // [flood-debug] logger output
-coverageMatches / groupByTop / levelCoversSame / zSpan / intervalsEqual
-                                               // compare eager vs lazy coverage (PROFILE_FLOOD)
 ```
 
 ---
