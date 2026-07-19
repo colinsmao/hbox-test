@@ -4,7 +4,8 @@
     "beforeShellExecution": [
       {
         "command": "node .cursor/hooks/commit-gate.js",
-        "matcher": "git\\s+commit"
+        "matcher": "git(\\S*)?[\\s\\S]*\\bcommit\\b",
+        "failClosed": true
       }
     ],
     "postToolUse": [

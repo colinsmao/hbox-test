@@ -4,8 +4,9 @@
 deliberately lean — it is *rules*, not background. Keep it that way: project
 facts (what the mod is, status/milestones, repo layout, versions, install,
 roadmap) live in **[`docs/project.md`](docs/project.md)**; subsystem depth lives
-in **[`docs/rendering.md`](docs/rendering.md)** and
-**[`docs/geometry.md`](docs/geometry.md)** (read the relevant one before working
+in **[`docs/rendering.md`](docs/rendering.md)**,
+**[`docs/geometry.md`](docs/geometry.md)**, and
+**[`docs/settings.md`](docs/settings.md)** (read the relevant one before working
 in that area); the *current short-term plan* lives in **[`PLAN.md`](PLAN.md)**
 (transient, often empty between tasks — never durable knowledge).
 
@@ -38,10 +39,12 @@ default shape of every task.
    *only* that block"), plus a regression line for anything the step could break.
    Writing the checklist is part of writing the plan — a step without one is
    incomplete, so don't present a plan as ready until every step carries a checklist.
-3. **Validate in-game, then commit, before the next step.** Run the step's checklist
-   in-game (`./gradlew runClient`) — you or the user tick every box — then commit that
+3. **Validate in-game, then commit, before the next step.** The human runs the
+   checklist in-game (`./gradlew runClient`) and ticks every box — then commit that
    step. Do not start the next step until the current one is validated and committed.
    A green `./gradlew build` / `./gradlew test` proves nothing about what is displayed.
+   **Agents must never launch `runClient` themselves** (it steals the user's session /
+   display); surface the checklist and wait for the human to confirm.
 4. **"It's just a logical change" is not an exemption.** A purely internal refactor
    with provably zero behavioral effect *may* gate on unit tests alone, but almost
    every logical change alters what gets calculated and therefore what is drawn.
@@ -52,9 +55,9 @@ default shape of every task.
 
 1. **Write the step's enumerated checklist into `PLAN.md`** — `action → expected
    on-screen result`, plus a regression line.
-2. **When the step's code builds, surface that checklist verbatim** and run it
-   in-game (`runClient`) — or hand it to the user — and record each result. If you
-   can't run `runClient` yourself, pause and hand off rather than proceeding.
+2. **When the step's code builds, surface that checklist verbatim** and hand it to
+   the human to run in-game (`./gradlew runClient`). Pause until they confirm results.
+   **Do not invoke `./gradlew runClient` (or `gradlew.bat runClient`) from the agent.**
 3. **Commit the step once its checklist passes in-game**, then move to the next step
    (see **Git / workflow**). One validated step → one commit.
 
@@ -83,11 +86,13 @@ as a substitute for actually validating in-game, and keep them working if you to
 ```bash
 ./gradlew build        # compile + run unit tests + produce build/libs/*.jar (CI gate)
 ./gradlew test         # run the pure-logic unit tests only
-./gradlew runClient    # launch a dev client with the mod loaded
+./gradlew runClient    # launch a dev client with the mod loaded (human only)
 ```
 
 - Use the Gradle wrapper (`./gradlew`, or `gradlew.bat` on Windows); do **not**
   assume a system Gradle is installed.
+- **`runClient` is human-only.** Agents must not launch it; hand the in-game
+  checklist to the user and wait for confirmation (see Stage-gating).
 - **Unit-test gate:** `./gradlew test` must pass. Pure logic (rect/geometry ops,
   occluder-edge classification, the headroom predicate, profile values) is
   unit-tested under `src/test/java` with `fabric-loader-junit`. **New pure logic
@@ -148,6 +153,11 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   [`docs/geometry.md`](docs/geometry.md)).
 - **Mismatched JDK is the most common setup failure** — verify `java -version` is
   `25` before debugging build issues.
+- **Locale files are author-owned copy.** Treat `assets/mobwalk/lang/*.json` (and
+  other locale resources) as the desired wording. Add keys for new options; update
+  a string only when the user asks or the option’s meaning changed. Do not rephrase,
+  “improve,” or whole-file rewrite existing entries. Prefer targeted edits over
+  replacing the file.
 
 ## Git / workflow
 

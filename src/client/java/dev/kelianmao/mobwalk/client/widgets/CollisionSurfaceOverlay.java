@@ -2,6 +2,8 @@ package dev.kelianmao.mobwalk.client.widgets;
 
 import java.util.List;
 
+import dev.kelianmao.mobwalk.client.Configs;
+import dev.kelianmao.mobwalk.client.Configs.ShowSurfaces;
 import dev.kelianmao.mobwalk.client.DownSkirtSpan;
 import dev.kelianmao.mobwalk.client.EntityProfile;
 import dev.kelianmao.mobwalk.client.HoleSpan;
@@ -18,7 +20,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -26,34 +28,35 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
 
+import fi.dy.masa.malilib.util.data.Color4f;
+
 /**
  * Draws the standable surfaces (upward-facing collision faces an entity can
- * stand on) of a region the player selects with a stick. The surfaces are
+ * stand on) of a region the player selects with the wand. The surfaces are
  * occlusion-aware (computed in {@link SurfaceSelection#select}): only tops not
  * covered by something directly above are emitted, so e.g. a stair renders as
  * its exposed L. The flat tops/borders draw <b>through walls</b> (depth-off fill
  * layer in {@code WorldOverlayManager}) so any remaining buried surface is
- * visible for debugging; each surface (and its skirts) is tinted by its
- * <b>flood BFS depth</b> — the distance from the seed at which the flood reached
- * it — as a cyclic hue band ({@link #depthColor}), a Milestone 6 debug aid so a
- * continuity bug (an area reached at an implausible depth) reads as an
- * out-of-sequence color. Surfaces within the last two
+ * visible for debugging. Tint comes from Appearance {@code walkableColor} by
+ * default; Debug {@code shadeByDepth} switches to a cyclic BFS-depth hue band
+ * ({@link #depthColor}) as a continuity-bug aid. Surfaces within the last two
  * blocks before the flood-radius cutoff blend toward <b>grey</b> (the outermost
  * block fully grey) to signal "increase the
  * radius or re-center" — a selection bounded by a real drop stops short of the
- * radius and stays depth-colored, so a radius cutoff reads differently from a
+ * radius and stays colored, so a radius cutoff reads differently from a
  * true boundary. By default tops (and their skirts/beams) draw on each block's
  * <b>visible face</b> ({@code visualTopY}) so blocks that render taller than they
- * collide (soul sand, mud) aren't buried; a standalone key (default {@code V})
- * toggles this against the true collision height ({@link #toggleVisualTop}), which
- * re-floods since the visible top is gathered compute-side. Each edge drops a
+ * collide (soul sand, mud) aren't buried; Appearance {@code drawOnVisibleFace}
+ * switches to the collision height, which re-floods since the visible top is
+ * gathered compute-side (gated on the flag; see {@code SurfaceSelection.visibleTop}).
+ * Each edge drops a
  * <b>depth-tested vertical skirt</b> so the
  * selection reads as a 3D mesh and a real drop reads as an open wall, but
  * <b>skirt-diffed</b>: the parts of an edge shared with an equal-height neighbour
  * (an internal edge of a continuous level the greedy merge split) are skipped, so
  * they don't read as false interior walls. See {@code PLAN.md}.
  *
- * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
+ * <p>The wand is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
  * collision shape) outward across walkable, footprint-adjacent surfaces (height
  * steps within the profile's reach) up to a BFS depth limit (adjustable via
@@ -65,7 +68,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * items and reappears on re-equip, and is emptied by a clearing right-click or
  * a level change.
  *
- * <p>The selection is published into a {@code volatile} snapshot on every stick
+ * <p>The selection is published into a {@code volatile} snapshot on every wand
  * action ({@link #publish}); {@link #extract} does no per-frame geometry work
  * (it only tracks the held item and resets on a level change), and {@link #emit}
  * re-emits the snapshot each frame.
@@ -74,13 +77,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Lifts the quads just above the block face to avoid z-fighting with the top
 	// surface. Kept as small as possible so the top hugs the real surface.
 	private static final double Y_OFFSET = 0.002;
-	private static final float FILL_ALPHA = 0.5f;
 	// An opaque outline drawn around each rect so adjacent surfaces (and the
 	// sub-rects of a single block) stay visually separable through the fill.
 	private static final float BORDER_ALPHA = 1.0f;
 	private static final float BORDER_THICKNESS = 0.045f;
 
-	// Debug depth coloring (Milestone 6 continuity-bug aid): tops and their skirts
+	// Debug depth coloring (gated by Configs.shadeByDepth): tops and their skirts
 	// are colored by flood BFS distance from the seed (0 = seed), NOT by height. The
 	// hue advances a small fixed step per depth ring and WRAPS, so it is a smooth
 	// gradient locally (neighbouring rings are near-identical colors — you can read
@@ -99,11 +101,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final double FLAT_EPS = 1.0e-6;
 
 	// Vertical skirts dropped from each surface edge so the selection reads as a
-	// 3D mesh. Depth = profile.reach() + SKIRT_MARGIN (~2): a region boundary is
-	// always a drop > reach, so this clears the reachable zone, and the
-	// depth-tested skirt pipeline then occludes the buried part. Skirts are shaded
-	// darker than the top for legibility.
-	private static final double SKIRT_MARGIN = 1.0;
+	// 3D mesh. Draw height comes from Appearance downSkirtHeight (0 skips draw).
+	// Skirts are shaded darker than the top for legibility.
 	private static final float SKIRT_SHADE = 0.55f;
 	private static final float SKIRT_ALPHA = 0.6f;
 	// Tiny uniform outward push of the (square) skirt edges — NOT a dilation: just
@@ -115,45 +114,29 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// Upward (occluder) skirts: drawn where a surface edge borders a wall/ceiling
 	// (the compute-side OccluderSpans), solid at the surface top and fading to
 	// transparent at the marker top. A lighter shade than the (darker) downward drop
-	// skirts so the two read distinctly. Four debug styles cycle on a keybind
-	// (cycleOccluderStyle) so the final look can be A/B'd in-game; the heights below
-	// are the candidate looks (tiny default).
+	// skirts so the two read distinctly. Draw height from Appearance upwardSkirtHeight
+	// (0 skips draw), clamped to the available wall above the surface.
 	private static final float UP_SKIRT_SHADE = 0.85f;
 	private static final float UP_SKIRT_ALPHA = 0.7f;
-	private static final int OCC_STYLE_COUNT = 4;
-	private static final int OCC_STYLE_TINY = 0;
-	private static final int OCC_STYLE_HALF = 1;
-	private static final int OCC_STYLE_FULL = 2;
-	private static final int OCC_STYLE_BOLD = 3;
-	private static final double OCC_TINY_HEIGHT = 0.15;
-	private static final double OCC_HALF_HEIGHT = 0.5;
-	private static final double OCC_BOLD_HEIGHT = 0.1;
 
-	// Hole beam: a through-walls vertical marker rising from the cliff-edge top of a
-	// hole span (drawn in the depth-off FILLED layer so it reads through terrain).
-	// Solid-ish red at the base, fading out toward a fixed world height so it doesn't
-	// read as a hard wall. Per-edge for now (Step 3); Step 4 coalesces to one beam per
-	// hole region and tunes this look.
+	// Hole beam: a vertical marker rising from the cliff-edge top of a hole span.
+	// Routed to the depth-off BEAM layer or depth-tested SKIRT layer by Appearance
+	// showBeamsThroughWalls. Color/opacity from holeBeamColor.
 	private static final float BEAM_HEIGHT = 4.0f;
-	private static final float BEAM_R = 0.95f;
-	private static final float BEAM_G = 0.15f;
-	private static final float BEAM_B = 0.1f;
-	private static final float BEAM_ALPHA_BASE = 0.85f;
-	private static final float BEAM_ALPHA_TOP = 0.05f;
 
 	// Cap the downward walk so looking at tall grass over a hole can't scan into
 	// the void; resolution also stops at world min-Y.
 	private static final int MAX_DOWNWARD_STEPS = 64;
 
 	// Flood depth limit: the maximum BFS hop-count from the seed. Adjustable at
-	// runtime via shift+scroll while holding the stick (see adjustRadius), clamped.
+	// runtime via shift+scroll while holding the wand (see adjustRadius), clamped.
 	private static final int MIN_RADIUS = 0;
-	private static final int MAX_RADIUS = 20;
-	private static final int DEFAULT_RADIUS = 3;
+	private static final int MAX_RADIUS = 30;
+	private static final int INITIAL_FLOOD_RADIUS = 20;
 	// Past this the scroll steps by 2, keeping the high end usable.
 	private static final int COARSE_RADIUS = 10;
 
-	// The computed surfaces, recomputed from scratch on each stick action
+	// The computed surfaces, recomputed from scratch on each wand action
 	// (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
 	private final SurfaceSelection cache = new SurfaceSelection();
 
@@ -161,14 +144,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// can re-flood from the same origin. Both touched only on the client thread
 	// (onUseItem and the scroll handler). lastSeed is null when nothing is
 	// selected.
-	private int selectionRadius = DEFAULT_RADIUS;
+	private int selectionRadius = INITIAL_FLOOD_RADIUS;
 	private BlockPos lastSeed;
 
-	// Active entity profile, cycled by sneak+right-click at nothing (see
-	// onUseItem). Point is a no-op for dilation, so it reproduces today's
-	// point-particle behavior. Written on the client thread (onUseItem), read on
-	// the render thread (emit, for the skirt depth), so volatile.
-	private volatile EntityProfile profile = EntityProfile.POINT;
+	// Active mob profile comes from Configs.mobProfile() (settings source of
+	// truth). Sneak+air-click may cycle it when Debug crouchCycleProfile is on.
 
 	// Last level seen on the extraction thread. A change (world unload, dimension
 	// switch, disconnect/reconnect) empties the in-memory selection — a
@@ -176,7 +156,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private Level lastLevel;
 
 	// Written on the extraction path, read on the render thread, so volatile.
-	private volatile boolean holdingStick = false;
+	// Full draw gate (showSurfaces + profile + wand + non-empty snapshot) sampled
+	// once per extract; isVisible() is a field read.
+	private volatile boolean visible = false;
 	// The opaque per-rect outlines are a debugging aid (they separate adjacent
 	// surfaces and sub-rects) but clutter the normal view, so they only draw while
 	// crouching. Sampled on the extraction thread, read in emit.
@@ -193,21 +175,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
 	// See SurfaceSelection.computeHoles.
 	private volatile List<HoleSpan> holeSnapshot = List.of();
-	// Debug A/B style for the occluder markers (tiny / half-block / full / bold-line),
-	// incremented by a standalone keybind (cycleOccluderStyle, client thread), read in
-	// emit (render thread). A render-thread-only choice, so it does not touch the
-	// published spans.
-	private volatile int occluderStyle = OCC_STYLE_TINY;
-
-	// Whether standable tops render on the block's VISIBLE face rather than the
-	// collision top, so render-taller-than-collide blocks (soul sand, mud) aren't
-	// buried. Default on (the fix). This is a COMPUTE-side flag, not a per-draw one: it
-	// is passed into select() (the visible top is gathered there, gated on it — see
-	// SurfaceSelection.visibleTop) and the chosen height is baked into each rect's
-	// visualTopY, which emit always draws. Toggling therefore re-floods from lastSeed
-	// (toggleVisualTop). Touched only on the client thread (select/toggle); emit no
-	// longer reads it, so volatile is just belt-and-suspenders.
-	private volatile boolean useVisualTop = true;
 
 	// Depth-based greying: surfaces near the flood's BFS-depth cutoff (the last 2
 	// depth rings) blend toward grey to signal "increase the depth limit"; a
@@ -230,9 +197,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		Player player = client.player;
 		Level level = client.level;
 
-		// The selection is published on every stick action (publish()), so extract
-		// does no per-frame geometry work. It only tracks the held item and resets
-		// on a level-identity change (world unload, dimension switch, reconnect).
+		// The selection is published on every wand action (publish()), so extract
+		// does no per-frame geometry work. It samples draw visibility + crouch and
+		// resets on a level-identity change (world unload, dimension switch, reconnect).
 		if (level != lastLevel) {
 			cache.clear();
 			lastSeed = null;
@@ -243,9 +210,18 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			holeSnapshot = List.of();
 		}
 
-		holdingStick = player != null
-			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK));
-		crouching = player != null && player.isShiftKeyDown();
+		Item wand = Configs.wandItem();
+		boolean holding = player != null
+			&& (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand));
+		ShowSurfaces mode = Configs.showSurfaces();
+		visible = mode != ShowSurfaces.NEVER
+			&& Configs.hasEnabledProfile()
+			&& (mode == ShowSurfaces.ALWAYS || holding)
+			&& !snapshot.isEmpty();
+		// Through-walls tops + crouch borders share this flag; gated by Debug setting.
+		crouching = player != null
+			&& player.isShiftKeyDown()
+			&& Configs.crouchSeeThroughWalls();
 	}
 
 	// Publish the current selection into the volatile snapshot emit() reads. Called
@@ -276,25 +252,59 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public boolean isVisible() {
-		return holdingStick && !snapshot.isEmpty();
+		return visible;
+	}
+
+	/**
+	 * Live apply from MaLiLib flood-radius control: update the session radius and
+	 * re-flood an active selection so the change shows immediately.
+	 */
+	public void applyFloodRadius(int radius) {
+		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, radius));
+		if (updated == selectionRadius) {
+			return;
+		}
+		selectionRadius = updated;
+		reselectWithMobProfile();
+	}
+
+	/**
+	 * Live apply from MaLiLib mob-profile control: re-flood an active selection so
+	 * the new entity size shows immediately.
+	 */
+	public void reselectWithMobProfile() {
+		Level level = Minecraft.getInstance().level;
+		var profile = Configs.mobProfile();
+		if (level != null && lastSeed != null && profile.isPresent()) {
+			cache.select(level, lastSeed, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
+			publish();
+		}
+	}
+
+	/** Soft-disabled roster: drop any leftover selection so draw stays off. */
+	public void clearSelectionForSoftDisable() {
+		cache.clear();
+		lastSeed = null;
+		publish();
 	}
 
 	@Override
 	public void onUseItem(Player player) {
-		// Right-click with the stick floods the selection from the targeted block
+		// Right-click with the wand floods the selection from the targeted block
 		// (resolved downward to its standable surface) across connected neighbors,
 		// replacing the previous selection; right-clicking nothing clears it.
 		//
-		// The stick may be in either hand. Pick the acting hand main-first, falling
-		// back to the off hand ONLY when the main hand is empty (or also a stick):
+		// The wand may be in either hand. Pick the acting hand main-first, falling
+		// back to the off hand ONLY when the main hand is empty (or also a wand):
 		// a non-empty main hand is assumed to consume the right-click (place/use), so
-		// an off-hand stick doesn't also fire — approximating vanilla's "main acts
+		// an off-hand wand doesn't also fire — approximating vanilla's "main acts
 		// first, off hand only if main did nothing" without an interaction-result
 		// mixin (this is edge-detected off the use key, so the true result is unseen).
+		Item wand = Configs.wandItem();
 		InteractionHand hand;
-		if (player.getMainHandItem().is(Items.STICK)) {
+		if (player.getMainHandItem().is(wand)) {
 			hand = InteractionHand.MAIN_HAND;
-		} else if (player.getOffhandItem().is(Items.STICK) && player.getMainHandItem().isEmpty()) {
+		} else if (player.getOffhandItem().is(wand) && player.getMainHandItem().isEmpty()) {
 			hand = InteractionHand.OFF_HAND;
 		} else {
 			return;
@@ -311,32 +321,48 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		if (start != null) {
-			cache.select(level, start, selectionRadius, profile, useVisualTop);
-			lastSeed = start;
+			if (!Configs.hasEnabledProfile()) {
+				OverlayManager.radiusIndicator().showProfile("no profiles active");
+			} else {
+				var profile = Configs.mobProfile();
+				if (profile.isPresent()) {
+					cache.select(level, start, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
+					lastSeed = start;
+				}
+			}
 		} else {
-			// Right-click at nothing clears. Sneaking also advances the profile and
-			// pings the HUD; lastSeed stays null so there is no re-flood — the new
-			// profile takes effect on the next select.
+			// Right-click at nothing clears. Soft-disabled: HUD "no profiles active".
+			// Otherwise when Debug crouchCycleProfile is on, sneaking advances the
+			// roster profile and pings the HUD; lastSeed stays null so there is no
+			// re-flood — the new profile takes effect on the next select.
 			cache.clear();
 			lastSeed = null;
-			if (player.isShiftKeyDown()) {
-				profile = profile.next();
-				OverlayManager.radiusIndicator().showProfile(profile.name());
+			if (!Configs.hasEnabledProfile()) {
+				OverlayManager.radiusIndicator().showProfile("no profiles active");
+			} else if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
+				if (Configs.cycleMobProfile().isPresent()) {
+					OverlayManager.radiusIndicator().showProfile(
+						Configs.profileDisplayLabel(Configs.activeProfileId())
+					);
+				}
 			}
 		}
 		publish();
 		player.swing(hand);
 	}
 
-	// True when shift+scroll should retarget the flood radius instead of switching
-	// the hotbar: only while holding the stick (the tool, in either hand) and
-	// sneaking, so plain scroll still changes the hotbar normally. No empty-main
-	// gate here (unlike the use trigger): scroll doesn't compete with a main-hand
-	// right-click and only does anything once a selection exists.
+	// True when scroll should retarget the flood radius instead of switching the
+	// hotbar: Debug "crouch to scroll radius" enabled, holding the wand (either
+	// hand), and crouching. When the option is off the feature is inactive — scroll
+	// always leaves the hotbar alone to vanilla.
 	public boolean wantsRadiusScroll() {
+		if (!Configs.crouchScrollRadius()) {
+			return false;
+		}
 		Player player = Minecraft.getInstance().player;
+		Item wand = Configs.wandItem();
 		return player != null
-			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK))
+			&& (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand))
 			&& player.isShiftKeyDown();
 	}
 
@@ -352,38 +378,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, selectionRadius + dir * step));
 		if (updated != selectionRadius) {
 			selectionRadius = updated;
-			Level level = Minecraft.getInstance().level;
-			if (level != null && lastSeed != null) {
-				cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
-				publish();
-			}
+			reselectWithMobProfile();
 		}
 		return selectionRadius;
-	}
-
-	// Advance the occluder-marker debug style (wrapping). Bound to a standalone key in
-	// MobWalkClient; a pure render-thread choice, so it does not touch the published
-	// spans (no re-flood). Returns the new style index for the on-screen ping.
-	public int cycleOccluderStyle() {
-		int next = (occluderStyle + 1) % OCC_STYLE_COUNT;
-		occluderStyle = next;
-		return next;
-	}
-
-	// Flip the visible-face-top render mode (soul sand / mud drawn on the face you see
-	// vs at their true collision top) and re-flood from the last seed. Unlike the pure
-	// render-side cycleOccluderStyle, this MUST recompute: the visible top is gathered
-	// compute-side and gated on this flag (see SurfaceSelection.visibleTop), so the
-	// snapshot has to be rebuilt. Toggling is rare, so the re-flood cost is a non-issue.
-	// Returns the new state for the on-screen ping.
-	public boolean toggleVisualTop() {
-		useVisualTop = !useVisualTop;
-		Level level = Minecraft.getInstance().level;
-		if (level != null && lastSeed != null) {
-			cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
-			publish();
-		}
-		return useVisualTop;
 	}
 
 	/**
@@ -393,11 +390,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	 */
 	public FloodDebugCounts dumpFloodDebug() {
 		Level level = Minecraft.getInstance().level;
-		if (level == null || lastSeed == null) {
+		var profile = Configs.mobProfile();
+		if (level == null || lastSeed == null || profile.isEmpty()) {
 			return null;
 		}
 		cache.requestDebugDump();
-		cache.select(level, lastSeed, selectionRadius, profile, useVisualTop);
+		cache.select(level, lastSeed, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
 		publish();
 		return new FloodDebugCounts(
 			cache.allRects().size(),
@@ -411,29 +409,33 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	@Override
-	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer) {
+	public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
+			BufferBuilder beamBuffer) {
 		List<StandableRect> rects = snapshot;
 		if (rects.isEmpty()) {
 			return;
 		}
 
 		int limit = depthLimit;
-		float skirtDepth = (float) (profile.reach() + SKIRT_MARGIN);
 
 		for (StandableRect rect : rects) {
+			if (!Configs.showCutoffRing() && inCutoffRing(rect.depth(), limit)) {
+				continue;
+			}
 			float minX = (float) rect.minX();
 			float minZ = (float) rect.minZ();
 			float maxX = (float) rect.maxX();
 			float maxZ = (float) rect.maxZ();
 			float y = (float) rect.visualTopY() + (float) Y_OFFSET;
 
-			float[] rgb = greyBlend(depthColor(rect.depth()), rect.depth(), limit);
+			float[] rgb = greyBlend(surfaceRgb(rect.depth()), rect.depth(), limit);
 			float r = rgb[0];
 			float g = rgb[1];
 			float b = rgb[2];
+			float fillAlpha = Configs.walkableColor().a;
 
 			BufferBuilder topBuffer = crouching ? fillBuffer : skirtBuffer;
-			quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, FILL_ALPHA);
+			quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, fillAlpha);
 
 			if (crouching) {
 				float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
@@ -451,26 +453,36 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		// drawn once per span into the depth-tested layer, pushed out by a tiny
 		// SKIRT_OFFSET so they clear the coplanar terrain face without z-fighting.
 		// Each span carries its edge line, [lo,hi], side, base height, and its
-		// surface's flood-depth (the debug color, fade, and skirt depth derive here).
-		emitDownSkirts(skirtBuffer, positionMatrix, skirtDepth);
+		// surface's flood-depth (the debug color and fade derive here).
+		emitDownSkirts(skirtBuffer, positionMatrix);
 
 		// Upward (occluder) skirts: drawn once per published span, into the same
-		// depth-tested layer, in the active debug style.
-		emitOccluders(skirtBuffer, positionMatrix, skirtDepth);
+		// depth-tested layer, at Appearance upwardSkirtHeight.
+		emitOccluders(skirtBuffer, positionMatrix);
 
-		// Hole beams: through-walls markers at each hole rim, into the depth-off
-		// FILLED layer so they read even behind terrain.
-		emitHoles(fillBuffer, positionMatrix);
+		// Hole beams: depth-off beam layer when showBeamsThroughWalls, else
+		// depth-tested skirt layer (occluded by terrain). Emit after skirts so
+		// beams still sit above skirt quads when sharing that buffer.
+		BufferBuilder holes = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
+		emitHoles(holes, positionMatrix);
 	}
 
-	// Draw a through-walls vertical beam rising from each hole span's rim (baseY),
-	// clamped to a fixed world height, solid-ish at the base and fading out at the
-	// top. Into the depth-off FILLED buffer so it is visible behind terrain.
-	private void emitHoles(BufferBuilder fillBuffer, Matrix4fc positionMatrix) {
+	// Draw a vertical beam rising from each hole span's rim (baseY), clamped to a
+	// fixed world height, at holeBeamColor opacity. Caller picks beam vs skirt
+	// buffer (Appearance showBeamsThroughWalls).
+	private void emitHoles(BufferBuilder beamBuffer, Matrix4fc positionMatrix) {
+		if (!Configs.showHoleBeams()) {
+			return;
+		}
 		List<HoleSpan> spans = holeSnapshot;
 		if (spans.isEmpty()) {
 			return;
 		}
+		Color4f beam = Configs.holeBeamColor();
+		float r = beam.r;
+		float g = beam.g;
+		float b = beam.b;
+		float a = beam.a;
 		// HoleSpan doesn't carry a flood-depth, so holes at the cutoff edge can't
 		// be depth-suppressed — that's acceptable: depth-limit artifacts are rare
 		// at cliff edges (the flood stops mid-surface, not at a drop).
@@ -493,8 +505,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 				xa = (float) h.line();
 				xb = (float) h.line();
 			}
-			vQuad(fillBuffer, positionMatrix, xa, za, xb, zb, top, base,
-				BEAM_R, BEAM_G, BEAM_B, BEAM_ALPHA_TOP, BEAM_ALPHA_BASE);
+			vQuad(beamBuffer, positionMatrix, xa, za, xb, zb, top, base,
+				r, g, b, a, a);
 		}
 	}
 
@@ -502,8 +514,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	// to transparent over the bottom half (so a deep drop doesn't read as a hard
 	// floating wall), depth-colored (inherited from its surface) and shaded darker.
 	// Spans at the outermost depth ring are suppressed (depth-cutoff artifacts).
-	private void emitDownSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-			float skirtDepth) {
+	// Appearance downSkirtHeight <= 0 skips the draw entirely.
+	private void emitDownSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix) {
+		float skirtDepth = (float) Configs.downSkirtHeight();
+		if (skirtDepth <= 0.0f) {
+			return;
+		}
 		List<DownSkirtSpan> spans = downSkirtSnapshot;
 		if (spans.isEmpty()) {
 			return;
@@ -514,7 +530,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			if (sp.depth() >= limit) {
 				continue;
 			}
-			float[] rgb = greyBlend(depthColor(sp.depth()), sp.depth(), limit);
+			if (!Configs.showCutoffRing() && inCutoffRing(sp.depth(), limit)) {
+				continue;
+			}
+			float[] rgb = greyBlend(surfaceRgb(sp.depth()), sp.depth(), limit);
 			float sr = rgb[0] * SKIRT_SHADE;
 			float sg = rgb[1] * SKIRT_SHADE;
 			float sb = rgb[2] * SKIRT_SHADE;
@@ -535,21 +554,27 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 	}
 
-	// Draw every published upward (occluder) skirt span in the active debug style.
-	// Solid at the surface top (baseY), fading to transparent at the marker top, the
+	// Draw every published upward (occluder) skirt span at Appearance upwardSkirtHeight,
+	// solid at the surface top and fading to transparent at the marker top, the
 	// marker pulled toward the surface interior by SKIRT_OFFSET to clear the wall face.
 	// Spans at the outermost depth ring are suppressed (depth-cutoff artifacts).
-	private void emitOccluders(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-			float skirtClamp) {
+	// upwardSkirtHeight <= 0 skips the draw entirely.
+	private void emitOccluders(BufferBuilder skirtBuffer, Matrix4fc positionMatrix) {
+		float configuredHeight = (float) Configs.upwardSkirtHeight();
+		if (configuredHeight <= 0.0f) {
+			return;
+		}
 		List<OccluderSpan> spans = occluderSnapshot;
 		if (spans.isEmpty()) {
 			return;
 		}
 		int limit = depthLimit;
-		int style = occluderStyle;
 		float o = (float) SKIRT_OFFSET;
 		for (OccluderSpan span : spans) {
 			if (span.depth() >= limit) {
+				continue;
+			}
+			if (!Configs.showCutoffRing() && inCutoffRing(span.depth(), limit)) {
 				continue;
 			}
 			// Rise from the rect's render height (visualBaseY); the wall top (span.topY)
@@ -559,16 +584,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			if (available <= 0.0f) {
 				continue;
 			}
-			float markerHeight = switch (style) {
-				case OCC_STYLE_HALF -> (float) OCC_HALF_HEIGHT;
-				case OCC_STYLE_FULL -> skirtClamp;
-				case OCC_STYLE_BOLD -> (float) OCC_BOLD_HEIGHT;
-				default -> (float) OCC_TINY_HEIGHT;
-			};
-			markerHeight = Math.min(markerHeight, available);
+			float markerHeight = Math.min(configuredHeight, available);
 			float yTopMarker = base + markerHeight;
 
-			float[] rgb = greyBlend(depthColor(span.depth()), span.depth(), limit);
+			float[] rgb = greyBlend(surfaceRgb(span.depth()), span.depth(), limit);
 			float r = rgb[0] * UP_SKIRT_SHADE;
 			float g = rgb[1] * UP_SKIRT_SHADE;
 			float b = rgb[2] * UP_SKIRT_SHADE;
@@ -594,15 +613,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 				xb = line;
 			}
 
-			if (style == OCC_STYLE_BOLD) {
-				// A crisp opaque line (no fade), marking the wall edge.
-				vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
-					r, g, b, BORDER_ALPHA, BORDER_ALPHA);
-			} else {
-				// Solid at the base (T), fading to transparent at the marker top.
-				vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
-					r, g, b, 0.0f, UP_SKIRT_ALPHA);
-			}
+			// Solid at the base (T), fading to transparent at the marker top.
+			vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
+				r, g, b, 0.0f, UP_SKIRT_ALPHA);
 		}
 	}
 
@@ -622,6 +635,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		buffer.addVertex(matrix, x1, y, z1).setColor(r, g, b, a);
 		buffer.addVertex(matrix, x0, y, z1).setColor(r, g, b, a);
 		buffer.addVertex(matrix, x0, y, z0).setColor(r, g, b, a);
+	}
+
+	// True for depths in the cutoff-ring band (partial/full grey when shown):
+	// depth == limit-1 → half grey; depth >= limit → full grey.
+	private static boolean inCutoffRing(int depth, int limit) {
+		return depth >= 0 && depth > limit - 2;
 	}
 
 	// Blend a base color toward RING_COLOR by how close the rect's BFS depth is to
@@ -667,6 +686,16 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		buffer.addVertex(matrix, xb, yTop, zb).setColor(r, g, b, aTop);
 		buffer.addVertex(matrix, xa, yTop, za).setColor(r, g, b, aTop);
 		buffer.addVertex(matrix, xa, yBot, za).setColor(r, g, b, aBot);
+	}
+
+	// Base RGB for a surface/skirt at the given flood depth: Appearance walkable
+	// color, or the cyclic depth-hue band when Debug shadeByDepth is on.
+	private static float[] surfaceRgb(int depth) {
+		if (Configs.shadeByDepth()) {
+			return depthColor(depth);
+		}
+		Color4f c = Configs.walkableColor();
+		return new float[] {c.r, c.g, c.b};
 	}
 
 	// Map a flood BFS depth (distance from the seed) to RGB: the hue advances a small

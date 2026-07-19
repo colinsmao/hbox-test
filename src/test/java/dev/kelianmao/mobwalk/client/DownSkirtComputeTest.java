@@ -94,4 +94,36 @@ final class DownSkirtComputeTest {
 		assertTrue(find(spans, false, true, 1.0) == null, "+X edge is a wall, no down skirt");
 		assertEquals(3, spans.size());
 	}
+
+	@Test
+	void visualStepBetweenSameCollisionTopRaisesSkirt() {
+		// The neighbour-raise split: a path lip drawn on a soul-sand cube top
+		// (visualTopY 65.0) abuts the flush path proper (visualTopY 64.9375); both share
+		// collision topY 64.9375. The collision pass sees a seam, the visual pass a step.
+		StandableRect flush = new StandableRect(0, 0, 1, 1, 64.9375, 64.9375);
+		StandableRect raised = new StandableRect(1, 0, 2, 1, 64.9375, 65.0);
+		List<DownSkirtSpan> drop =
+			SurfaceSelection.computeDownSkirts(List.of(flush, raised), List.of(), false);
+		assertTrue(find(drop, false, true, 1.0) == null, "collision seam: no drop skirt (flush +X)");
+		assertTrue(find(drop, false, false, 1.0) == null, "collision seam: no drop skirt (raised -X)");
+		List<DownSkirtSpan> skirts =
+			SurfaceSelection.computeDownSkirts(List.of(flush, raised), List.of(), true);
+		DownSkirtSpan step = find(skirts, false, true, 1.0);
+		assertTrue(step != null, "visible step: flush +X skirts");
+		assertEquals(64.9375, step.visualBaseY(), EPS);
+		assertTrue(find(skirts, false, false, 1.0) != null, "visible step: raised -X skirts");
+	}
+
+	@Test
+	void sameVisualTopDifferentCollisionSuppressesSkirt() {
+		// Soul sand's own remnant (64.875 collision, 65.0 visual) abutting the path lip
+		// (64.9375 collision, 65.0 visual): equal visualTopY, so the visual pass draws no
+		// skirt between them even though their collision tops differ.
+		StandableRect remnant = new StandableRect(0, 0, 1, 1, 64.875, 65.0);
+		StandableRect lip = new StandableRect(1, 0, 2, 1, 64.9375, 65.0);
+		List<DownSkirtSpan> skirts =
+			SurfaceSelection.computeDownSkirts(List.of(remnant, lip), List.of(), true);
+		assertTrue(find(skirts, false, true, 1.0) == null, "no visible step -> no skirt (remnant +X)");
+		assertTrue(find(skirts, false, false, 1.0) == null, "no visible step -> no skirt (lip -X)");
+	}
 }
