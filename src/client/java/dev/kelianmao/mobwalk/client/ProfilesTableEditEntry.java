@@ -15,32 +15,32 @@ import fi.dy.masa.malilib.util.StringUtils;
  * {@link #setEnabled} on this button ignores that and stays off.
  */
 final class ProfilesTableEditEntry extends WidgetTableEditEntry {
-	ProfilesTableEditEntry(
-		int x,
-		int y,
-		int width,
-		int height,
-		int listIndex,
-		boolean isOdd,
-		TableRow entry,
-		TableRow defaultValue,
-		WidgetListTableEdit parent,
-		List<EntryTypes> types
-	) {
-		super(x, y, width, height, listIndex, isOdd, entry, defaultValue, parent, types);
-	}
+  ProfilesTableEditEntry(
+    int x,
+    int y,
+    int width,
+    int height,
+    int listIndex,
+    boolean isOdd,
+    TableRow entry,
+    TableRow defaultValue,
+    WidgetListTableEdit parent,
+    List<EntryTypes> types
+  ) {
+    super(x, y, width, height, listIndex, isOdd, entry, defaultValue, parent, types);
+  }
 
-	@Override
-	protected ButtonGeneric createResetButton(int x, int y) {
-		String label = StringUtils.translate("malilib.gui.button.reset.caps");
-		ButtonGeneric button = new ButtonGeneric(x, y, -1, 20, label) {
-			@Override
-			public void setEnabled(boolean enabled) {
-				super.setEnabled(false);
-			}
-		};
-		button.setX(x - button.getWidth());
-		button.setEnabled(false);
-		return button;
-	}
+  @Override
+  protected ButtonGeneric createResetButton(int x, int y) {
+    String label = StringUtils.translate("malilib.gui.button.reset.caps");
+    ButtonGeneric button = new ButtonGeneric(x, y, -1, 20, label) {
+      @Override
+      public void setEnabled(boolean enabled) {
+        super.setEnabled(false);
+      }
+    };
+    button.setX(x - button.getWidth());
+    button.setEnabled(false);
+    return button;
+  }
 }

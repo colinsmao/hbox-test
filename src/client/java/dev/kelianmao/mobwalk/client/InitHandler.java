@@ -9,12 +9,12 @@ import dev.kelianmao.mobwalk.MobWalk;
 
 /** Registers MaLiLib config handler + config-screen factory after MaLiLib boots. */
 public final class InitHandler implements IInitializationHandler {
-	@Override
-	public void registerModHandlers() {
-		ConfigManager.getInstance().registerConfigHandler(MobWalk.MOD_ID, new Configs());
-		Registry.CONFIG_SCREEN.registerConfigScreenFactory(
-			new ModInfo(MobWalk.MOD_ID, "MobWalk", GuiConfigs::new)
-		);
-		Configs.initCallbacks();
-	}
+  @Override
+  public void registerModHandlers() {
+    ConfigManager.getInstance().registerConfigHandler(MobWalk.MOD_ID, new Configs());
+    Registry.CONFIG_SCREEN.registerConfigScreenFactory(
+      new ModInfo(MobWalk.MOD_ID, "MobWalk", GuiConfigs::new)
+    );
+    Configs.initCallbacks();
+  }
 }

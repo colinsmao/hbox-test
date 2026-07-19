@@ -24,15 +24,15 @@ package dev.kelianmao.mobwalk.client;
  * grey. Nothing but the debug depth-coloring reads it.
  */
 public record StandableRect(double minX, double minZ, double maxX, double maxZ,
-		double topY, double visualTopY, int depth) {
-	/** A rect with an explicit visible top but no flood depth ({@code depth = -1}). */
-	public StandableRect(double minX, double minZ, double maxX, double maxZ,
-			double topY, double visualTopY) {
-		this(minX, minZ, maxX, maxZ, topY, visualTopY, -1);
-	}
+    double topY, double visualTopY, int depth) {
+  /** A rect with an explicit visible top but no flood depth ({@code depth = -1}). */
+  public StandableRect(double minX, double minZ, double maxX, double maxZ,
+      double topY, double visualTopY) {
+    this(minX, minZ, maxX, maxZ, topY, visualTopY, -1);
+  }
 
-	/** A rect whose visible top coincides with its collision top (the common case). */
-	public StandableRect(double minX, double minZ, double maxX, double maxZ, double topY) {
-		this(minX, minZ, maxX, maxZ, topY, topY, -1);
-	}
+  /** A rect whose visible top coincides with its collision top (the common case). */
+  public StandableRect(double minX, double minZ, double maxX, double maxZ, double topY) {
+    this(minX, minZ, maxX, maxZ, topY, topY, -1);
+  }
 }

@@ -35,16 +35,16 @@ package dev.kelianmao.mobwalk.client;
  *                {@code -1} = "no flood depth" (rendered grey).
  */
 public record DownSkirtSpan(boolean alongX, boolean maxSide, double line,
-		double lo, double hi, double baseY, double visualBaseY, int depth) {
-	/** A span with an explicit visible base but no flood depth ({@code depth = -1}). */
-	public DownSkirtSpan(boolean alongX, boolean maxSide, double line,
-			double lo, double hi, double baseY, double visualBaseY) {
-		this(alongX, maxSide, line, lo, hi, baseY, visualBaseY, -1);
-	}
+    double lo, double hi, double baseY, double visualBaseY, int depth) {
+  /** A span with an explicit visible base but no flood depth ({@code depth = -1}). */
+  public DownSkirtSpan(boolean alongX, boolean maxSide, double line,
+      double lo, double hi, double baseY, double visualBaseY) {
+    this(alongX, maxSide, line, lo, hi, baseY, visualBaseY, -1);
+  }
 
-	/** A span whose visible base coincides with its collision base (the common case). */
-	public DownSkirtSpan(boolean alongX, boolean maxSide, double line,
-			double lo, double hi, double baseY) {
-		this(alongX, maxSide, line, lo, hi, baseY, baseY, -1);
-	}
+  /** A span whose visible base coincides with its collision base (the common case). */
+  public DownSkirtSpan(boolean alongX, boolean maxSide, double line,
+      double lo, double hi, double baseY) {
+    this(alongX, maxSide, line, lo, hi, baseY, baseY, -1);
+  }
 }

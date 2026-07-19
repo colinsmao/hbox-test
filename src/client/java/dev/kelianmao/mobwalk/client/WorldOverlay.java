@@ -17,38 +17,38 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * shared render pipeline and GPU plumbing so widgets only describe geometry.
  */
 public interface WorldOverlay {
-	String id();
+  String id();
 
-	/** Extraction phase: read game state and store an immutable snapshot. */
-	void extract(LevelExtractionContext context);
+  /** Extraction phase: read game state and store an immutable snapshot. */
+  void extract(LevelExtractionContext context);
 
-	/**
-	 * Drawing phase: append quads to the shared buffers.
-	 *
-	 * <p>{@link WorldOverlayManager} maintains three {@code POSITION_COLOR} /
-	 * {@code QUADS} layers: {@code fillBuffer} is <b>depth-disabled</b> (tops /
-	 * borders through walls), {@code skirtBuffer} is <b>depth-tested</b>
-	 * (occluded by world geometry), and {@code beamBuffer} is <b>depth-disabled</b>
-	 * again but drawn <b>last</b> so hole beams composite over skirts.
-	 *
-	 * @param positionMatrix already translated so world coordinates are
-	 *                       camera-relative; pass absolute world coords.
-	 * @param fillBuffer     depth-disabled layer (tops/borders through walls).
-	 * @param skirtBuffer    depth-tested layer (occluded by world geometry).
-	 * @param beamBuffer     depth-disabled layer drawn after skirts (hole beams).
-	 */
-	void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
-			BufferBuilder beamBuffer);
+  /**
+   * Drawing phase: append quads to the shared buffers.
+   *
+   * <p>{@link WorldOverlayManager} maintains three {@code POSITION_COLOR} /
+   * {@code QUADS} layers: {@code fillBuffer} is <b>depth-disabled</b> (tops /
+   * borders through walls), {@code skirtBuffer} is <b>depth-tested</b>
+   * (occluded by world geometry), and {@code beamBuffer} is <b>depth-disabled</b>
+   * again but drawn <b>last</b> so hole beams composite over skirts.
+   *
+   * @param positionMatrix already translated so world coordinates are
+   *                       camera-relative; pass absolute world coords.
+   * @param fillBuffer     depth-disabled layer (tops/borders through walls).
+   * @param skirtBuffer    depth-tested layer (occluded by world geometry).
+   * @param beamBuffer     depth-disabled layer drawn after skirts (hole beams).
+   */
+  void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
+      BufferBuilder beamBuffer);
 
-	default boolean isVisible() {
-		return true;
-	}
+  default boolean isVisible() {
+    return true;
+  }
 
-	/**
-	 * Called on the rising edge of the use key (right-click). The widget picks
-	 * which hand to act on itself (e.g. main-first with an off-hand fallback), so
-	 * the manager stays agnostic to what item a widget cares about.
-	 */
-	default void onUseItem(Player player) {
-	}
+  /**
+   * Called on the rising edge of the use key (right-click). The widget picks
+   * which hand to act on itself (e.g. main-first with an off-hand fallback), so
+   * the manager stays agnostic to what item a widget cares about.
+   */
+  default void onUseItem(Player player) {
+  }
 }

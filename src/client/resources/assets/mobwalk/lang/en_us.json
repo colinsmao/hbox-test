@@ -1,7 +1,7 @@
 {
   "mobwalk.gui.title.configs": "MobWalk Configs",
 
-	"mobwalk.gui.button.config_gui.general": "General",
+  "mobwalk.gui.button.config_gui.general": "General",
   "mobwalk.gui.button.config_gui.appearance": "Appearance",
   "mobwalk.gui.button.config_gui.debug": "Debug",
 

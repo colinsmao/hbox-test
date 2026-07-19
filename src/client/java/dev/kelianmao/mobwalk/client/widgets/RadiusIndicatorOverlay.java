@@ -19,56 +19,56 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
  * {@link #isVisible}, so they are {@code volatile}.
  */
 public final class RadiusIndicatorOverlay implements Overlay {
-	private static final long VISIBLE_MS = 1500L;
-	private static final long FADE_MS = 500L;
-	private static final int CROSSHAIR_Y_OFFSET = 12;
-	private static final int RGB = 0xFFFFFF;
+  private static final long VISIBLE_MS = 1500L;
+  private static final long FADE_MS = 500L;
+  private static final int CROSSHAIR_Y_OFFSET = 12;
+  private static final int RGB = 0xFFFFFF;
 
-	private volatile String text = "";
-	private volatile long expiresAt;
+  private volatile String text = "";
+  private volatile long expiresAt;
 
-	/** Show the indicator with the given radius, resetting its fade timer. */
-	public void show(int radius) {
-		showMessage("Flood radius: " + radius);
-	}
+  /** Show the indicator with the given radius, resetting its fade timer. */
+  public void show(int radius) {
+    showMessage("Flood radius: " + radius);
+  }
 
-	/** Show the indicator with the active profile name, resetting its fade timer. */
-	public void showProfile(String name) {
-		showMessage("Profile: " + name);
-	}
+  /** Show the indicator with the active profile name, resetting its fade timer. */
+  public void showProfile(String name) {
+    showMessage("Profile: " + name);
+  }
 
-	private void showMessage(String message) {
-		this.text = message;
-		this.expiresAt = System.currentTimeMillis() + VISIBLE_MS;
-	}
+  private void showMessage(String message) {
+    this.text = message;
+    this.expiresAt = System.currentTimeMillis() + VISIBLE_MS;
+  }
 
-	@Override
-	public String id() {
-		return "radius_indicator";
-	}
+  @Override
+  public String id() {
+    return "radius_indicator";
+  }
 
-	@Override
-	public boolean isVisible() {
-		return System.currentTimeMillis() < expiresAt;
-	}
+  @Override
+  public boolean isVisible() {
+    return System.currentTimeMillis() < expiresAt;
+  }
 
-	@Override
-	public void render(GuiGraphicsExtractor graphics, DeltaTracker delta) {
-		long remaining = expiresAt - System.currentTimeMillis();
-		if (remaining <= 0) {
-			return;
-		}
+  @Override
+  public void render(GuiGraphicsExtractor graphics, DeltaTracker delta) {
+    long remaining = expiresAt - System.currentTimeMillis();
+    if (remaining <= 0) {
+      return;
+    }
 
-		int alpha = remaining >= FADE_MS ? 255 : (int) (255L * remaining / FADE_MS);
-		if (alpha <= 0) {
-			return;
-		}
+    int alpha = remaining >= FADE_MS ? 255 : (int) (255L * remaining / FADE_MS);
+    if (alpha <= 0) {
+      return;
+    }
 
-		Minecraft client = Minecraft.getInstance();
-		Font font = client.font;
-		String text = this.text;
-		int x = (client.getWindow().getGuiScaledWidth() - font.width(text)) / 2;
-		int y = client.getWindow().getGuiScaledHeight() / 2 + CROSSHAIR_Y_OFFSET;
-		graphics.text(font, text, x, y, (alpha << 24) | RGB, true);
-	}
+    Minecraft client = Minecraft.getInstance();
+    Font font = client.font;
+    String text = this.text;
+    int x = (client.getWindow().getGuiScaledWidth() - font.width(text)) / 2;
+    int y = client.getWindow().getGuiScaledHeight() / 2 + CROSSHAIR_Y_OFFSET;
+    graphics.text(font, text, x, y, (alpha << 24) | RGB, true);
+  }
 }

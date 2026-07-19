@@ -13,45 +13,45 @@ import fi.dy.masa.malilib.gui.GuiTextFieldGeneric;
  * typed string stays in the config field.
  */
 public final class WandItem {
-	public static final String DEFAULT_ID = "minecraft:stick";
+  public static final String DEFAULT_ID = "minecraft:stick";
 
-	private static final String INVALID_TOOLTIP_KEY = "mobwalk.gui.text_field.invalid_item_id";
+  private static final String INVALID_TOOLTIP_KEY = "mobwalk.gui.text_field.invalid_item_id";
 
-	private WandItem() {}
+  private WandItem() {}
 
-	/** True when {@code text} parses to a registered item id. */
-	public static boolean isValid(String text) {
-		if (text == null) {
-			return false;
-		}
-		Identifier id = Identifier.tryParse(text.trim());
-		return id != null && BuiltInRegistries.ITEM.containsKey(id);
-	}
+  /** True when {@code text} parses to a registered item id. */
+  public static boolean isValid(String text) {
+    if (text == null) {
+      return false;
+    }
+    Identifier id = Identifier.tryParse(text.trim());
+    return id != null && BuiltInRegistries.ITEM.containsKey(id);
+  }
 
-	/**
-	 * Item named by {@code text}, or {@link Items#STICK} when the string is
-	 * malformed or not a registered item.
-	 */
-	public static Item resolve(String text) {
-		if (text == null) {
-			return Items.STICK;
-		}
-		Identifier id = Identifier.tryParse(text.trim());
-		if (id == null) {
-			return Items.STICK;
-		}
-		return BuiltInRegistries.ITEM.getOptional(id).orElse(Items.STICK);
-	}
+  /**
+   * Item named by {@code text}, or {@link Items#STICK} when the string is
+   * malformed or not a registered item.
+   */
+  public static Item resolve(String text) {
+    if (text == null) {
+      return Items.STICK;
+    }
+    Identifier id = Identifier.tryParse(text.trim());
+    if (id == null) {
+      return Items.STICK;
+    }
+    return BuiltInRegistries.ITEM.getOptional(id).orElse(Items.STICK);
+  }
 
-	/**
-	 * MaLiLib-style live invalid cue: hover tooltip when the field text is not a
-	 * registered item id; clear when valid.
-	 */
-	public static void applyInvalidTooltip(GuiTextFieldGeneric field) {
-		if (isValid(field.getValue())) {
-			field.clearHoverTooltip();
-		} else {
-			field.setHoverTooltip(INVALID_TOOLTIP_KEY);
-		}
-	}
+  /**
+   * MaLiLib-style live invalid cue: hover tooltip when the field text is not a
+   * registered item id; clear when valid.
+   */
+  public static void applyInvalidTooltip(GuiTextFieldGeneric field) {
+    if (isValid(field.getValue())) {
+      field.clearHoverTooltip();
+    } else {
+      field.setHoverTooltip(INVALID_TOOLTIP_KEY);
+    }
+  }
 }
