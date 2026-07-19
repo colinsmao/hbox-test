@@ -8,11 +8,15 @@
   "mobwalk.gui.button.reset_cancel": "Cancel",
   "mobwalk.gui.button.reset_confirm": "Confirm",
 
-  "mobwalk.config.generic.comment.enableRendering": "If enabled, shows the standable-surface overlay when holding a stick.",
+  "mobwalk.config.generic.comment.enableRendering": "If enabled, shows the standable-surface overlay when holding a wand.",
+
+  "mobwalk.config.generic.comment.wandItem": "Item id of the wand tool. Defaults to minecraft:stick.\nRight-click with the wand to select. Only renders when holding the wand in either hand. It is suggested to use a non-interaction item (eg stick, ingot), to prevent action conflicts on right-click.",
 
   "mobwalk.config.generic.comment.mobProfile": "Which mob's hitbox and vertical reach to use when calculating walkable area. Cycles enabled mob profiles only. Does NOT account for horizontal movement when jumping (ie parkour).",
 
   "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block, in flood steps. Large values may impact performance, especially with a large mob hitbox (must check farther per step).",
+
+  "mobwalk.gui.text_field.invalid_item_id": "Unknown or invalid item id",
 
   "mobwalk.config.profiles.button.builtinProfiles": "Edit Built-in Profiles",
   "mobwalk.config.profiles.button.customProfiles": "Edit Custom Profiles",
@@ -42,9 +46,9 @@
 
   "mobwalk.config.debug.comment.crouchSeeThroughWalls": "If enabled, while crouching, shows walkable surfaces through walls.",
 
-  "mobwalk.config.debug.comment.crouchScrollRadius": "If enabled, while crouching with a stick, scrolling changes the flood radius.",
+  "mobwalk.config.debug.comment.crouchScrollRadius": "If enabled, while crouching with a wand, scrolling changes the flood radius.",
 
-  "mobwalk.config.debug.comment.crouchCycleProfile": "If enabled, while crouching with a stick, right-clicking air cycles the mob profile.",
+  "mobwalk.config.debug.comment.crouchCycleProfile": "If enabled, while crouching with a wand, right-clicking air cycles the mob profile.",
 
   "mobwalk.config.debug.comment.shadeByDepth": "If enabled, colors surfaces by the BFS flood depth from the seed. Mostly for debugging connectivity, as the rainbow hues are distracting.",
 

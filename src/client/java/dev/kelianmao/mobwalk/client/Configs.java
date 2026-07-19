@@ -14,6 +14,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 import fi.dy.masa.malilib.config.ConfigUtils;
 import fi.dy.masa.malilib.config.IConfigBase;
@@ -23,6 +25,7 @@ import fi.dy.masa.malilib.config.options.ConfigColor;
 import fi.dy.masa.malilib.config.options.ConfigDouble;
 import fi.dy.masa.malilib.config.options.ConfigInteger;
 import fi.dy.masa.malilib.config.options.ConfigOptionList;
+import fi.dy.masa.malilib.config.options.ConfigString;
 import fi.dy.masa.malilib.config.options.table.ConfigTable;
 import fi.dy.masa.malilib.config.options.table.Label;
 import fi.dy.masa.malilib.config.options.table.TableRow;
@@ -53,6 +56,8 @@ public final class Configs implements IConfigHandler {
 
 	/** Cached roster rebuilt from builtin slim state + custom table. */
 	private static ProfileRoster cachedRoster = ProfileRoster.defaults();
+	/** Current wand item resolved from {@link Generic#WAND_ITEM}; refreshed on change/load. */
+	private static Item cachedWandItem = Items.STICK;
 	/** Guards re-entrant setTable while seeding a newly ADDed custom row. */
 	private static boolean seedingCustomAdd;
 	/**
@@ -65,6 +70,8 @@ public final class Configs implements IConfigHandler {
 	public static final class Generic {
 		public static final ConfigBoolean ENABLE_RENDERING =
 			new ConfigBoolean("enableRendering", true).apply(GENERIC_KEY);
+		public static final ConfigString WAND_ITEM =
+			new ConfigString("wandItem", WandItem.DEFAULT_ID).apply(GENERIC_KEY);
 		public static final ConfigOptionList MOB_PROFILE =
 			new ConfigOptionList("mobProfile", RosterProfileOption.player()).apply(GENERIC_KEY);
 		/** Same instance as {@link Profiles#BUILTIN_PROFILES}; shown on General. */
@@ -77,6 +84,7 @@ public final class Configs implements IConfigHandler {
 		/** GUI order (includes tables). File I/O uses {@link #FILE_OPTIONS}. */
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
 			ENABLE_RENDERING,
+			WAND_ITEM,
 			MOB_PROFILE,
 			BUILTIN_PROFILES,
 			CUSTOM_PROFILES,
@@ -86,6 +94,7 @@ public final class Configs implements IConfigHandler {
 		/** Generic JSON category — profile tables live under Profiles. */
 		static final ImmutableList<IConfigBase> FILE_OPTIONS = ImmutableList.of(
 			ENABLE_RENDERING,
+			WAND_ITEM,
 			MOB_PROFILE,
 			FLOOD_RADIUS
 		);
@@ -325,6 +334,7 @@ public final class Configs implements IConfigHandler {
 
 	/** Wire live apply into the overlay (call once from init, before config load). */
 	public static void initCallbacks() {
+		Generic.WAND_ITEM.setValueChangeCallback(cfg -> refreshWandItem());
 		Generic.FLOOD_RADIUS.setValueChangeCallback(cfg -> {
 			CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
 			if (collision != null) {
@@ -348,6 +358,10 @@ public final class Configs implements IConfigHandler {
 		});
 		Profiles.BUILTIN_PROFILES.setValueChangeCallback(cfg -> onProfilesChanged());
 		Profiles.CUSTOM_PROFILES.setValueChangeCallback(cfg -> onCustomProfilesChanged());
+	}
+
+	private static void refreshWandItem() {
+		cachedWandItem = WandItem.resolve(Generic.WAND_ITEM.getStringValue());
 	}
 
 	/**
@@ -441,6 +455,11 @@ public final class Configs implements IConfigHandler {
 
 	public static boolean isRenderingEnabled() {
 		return Generic.ENABLE_RENDERING.getBooleanValue();
+	}
+
+	/** Current wand item (malformed/unknown ids → stick). Refreshed on change/load. */
+	public static Item wandItem() {
+		return cachedWandItem;
 	}
 
 	/** @deprecated use {@link #isRenderingEnabled()} */
@@ -551,6 +570,7 @@ public final class Configs implements IConfigHandler {
 		Path configFile = FileUtils.getConfigDirectory().resolve(CONFIG_FILE_NAME);
 		if (!Files.isRegularFile(configFile)) {
 			applyRoster(ProfileRoster.defaults());
+			refreshWandItem();
 			return;
 		}
 		JsonElement element = JsonUtils.parseJsonFile(configFile);
@@ -563,6 +583,7 @@ public final class Configs implements IConfigHandler {
 		} else {
 			applyRoster(ProfileRoster.defaults());
 		}
+		refreshWandItem();
 	}
 
 	/**

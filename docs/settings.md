@@ -45,12 +45,13 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `enableRendering` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
+| `wandItem` | `ConfigString` | `minecraft:stick` | Item used as the wand (select / clear / crouch gestures). Current resolved `Item` is refreshed on change/load via `WandItem` against `BuiltInRegistries.ITEM`; malformed or unknown ids fall back to stick while the typed string stays in the field. Row uses `ItemIdConfigOption` (live invalid hover tooltip). |
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
 | `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
 
-Helpers: `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
+Helpers: `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
 `Configs.roster()`, `Configs.hasEnabledProfile()`, `Configs.isRenderingEnabled()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
@@ -108,13 +109,15 @@ New/renamed colliding names are uniquified into the stored Name (ids `custom0`,
 `custom1`, …); existing names are not reindexed. `Configs.profileDisplayLabel` /
 settings button use that stored name. Cycle still skips disabled.
 - **Soft-disable:** every participating profile Off → `hasEnabledProfile()` false;
-overlay select floods stay off; stick air- or block-click pings HUD
+overlay select floods stay off; wand air- or block-click pings HUD
 `no profiles active`; `enableRendering` is unchanged. Shift+scroll radius still works.
 - **ConfigTable RESET enable:** MaLiLib `ConfigTable.isModified()` compares defaults
 to a stale `lastTable` after popup edits. Use `Configs.configTableIsModified(table)`
 (live rows vs defaults) for RESET enable on any ConfigTable. Both
 `Edit Built-in Profiles` and `Edit Custom Profiles` rows use Cancel (same spot) +
-Confirm (to the right) via `ConfirmResetConfigOption`; Confirm calls
+Confirm (to the right) via `ConfirmResetConfigOption` (factory selects that subclass
+only for those two tables; other rows use stock `WidgetConfigOption`; `wandItem` uses
+`ItemIdConfigOption`); Confirm calls
 `resetToDefault()` then `Configs.syncAfterProfilesTableReset()`. Builtin RESET
 restores seed enables/order; custom RESET clears the table to empty.
 
@@ -162,8 +165,8 @@ name: `"Debug"`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
-| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: stick + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
-| `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: stick + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
+| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
+| `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
 | `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `greyBlend`. |
 | `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`greyBlend`). When off: those ring depths are not drawn. |
 

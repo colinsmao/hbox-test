@@ -117,30 +117,30 @@ Config UI, persistence, and MaLiLib option types live in
 ## Block-hitbox rendering: `CollisionSurfaceOverlay` + `SurfaceSelection`
 
 Draws the **standable surfaces** of blocks — the upward-facing collision faces an
-entity of a chosen size can stand on — for a region the player selects with a
-stick, where the region follows **walkable terrain** outward from the clicked
+entity of a chosen size can stand on — for a region the player selects with the
+wand (General `wandItem`, default stick), where the region follows **walkable terrain** outward from the clicked
 block. The geometry (occlusion-aware tops, entity-width dilation, the
 output-sensitive flood) is computed by `SurfaceSelection` and documented in
 [`geometry.md`](geometry.md); this section covers the **widget and its drawing**.
 
 ### Selection lifecycle (input → snapshot)
 
-- **Stick is a trigger, not a brush.** Right-clicking (use-key rising edge) selects
+- **Wand is a trigger, not a brush.** Right-clicking (use-key rising edge) selects
   the surfaces reachable from the targeted block; right-clicking nothing clears. The
-  selection persists across item switches (drawn while the stick is held in **either
+  selection persists across item switches (drawn while the wand is held in **either
   hand**) until the next trigger or a level change.
-- **Either hand, main-first.** The stick works in the main **or** off hand. The
+- **Either hand, main-first.** The wand works in the main **or** off hand. The
   acting hand is chosen main-first, falling back to the off hand **only when the main
-  hand is empty** (or also a stick): a non-empty main hand is assumed to consume the
-  right-click (place/use), so an off-hand stick doesn't also fire — approximating
+  hand is empty** (or also a wand): a non-empty main hand is assumed to consume the
+  right-click (place/use), so an off-hand wand doesn't also fire — approximating
   vanilla's "main acts first, off hand only if main did nothing" without an
   interaction-result mixin (the trigger is edge-detected off the use key, so the true
   result is unseen). The hand choice lives in `CollisionSurfaceOverlay.onUseItem`, not
   the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
-  stays agnostic to which item (the stick) a widget cares about.
+  stays agnostic to which item (the wand) a widget cares about.
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
   `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
-  (re)published into a `volatile` field on each stick action (select / clear / radius
+  (re)published into a `volatile` field on each wand action (select / clear / radius
   scroll / profile cycle). `extract` only does the
   **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
   dimension change / disconnect all reset it without a manager-side hook). Editing
@@ -161,7 +161,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Adjustable flood radius (shift+scroll).** Gated by Debug
   `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
   `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
-  holding the stick (in either hand) and sneaking**, changes the radius by the
+  holding the wand (in either hand) and sneaking**, changes the radius by the
   scroll direction (`adjustRadius`), re-floods from the last seed so the change
   is immediate, and returns `false` to cancel the vanilla slot change. When the
   option is off, that gesture is inactive — scroll never changes the radius.
@@ -231,7 +231,7 @@ through-walls, depth-on `SKIRT` occluded).
   rising from the surface top — solid at the base `T` and fading to transparent at the
   marker top (every height fades out at the top). Because the wall/drop split needs
   collision-box data the render thread may not query, the classification is done
-  **compute-side** (`SurfaceSelection.computeOccluders`, once per stick action) and
+  **compute-side** (`SurfaceSelection.computeOccluders`, once per wand action) and
   published as `OccluderSpan`s in the snapshot. The *downward* skirts are computed
   compute-side too (`computeDownSkirts`, above) with the occluder sub-spans already
   subtracted, so an edge is never double-skirted; `emit`
@@ -250,7 +250,7 @@ through-walls, depth-on `SKIRT` occluded).
   above the surface, solid at the base and fading to transparent at the tip. Same
   depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
   `SKIRT_OFFSET`.
-- **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a stick
+- **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a wand
   selection active it re-runs `select` once with a one-shot flag, writes a single
   `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
   downskirts → holes), and posts a short chat summary (`merged=… occluders=…
@@ -339,7 +339,7 @@ through-walls, depth-on `SKIRT` occluded).
   double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
-- `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (stick+sneak
+- `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the world overlay's radius and the HUD indicator — and the
   `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →

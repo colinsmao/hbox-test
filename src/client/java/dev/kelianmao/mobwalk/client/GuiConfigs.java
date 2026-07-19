@@ -6,10 +6,15 @@ import java.util.List;
 
 import net.minecraft.client.gui.screens.Screen;
 
+import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigResettable;
+import fi.dy.masa.malilib.config.IConfigValue;
+import fi.dy.masa.malilib.config.gui.ConfigOptionChangeListenerTextField;
+import fi.dy.masa.malilib.config.gui.ConfigOptionListenerResetConfig;
 import fi.dy.masa.malilib.config.options.table.ConfigTable;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
+import fi.dy.masa.malilib.gui.GuiTextFieldGeneric;
 import fi.dy.masa.malilib.gui.button.ButtonBase;
 import fi.dy.masa.malilib.gui.button.ButtonGeneric;
 import fi.dy.masa.malilib.gui.button.IButtonActionListener;
@@ -19,6 +24,7 @@ import fi.dy.masa.malilib.gui.interfaces.IKeybindConfigGui;
 import fi.dy.masa.malilib.gui.widgets.WidgetConfigOption;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptions;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptionsBase;
+import fi.dy.masa.malilib.gui.wrappers.TextFieldType;
 import fi.dy.masa.malilib.util.GuiUtils;
 import fi.dy.masa.malilib.util.StringUtils;
 
@@ -27,7 +33,9 @@ import dev.kelianmao.mobwalk.MobWalk;
 /**
  * MaLiLib settings screen (ModMenu Configure entry). Filter tabs: All / General /
  * Appearance / Debug. "Edit Built-in Profiles" / "Edit Custom Profiles" open from
- * General. ConfigTable rows that need confirm-to-reset use {@link ConfirmResetConfigOption}.
+ * General. Those two ConfigTable rows use {@link ConfirmResetConfigOption};
+ * {@link Configs.Generic#WAND_ITEM} uses {@link ItemIdConfigOption}; other
+ * rows use stock {@link WidgetConfigOption}.
  */
 public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab {
 	private static ConfigGuiTab tab = ConfigGuiTab.ALL;
@@ -77,7 +85,37 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 			protected WidgetConfigOption createListEntryWidget(
 				int x, int y, int listIndex, boolean isOdd, ConfigOptionWrapper wrapper
 			) {
-				return new ConfirmResetConfigOption(
+				IConfigBase config = wrapper.getConfig();
+				if (config == Configs.Profiles.BUILTIN_PROFILES
+					|| config == Configs.Profiles.CUSTOM_PROFILES) {
+					return new ConfirmResetConfigOption(
+						x,
+						y,
+						this.browserEntryWidth,
+						this.browserEntryHeight,
+						this.maxLabelWidth,
+						this.configWidth,
+						wrapper,
+						listIndex,
+						this.parent,
+						this
+					);
+				}
+				if (config == Configs.Generic.WAND_ITEM) {
+					return new ItemIdConfigOption(
+						x,
+						y,
+						this.browserEntryWidth,
+						this.browserEntryHeight,
+						this.maxLabelWidth,
+						this.configWidth,
+						wrapper,
+						listIndex,
+						this.parent,
+						this
+					);
+				}
+				return new WidgetConfigOption(
 					x,
 					y,
 					this.browserEntryWidth,
@@ -154,9 +192,79 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 	}
 
 	/**
-	 * For selected {@link ConfigTable} rows: RESET arms into Cancel (same rect) +
-	 * Confirm to the right so a double-click lands on Cancel. Other options keep
-	 * MaLiLib’s one-click RESET.
+	 * Item-id string row: live item-registry invalid tooltip on the text field
+	 * (MaLiLib has no ITEM_ID {@link TextFieldType}). Factory selects this for
+	 * {@link Configs.Generic#WAND_ITEM}.
+	 */
+	private static final class ItemIdConfigOption extends WidgetConfigOption {
+		ItemIdConfigOption(
+			int x,
+			int y,
+			int width,
+			int height,
+			int labelWidth,
+			int configWidth,
+			ConfigOptionWrapper wrapper,
+			int listIndex,
+			IKeybindConfigGui host,
+			WidgetListConfigOptionsBase<?, ?> parent
+		) {
+			super(x, y, width, height, labelWidth, configWidth, wrapper, listIndex, host, parent);
+		}
+
+		@Override
+		protected void addConfigTextFieldEntry(
+			int x,
+			int y,
+			int resetX,
+			int configWidth,
+			int configHeight,
+			IConfigValue config,
+			TextFieldType type
+		) {
+			GuiTextFieldGeneric field = this.createTextField(
+				x, y + 1, configWidth - 4, configHeight - 3
+			);
+			int maxLength = type.getMaxLength() > 0 ? type.getMaxLength() : this.maxTextfieldTextLength;
+			field.setMaxLength(maxLength);
+			field.setValue(config.getStringValue());
+
+			ButtonGeneric resetButton = this.createResetButton(resetX, y, config);
+			ConfigOptionChangeListenerTextField listener = new ConfigOptionChangeListenerTextField(
+				config, field, resetButton
+			) {
+				@Override
+				public boolean onTextChange(GuiTextFieldGeneric textField) {
+					boolean result = super.onTextChange(textField);
+					WandItem.applyInvalidTooltip(textField);
+					return result;
+				}
+			};
+			ConfigOptionListenerResetConfig resetListener = new ConfigOptionListenerResetConfig(
+				config,
+				new ConfigOptionListenerResetConfig.ConfigResetterTextField(config, field),
+				resetButton,
+				null
+			);
+			this.addTextField(field, listener, type);
+			this.addButton(resetButton, resetListener);
+			WandItem.applyInvalidTooltip(field);
+		}
+
+		@Override
+		public void applyNewValueToConfig() {
+			super.applyNewValueToConfig();
+			if (this.textField != null) {
+				WandItem.applyInvalidTooltip(this.textField.textField());
+			}
+		}
+	}
+
+	/**
+	 * Profile-table rows only ({@link Configs.Profiles#BUILTIN_PROFILES} /
+	 * {@link Configs.Profiles#CUSTOM_PROFILES}): RESET arms into Cancel (same rect) +
+	 * Confirm to the right so a double-click lands on Cancel. Selected by
+	 * {@link #createListWidget}; other rows use stock {@link WidgetConfigOption}.
 	 */
 	private static final class ConfirmResetConfigOption extends WidgetConfigOption {
 		private static final int GAP = 2;
@@ -190,13 +298,7 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
 		protected void addConfigButtonEntry(
 			int x, int y, IConfigResettable config, ButtonBase button
 		) {
-			if (!(config instanceof ConfigTable table)
-				|| (config != Configs.Profiles.BUILTIN_PROFILES
-					&& config != Configs.Profiles.CUSTOM_PROFILES)) {
-				super.addConfigButtonEntry(x, y, config, button);
-				return;
-			}
-
+			ConfigTable table = (ConfigTable) config;
 			this.table = table;
 			this.idleEntryWidth = this.getWidth();
 			this.resetButton = this.createResetButton(x, y, config);

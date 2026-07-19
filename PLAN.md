@@ -15,7 +15,9 @@ per `[AGENTS.md](AGENTS.md)`). When that chunk lands, distill durable facts into
 
 - MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs` with filter tabs **All** /
 **General** / **Appearance** / **Debug** (default **All**).
-- General (`Configs.Generic` / JSON `"Generic"`): **enableRendering**; **mobProfile**
+- General (`Configs.Generic` / JSON `"Generic"`): **enableRendering**; **wandItem**
+(item id string, default `minecraft:stick`, registry-validated with live invalid
+tooltip); **mobProfile**
 (roster-backed cycle among enabled profiles, default Player); **floodRadius**
 (0–30, default 20); `Edit Built-in Profiles` (`builtinProfiles` ConfigTable
 popup — six builtins, enables + real row order; soft-disable when none enabled;
@@ -62,7 +64,6 @@ Add or reorder freely; pick items up via a temporary plan when ready.
 
 - Chunked / multi-tick flood so one raised block doesn't repay a full-flood scan
   (deferred with the general flood-perf frame-slicing below).
-- Activation item picker (stick today).
 - Flood perf hardening (timeout, threading, frame-slicing).
 - Settings tooltip UX pass (tone/length).
 

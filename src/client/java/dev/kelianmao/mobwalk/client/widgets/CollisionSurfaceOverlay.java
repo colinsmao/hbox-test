@@ -19,7 +19,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -31,7 +31,7 @@ import fi.dy.masa.malilib.util.data.Color4f;
 
 /**
  * Draws the standable surfaces (upward-facing collision faces an entity can
- * stand on) of a region the player selects with a stick. The surfaces are
+ * stand on) of a region the player selects with the wand. The surfaces are
  * occlusion-aware (computed in {@link SurfaceSelection#select}): only tops not
  * covered by something directly above are emitted, so e.g. a stair renders as
  * its exposed L. The flat tops/borders draw <b>through walls</b> (depth-off fill
@@ -55,7 +55,7 @@ import fi.dy.masa.malilib.util.data.Color4f;
  * (an internal edge of a continuous level the greedy merge split) are skipped, so
  * they don't read as false interior walls. See {@code PLAN.md}.
  *
- * <p>The stick is a <b>trigger</b>: right-clicking floods the selection from
+ * <p>The wand is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
  * collision shape) outward across walkable, footprint-adjacent surfaces (height
  * steps within the profile's reach) up to a BFS depth limit (adjustable via
@@ -67,7 +67,7 @@ import fi.dy.masa.malilib.util.data.Color4f;
  * items and reappears on re-equip, and is emptied by a clearing right-click or
  * a level change.
  *
- * <p>The selection is published into a {@code volatile} snapshot on every stick
+ * <p>The selection is published into a {@code volatile} snapshot on every wand
  * action ({@link #publish}); {@link #extract} does no per-frame geometry work
  * (it only tracks the held item and resets on a level change), and {@link #emit}
  * re-emits the snapshot each frame.
@@ -128,14 +128,14 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private static final int MAX_DOWNWARD_STEPS = 64;
 
 	// Flood depth limit: the maximum BFS hop-count from the seed. Adjustable at
-	// runtime via shift+scroll while holding the stick (see adjustRadius), clamped.
+	// runtime via shift+scroll while holding the wand (see adjustRadius), clamped.
 	private static final int MIN_RADIUS = 0;
 	private static final int MAX_RADIUS = 30;
 	private static final int INITIAL_FLOOD_RADIUS = 20;
 	// Past this the scroll steps by 2, keeping the high end usable.
 	private static final int COARSE_RADIUS = 10;
 
-	// The computed surfaces, recomputed from scratch on each stick action
+	// The computed surfaces, recomputed from scratch on each wand action
 	// (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
 	private final SurfaceSelection cache = new SurfaceSelection();
 
@@ -155,7 +155,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private Level lastLevel;
 
 	// Written on the extraction path, read on the render thread, so volatile.
-	private volatile boolean holdingStick = false;
+	private volatile boolean holdingWand = false;
 	// The opaque per-rect outlines are a debugging aid (they separate adjacent
 	// surfaces and sub-rects) but clutter the normal view, so they only draw while
 	// crouching. Sampled on the extraction thread, read in emit.
@@ -194,7 +194,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		Player player = client.player;
 		Level level = client.level;
 
-		// The selection is published on every stick action (publish()), so extract
+		// The selection is published on every wand action (publish()), so extract
 		// does no per-frame geometry work. It only tracks the held item and resets
 		// on a level-identity change (world unload, dimension switch, reconnect).
 		if (level != lastLevel) {
@@ -207,8 +207,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			holeSnapshot = List.of();
 		}
 
-		holdingStick = player != null
-			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK));
+		Item wand = Configs.wandItem();
+		holdingWand = player != null
+			&& (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand));
 		// Through-walls tops + crouch borders share this flag; gated by Debug setting.
 		crouching = player != null
 			&& player.isShiftKeyDown()
@@ -245,7 +246,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	public boolean isVisible() {
 		return Configs.isRenderingEnabled()
 			&& Configs.hasEnabledProfile()
-			&& holdingStick
+			&& holdingWand
 			&& !snapshot.isEmpty();
 	}
 
@@ -284,20 +285,21 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public void onUseItem(Player player) {
-		// Right-click with the stick floods the selection from the targeted block
+		// Right-click with the wand floods the selection from the targeted block
 		// (resolved downward to its standable surface) across connected neighbors,
 		// replacing the previous selection; right-clicking nothing clears it.
 		//
-		// The stick may be in either hand. Pick the acting hand main-first, falling
-		// back to the off hand ONLY when the main hand is empty (or also a stick):
+		// The wand may be in either hand. Pick the acting hand main-first, falling
+		// back to the off hand ONLY when the main hand is empty (or also a wand):
 		// a non-empty main hand is assumed to consume the right-click (place/use), so
-		// an off-hand stick doesn't also fire — approximating vanilla's "main acts
+		// an off-hand wand doesn't also fire — approximating vanilla's "main acts
 		// first, off hand only if main did nothing" without an interaction-result
 		// mixin (this is edge-detected off the use key, so the true result is unseen).
+		Item wand = Configs.wandItem();
 		InteractionHand hand;
-		if (player.getMainHandItem().is(Items.STICK)) {
+		if (player.getMainHandItem().is(wand)) {
 			hand = InteractionHand.MAIN_HAND;
-		} else if (player.getOffhandItem().is(Items.STICK) && player.getMainHandItem().isEmpty()) {
+		} else if (player.getOffhandItem().is(wand) && player.getMainHandItem().isEmpty()) {
 			hand = InteractionHand.OFF_HAND;
 		} else {
 			return;
@@ -345,7 +347,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	}
 
 	// True when scroll should retarget the flood radius instead of switching the
-	// hotbar: Debug "crouch to scroll radius" enabled, holding the stick (either
+	// hotbar: Debug "crouch to scroll radius" enabled, holding the wand (either
 	// hand), and crouching. When the option is off the feature is inactive — scroll
 	// always leaves the hotbar alone to vanilla.
 	public boolean wantsRadiusScroll() {
@@ -353,8 +355,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 			return false;
 		}
 		Player player = Minecraft.getInstance().player;
+		Item wand = Configs.wandItem();
 		return player != null
-			&& (player.getMainHandItem().is(Items.STICK) || player.getOffhandItem().is(Items.STICK))
+			&& (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand))
 			&& player.isShiftKeyDown();
 	}
 
