@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: package-split
     content: 'Group the flat client package into client.config / client.overlay / client.surface (bootstrap stays in client), retiring the widgets subpackage. Pure git mv + package-line + import repoint; each test moves into the same package as the type whose package-private surface it touches; widen to public only the members now accessed across a package boundary. Gate on ./gradlew test.'
-    status: pending
+    status: completed
 isProject: false
 ---
 # Surface / overlay pipeline refactor

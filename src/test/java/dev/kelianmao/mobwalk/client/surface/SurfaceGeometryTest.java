@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
-import dev.kelianmao.mobwalk.client.RectMath.Rect;
-
 import org.junit.jupiter.api.Test;
+
+import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
 
 /**
  * Sanity tests over the pure rect ops in {@link RectMath}

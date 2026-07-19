@@ -328,13 +328,13 @@ the published snapshots into `SurfaceEmitter.emit`.
 
 ## Where the file-specific gotchas live (inline comments)
 
-- `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
+- `surface/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the level-identity reset, and the `volatile`
   snapshot/occluder/down-skirt/hole/crouch/`depthLimit` handoff into
   `SurfaceEmitter`.
-- `widgets/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
+- `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
   depth-based grey blend (`Palette.colorForDepth`, keyed on `rect.depth()` vs
   `depthLimit`), the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny
   `SKIRT_OFFSET`), drawing the **published** down-skirt spans (`emitDownSkirts`,
@@ -344,7 +344,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`)
   — emit draws only the published spans — the cyclic depth-gradient color
   (`Palette` / `DEPTH_CYCLE` hue band), and the double-sided-winding requirement.
-- `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
+- `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the

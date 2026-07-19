@@ -99,30 +99,26 @@ it.
   ├── client/java/dev/kelianmao/mobwalk/client/
   │   ├── MobWalkClient.java               # ClientModInitializer (+ debug keybinds, /mobwalk dump)
   │   ├── InitHandler.java                 # MaLiLib config + screen registration
-  │   ├── Configs.java                     # IConfigHandler → config/mobwalk.json
-  │   ├── GuiConfigs.java                  # MaLiLib GuiConfigsBase settings screen
-  │   ├── MobWalkModMenuIntegration.java   # ModMenu Configure → GuiConfigs
-  │   ├── Overlay.java                     # HUD widget interface
-  │   ├── OverlayManager.java              # HUD registry + render dispatch
-  │   ├── WorldOverlay.java                # in-world widget interface
-  │   ├── WorldOverlayManager.java         # in-world registry + GPU plumbing
-  │   ├── EntityProfile.java               # entity size/height/reach profiles (Point/Player/Ravager)
-  │   ├── StandableRect.java               # world-space standable rectangle
-  │   ├── OccluderSpan.java                # upward (wall/ceiling) skirt span (compute-side)
-  │   ├── DownSkirtSpan.java               # downward drop-edge skirt span (compute-side)
-  │   ├── HoleSpan.java                     # hole (unescapable drop) beam span (compute-side)
-  │   ├── RectMath.java                    # pure rect/interval algebra (Rect, merge, flood, …)
-  │   ├── SurfaceSelection.java            # size-aware surface compute: dilation + headroom + lazy flood + hole classification
-  │   └── widgets/
-  │       ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
-  │       ├── CollisionSurfaceOverlay.java  # standable-surface selection input / lifecycle / publish
-  │       └── SurfaceEmitter.java           # published snapshots → buffer geometry (+ Palette)
+  │   ├── config/                          # settings, roster, ModMenu
+  │   │   ├── Configs.java                 # IConfigHandler → config/mobwalk.json
+  │   │   ├── GuiConfigs.java              # MaLiLib GuiConfigsBase settings screen
+  │   │   ├── MobWalkModMenuIntegration.java
+  │   │   ├── WandItem.java / ProfileRoster.java / RosterProfileOption.java
+  │   │   └── *ProfilesTable* / CustomProfileTableRows.java
+  │   ├── overlay/                         # HUD + in-world overlay frameworks
+  │   │   ├── Overlay.java / OverlayManager.java / RadiusIndicatorOverlay.java
+  │   │   └── WorldOverlay.java / WorldOverlayManager.java
+  │   └── surface/                         # compute + selection widget + emit
+  │       ├── EntityProfile / StandableRect / OccluderSpan / DownSkirtSpan / HoleSpan
+  │       ├── RectMath.java / SurfaceSelection.java
+  │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java
   ├── client/resources/assets/mobwalk/lang/en_us.json
-  └── test/java/dev/kelianmao/mobwalk/client/ # pure-logic unit tests (fabric-loader-junit)
+  └── test/java/dev/kelianmao/mobwalk/client/{config,surface}/  # mirrors source packages
 ```
 
 `fabric.mod.json` sets `"environment": "client"`, declares a `client` entrypoint
-(`dev.kelianmao.mobwalk.client.MobWalkClient`) and a `modmenu` entrypoint, and
+(`dev.kelianmao.mobwalk.client.MobWalkClient`) and a `modmenu` entrypoint
+(`dev.kelianmao.mobwalk.client.config.MobWalkModMenuIntegration`), and
 depends on `fabricloader >=0.19.2`, `minecraft ~26.1.2`, `java >=25`,
 `fabric-api`, and `malilib`; it suggests `modmenu`.
 

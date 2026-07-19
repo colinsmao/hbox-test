@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.WorldBox;
-
 import org.junit.jupiter.api.Test;
+
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
 
 /**
  * Stage A1: the pure occluder-edge classification ({@code occluderSpansForRect} /

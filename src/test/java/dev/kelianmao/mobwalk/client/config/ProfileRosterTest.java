@@ -1,4 +1,9 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.config;
+
+import dev.kelianmao.mobwalk.client.config.ProfileRoster.RawBuiltinRow;
+import dev.kelianmao.mobwalk.client.config.ProfileRoster.RawCustomRow;
+import dev.kelianmao.mobwalk.client.config.ProfileRoster.SanitizeResult;
+import dev.kelianmao.mobwalk.client.surface.EntityProfile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -9,9 +14,6 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.ProfileRoster.RawBuiltinRow;
-import dev.kelianmao.mobwalk.client.ProfileRoster.RawCustomRow;
-import dev.kelianmao.mobwalk.client.ProfileRoster.SanitizeResult;
 
 /**
  * Pins {@link ProfileRoster} defaults, enable/cycle/soft-disable, and sanitize.

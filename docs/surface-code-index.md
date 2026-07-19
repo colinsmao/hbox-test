@@ -30,9 +30,11 @@ SurfaceEmitter (+ Palette) → WorldOverlayManager (FILLED / SKIRT / BEAM) → G
 // main
 MobWalk.java                                   // MOD_ID + LOGGER (shared main/client)
 
-// client — bootstrap / settings
+// client — bootstrap
 MobWalkClient.java                             // ClientModInitializer: managers, scroll, command, HUD root
 InitHandler.java                               // MaLiLib IInitializationHandler
+
+// client.config — settings / roster / ModMenu
 Configs.java                                   // IConfigHandler + live helpers (options in settings.md)
 GuiConfigs.java                                // MaLiLib GuiConfigsBase + wand / table widgets
 MobWalkModMenuIntegration.java                 // ModMenu Configure → GuiConfigs
@@ -45,33 +47,31 @@ ProfilesTableEdit.java                         // shared table editor → Profil
 ProfilesTableEditEntry.java                    // per-row RESET always disabled
 CustomProfileTableRows.java                    // custom row builders / ADD seed
 
-// client — HUD framework
+// client.overlay — HUD + world frameworks
 Overlay.java                                   // HUD widget interface
 OverlayManager.java                            // HUD registry + render loop
-widgets/RadiusIndicatorOverlay.java            // transient crosshair text (radius / profile / toggles)
-
-// client — world framework
+RadiusIndicatorOverlay.java                    // transient crosshair text (radius / profile / toggles)
 WorldOverlay.java                              // in-world widget interface (extract / emit / onUseItem)
 WorldOverlayManager.java                       // world registry, use-key edge, three GPU layers
 
-// client — surface data records
+// client.surface — data records + compute + widget
 EntityProfile.java                             // width / height / reach + legacy Option list
 StandableRect.java                             // reached standable patch
 OccluderSpan.java                              // upward (wall/ceiling) skirt span
 DownSkirtSpan.java                             // downward drop-skirt span
 HoleSpan.java                                  // hole-beam span
-
-// client — surface compute + widget
 RectMath.java (~487)                           // pure rect/interval algebra (Rect, merge, flood, …)
 SurfaceSelection.java (~1290)                  // expose, LazyFlood, skirts, holes; last-select lists
-widgets/CollisionSurfaceOverlay.java (~341)    // wand input, publish snapshots; emit → SurfaceEmitter
-widgets/SurfaceEmitter.java (~415)             // snapshot → geometry; nested Palette color
+CollisionSurfaceOverlay.java (~341)            // wand input, publish snapshots; emit → SurfaceEmitter
+SurfaceEmitter.java (~415)                     // snapshot → geometry; nested Palette color
 
-// test (pure logic against RectMath / SurfaceSelection / EntityProfile / roster / records)
-EntityProfileTest.java
+// test — mirrors source packages (package-private owners)
+// client.config
 ProfileRosterTest.java                         // sanitize / cycle / unique names
 WandItemTest.java                              // resolve / stick fallback
 CustomProfileTableRowsTest.java                // ADD seed index helper
+// client.surface
+EntityProfileTest.java
 SurfaceGeometryTest.java                       // RectMath: subtract / union / merge / flood / frontier / depth
 HeadroomTest.java                              // exposeBox headroom / burial
 VisualTopTest.java                             // visualTopY raise / merge carry (uses RectMath.mergeCoplanar)
@@ -188,7 +188,7 @@ radiusIndicator()                              // accessor for scroll / keys / p
 register(overlay)
 render(graphics, delta)                        // iterates visible overlays
 
-// widgets/RadiusIndicatorOverlay.java
+// overlay/RadiusIndicatorOverlay.java
 show(radius)                                   // "Flood radius: N"; resets 1.5s timer
 showProfile(name)                              // "Profile: …" / other short messages
 showMessage(message)                           // shared writer for text + expiresAt

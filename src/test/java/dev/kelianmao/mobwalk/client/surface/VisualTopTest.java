@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -7,10 +7,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.ColKey;
-import dev.kelianmao.mobwalk.client.SurfaceSelection.WorldBox;
-
 import org.junit.jupiter.api.Test;
+
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
 
 /**
  * Milestone 6 Step 2a: the draw-only {@code visualTopY} raise in {@code exposeBox}.

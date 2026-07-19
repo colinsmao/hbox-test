@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,10 +8,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.ColKey;
-import dev.kelianmao.mobwalk.client.SurfaceSelection.WorldBox;
-
 import org.junit.jupiter.api.Test;
+
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
 
 /**
  * Stage B2: the headroom occlusion predicate in {@code exposeBox} — a box top at

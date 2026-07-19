@@ -1,14 +1,14 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.DropClass;
-import dev.kelianmao.mobwalk.client.SurfaceSelection.DropClassification;
-import dev.kelianmao.mobwalk.client.RectMath.Rect;
-
 import org.junit.jupiter.api.Test;
+
+import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.DropClass;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.DropClassification;
 
 /**
  * The pure drop-edge classifier. A mob leaves a surface at {@code T = 64} over

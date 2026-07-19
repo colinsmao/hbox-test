@@ -1,10 +1,10 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import dev.kelianmao.mobwalk.client.RectMath.Rect;
-
 import org.junit.jupiter.api.Test;
+
+import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
 
 /**
  * Milestone 5 Step 3: the fall-footprint geometry ({@code SurfaceSelection.fallFootprint})

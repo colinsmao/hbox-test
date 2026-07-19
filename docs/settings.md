@@ -213,6 +213,8 @@ Match the existing Generic / Debug pattern in `Configs.java`:
 5. Wire live apply with `setValueChangeCallback` when changing the value should
   update an overlay immediately (see `FLOOD_RADIUS`); otherwise read the
   option live from a `Configs.*()` helper.
+  (`Configs` ↔ `CollisionSurfaceOverlay`/`SurfaceEmitter` is a package cycle today;
+  a live-apply listener would invert the config→overlay edge, low priority.)
 6. Persistence is automatic via `ConfigUtils.readConfigBase` /
   `writeConfigBase` over that category’s `OPTIONS` — keep the option on that list.
 

@@ -36,4 +36,5 @@ in this step; notes for a later cleanup pass.
 
 ### Visibility widenings forced by the split
 
-- `Configs()` constructor: package-private → `public` (`InitHandler` in `client` constructs it).
+- Pass A: `Configs()` constructor: package-private → `public` (`InitHandler` in `client` constructs it).
+- Pass B (tests): none — tests moved into the same packages as their package-private owners.
