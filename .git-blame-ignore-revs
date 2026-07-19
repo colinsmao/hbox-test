@@ -1,0 +1,6 @@
+# Commits listed here are skipped by git blame / GitHub blame.
+# After a whitespace-only reindent lands, append its full SHA below.
+# Local: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# tabs -> 2 spaces (source tree)
+443c9abb06f56bc37b3edc80db7a060ec7955532

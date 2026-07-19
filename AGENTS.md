@@ -211,6 +211,7 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
 ## Documentation & conventions
 
+- **Indentation is two spaces** (Java, Gradle, JSON under `src/`).
 - **Describe what something *is* / *does*, never what it isn't / doesn't.** This is
   a hard style rule for `docs/*.md`, `PLAN.md` prose, and code comments: write the
   positive fact only. Do **not** pad with negations of alternatives or absences
