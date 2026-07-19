@@ -20,6 +20,7 @@ import net.minecraft.world.item.Items;
 import fi.dy.masa.malilib.config.ConfigUtils;
 import fi.dy.masa.malilib.config.IConfigBase;
 import fi.dy.masa.malilib.config.IConfigHandler;
+import fi.dy.masa.malilib.config.IConfigOptionListEntry;
 import fi.dy.masa.malilib.config.options.ConfigBoolean;
 import fi.dy.masa.malilib.config.options.ConfigColor;
 import fi.dy.masa.malilib.config.options.ConfigDouble;
@@ -67,9 +68,59 @@ public final class Configs implements IConfigHandler {
 	 */
 	private static List<TableRow> lastCustomRows = List.of();
 
+	/**
+	 * When standable surfaces are drawn. MaLiLib cycle values for Generic
+	 * {@code showSurfaces}. Display labels live in lang
+	 * {@code mobwalk.config.generic.showSurfaces.*}.
+	 */
+	public enum ShowSurfaces implements IConfigOptionListEntry {
+		NEVER("never"),
+		WHILE_HOLDING_WAND("whileHoldingWand"),
+		ALWAYS("always");
+
+		private final String id;
+		private final String translationKey;
+
+		ShowSurfaces(String id) {
+			this.id = id;
+			this.translationKey = GENERIC_KEY + ".showSurfaces." + id;
+		}
+
+		@Override
+		public String getStringValue() {
+			return id;
+		}
+
+		@Override
+		public String getDisplayName() {
+			return StringUtils.translate(translationKey);
+		}
+
+		@Override
+		public IConfigOptionListEntry cycle(boolean forward) {
+			ShowSurfaces[] values = values();
+			int i = ordinal();
+			return values[forward
+				? (i + 1) % values.length
+				: (i - 1 + values.length) % values.length];
+		}
+
+		@Override
+		public IConfigOptionListEntry fromString(String value) {
+			if (value != null) {
+				for (ShowSurfaces mode : values()) {
+					if (mode.id.equalsIgnoreCase(value)) {
+						return mode;
+					}
+				}
+			}
+			return WHILE_HOLDING_WAND;
+		}
+	}
+
 	public static final class Generic {
-		public static final ConfigBoolean ENABLE_RENDERING =
-			new ConfigBoolean("enableRendering", true).apply(GENERIC_KEY);
+		public static final ConfigOptionList SHOW_SURFACES =
+			new ConfigOptionList("showSurfaces", ShowSurfaces.WHILE_HOLDING_WAND).apply(GENERIC_KEY);
 		public static final ConfigString WAND_ITEM =
 			new ConfigString("wandItem", WandItem.DEFAULT_ID).apply(GENERIC_KEY);
 		public static final ConfigOptionList MOB_PROFILE =
@@ -83,7 +134,7 @@ public final class Configs implements IConfigHandler {
 
 		/** GUI order (includes tables). File I/O uses {@link #FILE_OPTIONS}. */
 		public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
-			ENABLE_RENDERING,
+			SHOW_SURFACES,
 			WAND_ITEM,
 			MOB_PROFILE,
 			BUILTIN_PROFILES,
@@ -93,7 +144,7 @@ public final class Configs implements IConfigHandler {
 
 		/** Generic JSON category — profile tables live under Profiles. */
 		static final ImmutableList<IConfigBase> FILE_OPTIONS = ImmutableList.of(
-			ENABLE_RENDERING,
+			SHOW_SURFACES,
 			WAND_ITEM,
 			MOB_PROFILE,
 			FLOOD_RADIUS
@@ -453,19 +504,18 @@ public final class Configs implements IConfigHandler {
 		return cachedRoster.hasEnabledProfile();
 	}
 
-	public static boolean isRenderingEnabled() {
-		return Generic.ENABLE_RENDERING.getBooleanValue();
+	/** When standable surfaces are drawn ({@link ShowSurfaces}). */
+	public static ShowSurfaces showSurfaces() {
+		Object value = Generic.SHOW_SURFACES.getOptionListValue();
+		if (value instanceof ShowSurfaces mode) {
+			return mode;
+		}
+		return ShowSurfaces.WHILE_HOLDING_WAND;
 	}
 
 	/** Current wand item (malformed/unknown ids → stick). Refreshed on change/load. */
 	public static Item wandItem() {
 		return cachedWandItem;
-	}
-
-	/** @deprecated use {@link #isRenderingEnabled()} */
-	@Deprecated
-	public static boolean isOverlayEnabled() {
-		return isRenderingEnabled();
 	}
 
 	public static int floodRadius() {

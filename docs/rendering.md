@@ -127,8 +127,10 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 
 - **Wand is a trigger, not a brush.** Right-clicking (use-key rising edge) selects
   the surfaces reachable from the targeted block; right-clicking nothing clears. The
-  selection persists across item switches (drawn while the wand is held in **either
-  hand**) until the next trigger or a level change.
+  selection persists across item switches until the next trigger or a level change.
+  Draw visibility is sampled in `extract` into a `volatile` flag (General
+  `showSurfaces` and related gates — see [`settings.md`](settings.md)); `isVisible()`
+  is a field read on the draw path.
 - **Either hand, main-first.** The wand works in the main **or** off hand. The
   acting hand is chosen main-first, falling back to the off hand **only when the main
   hand is empty** (or also a wand): a non-empty main hand is assumed to consume the
@@ -141,7 +143,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
   `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
   (re)published into a `volatile` field on each wand action (select / clear / radius
-  scroll / profile cycle). `extract` only does the
+  scroll / profile cycle). `extract` samples the visibility flag and crouch, and does the
   **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
   dimension change / disconnect all reset it without a manager-side hook). Editing
   painted terrain needs a re-click (publish is action-driven).

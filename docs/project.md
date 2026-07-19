@@ -167,8 +167,10 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    block is drawn flat on top, double-sided without bad z-fighting; sweeping the
    crosshair paints a growing set whose surfaces all stay drawn; per-block shapes
    are correct (full / slab / stairs-as-L / fence-post-tops / carpet-thin) and tall
-   grass/flowers resolve to the block below; the selection hides when the wand is
-   unequipped and returns on re-equip; right-clicking resets it (exactly once per
+   grass/flowers resolve to the block below; with default General `showSurfaces`
+   (**While Holding Wand**), the selection hides when the wand is unequipped and
+   returns on re-equip (**Always** keeps it visible; **Never** hides draw); right-clicking
+   resets it (exactly once per
    click — holding does not spam) while swinging the acting arm; breaking/replacing a
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward

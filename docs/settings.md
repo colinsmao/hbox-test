@@ -44,15 +44,15 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `enableRendering` | `ConfigBoolean` | `true` | Gates `CollisionSurfaceOverlay.isVisible()` each frame (existing snapshot stays; enable alone does not re-flood). |
+| `showSurfaces` | `ConfigOptionList` | `While Holding Wand` (`Configs.ShowSurfaces`) | Gates `CollisionSurfaceOverlay.isVisible()` each frame: **Never**, **While Holding Wand** (draw only while the wand is held in either hand), **Always** (draw whenever a selection exists). Snapshot stays; mode alone does not re-flood. Cycle labels from lang `showSurfaces.*`; tooltip lists all three modes. |
 | `wandItem` | `ConfigString` | `minecraft:stick` | Item used as the wand (select / clear / crouch gestures). Current resolved `Item` is refreshed on change/load via `WandItem` against `BuiltInRegistries.ITEM`; malformed or unknown ids fall back to stick while the typed string stays in the field. Row uses `ItemIdConfigOption` (live invalid hover tooltip). |
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
 | `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
 
-Helpers: `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
-`Configs.roster()`, `Configs.hasEnabledProfile()`, `Configs.isRenderingEnabled()`.
+Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
+`Configs.roster()`, `Configs.hasEnabledProfile()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
@@ -110,7 +110,7 @@ New/renamed colliding names are uniquified into the stored Name (ids `custom0`,
 settings button use that stored name. Cycle still skips disabled.
 - **Soft-disable:** every participating profile Off → `hasEnabledProfile()` false;
 overlay select floods stay off; wand air- or block-click pings HUD
-`no profiles active`; `enableRendering` is unchanged. Shift+scroll radius still works.
+`no profiles active`; `showSurfaces` is unchanged. Shift+scroll radius still works.
 - **ConfigTable RESET enable:** MaLiLib `ConfigTable.isModified()` compares defaults
 to a stale `lastTable` after popup edits. Use `Configs.configTableIsModified(table)`
 (live rows vs defaults) for RESET enable on any ConfigTable. Both

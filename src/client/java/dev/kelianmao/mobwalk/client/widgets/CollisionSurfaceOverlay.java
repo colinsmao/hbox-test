@@ -3,6 +3,7 @@ package dev.kelianmao.mobwalk.client.widgets;
 import java.util.List;
 
 import dev.kelianmao.mobwalk.client.Configs;
+import dev.kelianmao.mobwalk.client.Configs.ShowSurfaces;
 import dev.kelianmao.mobwalk.client.DownSkirtSpan;
 import dev.kelianmao.mobwalk.client.EntityProfile;
 import dev.kelianmao.mobwalk.client.HoleSpan;
@@ -155,7 +156,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 	private Level lastLevel;
 
 	// Written on the extraction path, read on the render thread, so volatile.
-	private volatile boolean holdingWand = false;
+	// Full draw gate (showSurfaces + profile + wand + non-empty snapshot) sampled
+	// once per extract; isVisible() is a field read.
+	private volatile boolean visible = false;
 	// The opaque per-rect outlines are a debugging aid (they separate adjacent
 	// surfaces and sub-rects) but clutter the normal view, so they only draw while
 	// crouching. Sampled on the extraction thread, read in emit.
@@ -195,8 +198,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		Level level = client.level;
 
 		// The selection is published on every wand action (publish()), so extract
-		// does no per-frame geometry work. It only tracks the held item and resets
-		// on a level-identity change (world unload, dimension switch, reconnect).
+		// does no per-frame geometry work. It samples draw visibility + crouch and
+		// resets on a level-identity change (world unload, dimension switch, reconnect).
 		if (level != lastLevel) {
 			cache.clear();
 			lastSeed = null;
@@ -208,8 +211,13 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 		}
 
 		Item wand = Configs.wandItem();
-		holdingWand = player != null
+		boolean holding = player != null
 			&& (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand));
+		ShowSurfaces mode = Configs.showSurfaces();
+		visible = mode != ShowSurfaces.NEVER
+			&& Configs.hasEnabledProfile()
+			&& (mode == ShowSurfaces.ALWAYS || holding)
+			&& !snapshot.isEmpty();
 		// Through-walls tops + crouch borders share this flag; gated by Debug setting.
 		crouching = player != null
 			&& player.isShiftKeyDown()
@@ -244,10 +252,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
 	@Override
 	public boolean isVisible() {
-		return Configs.isRenderingEnabled()
-			&& Configs.hasEnabledProfile()
-			&& holdingWand
-			&& !snapshot.isEmpty();
+		return visible;
 	}
 
 	/**

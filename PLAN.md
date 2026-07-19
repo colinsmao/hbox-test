@@ -15,7 +15,8 @@ per `[AGENTS.md](AGENTS.md)`). When that chunk lands, distill durable facts into
 
 - MaLiLib `0.28.9` + ModMenu Configure → `GuiConfigs` with filter tabs **All** /
 **General** / **Appearance** / **Debug** (default **All**).
-- General (`Configs.Generic` / JSON `"Generic"`): **enableRendering**; **wandItem**
+- General (`Configs.Generic` / JSON `"Generic"`): **showSurfaces**
+(cycle Never / While Holding Wand / Always, default While Holding Wand); **wandItem**
 (item id string, default `minecraft:stick`, registry-validated with live invalid
 tooltip); **mobProfile**
 (roster-backed cycle among enabled profiles, default Player); **floodRadius**
