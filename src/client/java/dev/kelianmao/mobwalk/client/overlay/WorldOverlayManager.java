@@ -1,4 +1,6 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.overlay;
+
+import dev.kelianmao.mobwalk.client.surface.CollisionSurfaceOverlay;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,7 +9,6 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 
 import dev.kelianmao.mobwalk.MobWalk;
-import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;

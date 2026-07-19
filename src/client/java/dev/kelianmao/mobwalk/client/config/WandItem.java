@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.config;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;

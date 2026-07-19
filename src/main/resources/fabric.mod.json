@@ -18,7 +18,7 @@
       "dev.kelianmao.mobwalk.client.MobWalkClient"
     ],
     "modmenu": [
-      "dev.kelianmao.mobwalk.client.MobWalkModMenuIntegration"
+      "dev.kelianmao.mobwalk.client.config.MobWalkModMenuIntegration"
     ]
   },
   "depends": {

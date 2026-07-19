@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 /**
  * An axis-aligned, horizontal standable patch in absolute world coordinates.

@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 /**
  * One <b>downward</b> drop-skirt span: a sub-span of a standable surface edge that

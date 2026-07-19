@@ -1,4 +1,8 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.config;
+
+import dev.kelianmao.mobwalk.client.overlay.WorldOverlayManager;
+import dev.kelianmao.mobwalk.client.surface.CollisionSurfaceOverlay;
+import dev.kelianmao.mobwalk.client.surface.EntityProfile;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,7 +45,6 @@ import fi.dy.masa.malilib.util.data.Color4f;
 import fi.dy.masa.malilib.util.data.json.JsonUtils;
 
 import dev.kelianmao.mobwalk.MobWalk;
-import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay;
 
 /**
  * MaLiLib-backed settings. Widgets write options immediately; JSON is written on
@@ -299,7 +302,7 @@ public final class Configs implements IConfigHandler {
     private Debug() {}
   }
 
-  Configs() {}
+  public Configs() {}
 
   private static String formatDouble(double value) {
     if (value == Math.rint(value) && !Double.isInfinite(value)) {

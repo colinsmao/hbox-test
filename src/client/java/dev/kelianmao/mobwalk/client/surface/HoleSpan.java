@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 /**
  * One <b>hole</b> drop-edge span: a drop sub-span (a {@link DownSkirtSpan}) that the

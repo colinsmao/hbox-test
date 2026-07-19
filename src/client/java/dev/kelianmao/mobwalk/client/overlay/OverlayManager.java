@@ -1,9 +1,8 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.overlay;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import dev.kelianmao.mobwalk.client.widgets.RadiusIndicatorOverlay;
 
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.gui.GuiGraphicsExtractor;

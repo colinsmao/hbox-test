@@ -1,6 +1,5 @@
-package dev.kelianmao.mobwalk.client.widgets;
+package dev.kelianmao.mobwalk.client.overlay;
 
-import dev.kelianmao.mobwalk.client.Overlay;
 
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;

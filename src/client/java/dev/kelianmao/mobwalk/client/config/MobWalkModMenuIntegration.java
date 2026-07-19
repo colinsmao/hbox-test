@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.config;
 
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;

@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.config;
 
 import java.util.ArrayList;
 import java.util.Collections;

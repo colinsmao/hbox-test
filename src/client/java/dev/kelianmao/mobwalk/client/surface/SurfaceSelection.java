@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

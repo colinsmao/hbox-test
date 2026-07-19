@@ -1,4 +1,6 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.config;
+
+import dev.kelianmao.mobwalk.client.surface.EntityProfile;
 
 import java.util.ArrayList;
 import java.util.List;

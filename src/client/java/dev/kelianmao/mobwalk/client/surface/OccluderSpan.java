@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 /**
  * One <b>upward</b> (occluder) skirt span: a sub-span of a standable surface edge

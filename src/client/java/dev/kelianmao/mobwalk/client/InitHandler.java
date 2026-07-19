@@ -1,5 +1,8 @@
 package dev.kelianmao.mobwalk.client;
 
+import dev.kelianmao.mobwalk.client.config.Configs;
+import dev.kelianmao.mobwalk.client.config.GuiConfigs;
+
 import fi.dy.masa.malilib.config.ConfigManager;
 import fi.dy.masa.malilib.interfaces.IInitializationHandler;
 import fi.dy.masa.malilib.registry.Registry;

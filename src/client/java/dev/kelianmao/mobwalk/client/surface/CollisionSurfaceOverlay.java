@@ -1,16 +1,11 @@
-package dev.kelianmao.mobwalk.client.widgets;
+package dev.kelianmao.mobwalk.client.surface;
+
+import dev.kelianmao.mobwalk.client.config.Configs;
+import dev.kelianmao.mobwalk.client.config.Configs.ShowSurfaces;
+import dev.kelianmao.mobwalk.client.overlay.OverlayManager;
+import dev.kelianmao.mobwalk.client.overlay.WorldOverlay;
 
 import java.util.List;
-
-import dev.kelianmao.mobwalk.client.Configs;
-import dev.kelianmao.mobwalk.client.Configs.ShowSurfaces;
-import dev.kelianmao.mobwalk.client.DownSkirtSpan;
-import dev.kelianmao.mobwalk.client.HoleSpan;
-import dev.kelianmao.mobwalk.client.OccluderSpan;
-import dev.kelianmao.mobwalk.client.OverlayManager;
-import dev.kelianmao.mobwalk.client.StandableRect;
-import dev.kelianmao.mobwalk.client.SurfaceSelection;
-import dev.kelianmao.mobwalk.client.WorldOverlay;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import org.joml.Matrix4fc;

@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.surface;
 
 import fi.dy.masa.malilib.config.IConfigOptionListEntry;
 
@@ -9,7 +9,7 @@ import fi.dy.masa.malilib.config.IConfigOptionListEntry;
  * walkable height threshold (see {@code docs/geometry.md} "Reachability model").
  *
  * <p>Builtin seeds (roster order) live here as constants; enable flags and the
- * live cycle are owned by {@link ProfileRoster}. {@link #next()} /
+ * live cycle are owned by {@link dev.kelianmao.mobwalk.client.config.ProfileRoster}. {@link #next()} /
  * {@link Option} still cycle the original three (Point / Player / Ravager) until
  * settings wires the roster.
  *

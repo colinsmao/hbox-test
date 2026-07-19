@@ -1,8 +1,12 @@
 package dev.kelianmao.mobwalk.client;
 
+import dev.kelianmao.mobwalk.client.config.Configs;
+import dev.kelianmao.mobwalk.client.overlay.OverlayManager;
+import dev.kelianmao.mobwalk.client.overlay.WorldOverlayManager;
+import dev.kelianmao.mobwalk.client.surface.CollisionSurfaceOverlay.FloodDebugCounts;
+import dev.kelianmao.mobwalk.client.surface.CollisionSurfaceOverlay;
+
 import dev.kelianmao.mobwalk.MobWalk;
-import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay;
-import dev.kelianmao.mobwalk.client.widgets.CollisionSurfaceOverlay.FloodDebugCounts;
 
 import fi.dy.masa.malilib.event.InitializationHandler;
 

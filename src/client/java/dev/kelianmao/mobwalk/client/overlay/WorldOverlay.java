@@ -1,4 +1,4 @@
-package dev.kelianmao.mobwalk.client;
+package dev.kelianmao.mobwalk.client.overlay;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import org.joml.Matrix4fc;
