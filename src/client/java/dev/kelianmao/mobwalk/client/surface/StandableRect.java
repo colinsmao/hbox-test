@@ -6,8 +6,8 @@ package dev.kelianmao.mobwalk.client.surface;
  * <p>Collision shapes are unions of axis-aligned cuboids, so every upward-facing
  * face is an axis-aligned rectangle over {@code [minX,maxX] x [minZ,maxZ]} at a
  * single {@code topY}. Stored in world-space doubles (the resolved
- * {@code BlockPos} already folded in); see {@code PLAN.md} for why we skip a
- * 1/16-pixel integer model.
+ * {@code BlockPos} already folded in); see {@code docs/geometry.md} Appendix A
+ * for why we skip a 1/16-pixel integer model.
  *
  * <p>{@code topY} is the <b>collision</b> top — the height all walkability math
  * (flood reachability, occlusion, holes) is keyed on. {@code visualTopY} is a

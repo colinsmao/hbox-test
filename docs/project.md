@@ -230,10 +230,6 @@ decision, the entity-width dilation model, and the entity-height headroom rule.
 reference for the config stack, live Generic/Debug options, screen layout
 (flat list + LABEL sections), and MaLiLib option types (player-facing
 settings help is a separate publish-time doc).
-- **Surface / overlay code index:** [`surface-code-index.md`](surface-code-index.md)
-  — dense file/function map of `SurfaceSelection`, `RectMath`, `CollisionSurfaceOverlay`,
-  `SurfaceEmitter`, and the shared surface records (what each type and method does).
-
 
 
 ## Future work / roadmap
