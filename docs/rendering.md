@@ -111,17 +111,18 @@ Config UI, persistence, and MaLiLib option types live in
   cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
-  mid-session renderer reload). `CollisionSurfaceOverlay` (below)
-  is the widget that currently exercises this framework.
+  mid-session renderer reload). `CollisionSurfaceOverlay` + `SurfaceEmitter`
+  (below) exercise this framework.
 
-## Block-hitbox rendering: `CollisionSurfaceOverlay` + `SurfaceSelection`
+## Block-hitbox rendering: `CollisionSurfaceOverlay` + `SurfaceSelection` + `SurfaceEmitter`
 
 Draws the **standable surfaces** of blocks — the upward-facing collision faces an
 entity of a chosen size can stand on — for a region the player selects with the
 wand (General `wandItem`, default stick), where the region follows **walkable terrain** outward from the clicked
 block. The geometry (occlusion-aware tops, entity-width dilation, the
 output-sensitive flood) is computed by `SurfaceSelection` and documented in
-[`geometry.md`](geometry.md); this section covers the **widget and its drawing**.
+[`geometry.md`](geometry.md); this section covers the **widget lifecycle** and
+**`SurfaceEmitter` drawing**.
 
 ### Selection lifecycle (input → snapshot)
 
@@ -173,20 +174,23 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Threading.** The selection is computed only on the client/extraction thread
   (`select`/`clear`); the render thread reads only the immutable snapshot via the
   `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
-  result list — each action recomputes from scratch.
+  result list — each action recomputes from scratch. `SurfaceEmitter` receives those
+  published lists as args and never reads the live compute lists.
 
-### Per-surface drawing (`emit`)
+### Per-surface drawing (`SurfaceEmitter.emit`)
 
 Each reached `StandableRect` is drawn as a **top fill**, an optional **border**, and
 **skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
-through-walls, depth-on `SKIRT` occluded).
+through-walls, depth-on `SKIRT` occluded). `CollisionSurfaceOverlay.emit` forwards
+the published snapshots into `SurfaceEmitter.emit`.
 
 - **Top fill, Appearance-colored (or depth-hue debug).** Tops use Appearance
   `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
-  switches RGB to the cyclic BFS-depth hue band (`depthColor`, blue at depth 0,
-  cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color. Cutoff ring greying (`greyBlend`) applies in both modes when
-  Debug `showCutoffRing` is on (default); when off, those ring depths are not drawn.
+  switches RGB to the cyclic BFS-depth hue band (`Palette` / `depthColor`, blue at
+  depth 0, cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
+  out-of-sequence color. Cutoff ring greying (`Palette.colorForDepth` → `greyBlend`)
+  applies in both modes when Debug `showCutoffRing` is on (default); when off, those
+  ring depths are not drawn.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
   `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
   surfaces *through* blocks is a debug aid, so when the option is on the top is
@@ -277,7 +281,7 @@ through-walls, depth-on `SKIRT` occluded).
   (collision-top only); this is purely where the paint is drawn.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
   `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
-  blended toward **grey** (`greyBlend`), so a depth-cutoff reads differently from a
+  blended toward **grey** (`Palette.colorForDepth`), so a depth-cutoff reads differently from a
   true boundary (a selection stopped by a real drop stays colored). When off, those
   ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
   `depth` relative to `depthLimit` (= `selectionRadius`):
@@ -326,19 +330,19 @@ through-walls, depth-on `SKIRT` occluded).
 - `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
-  publish-on-action snapshot, the crouch-gated through-walls top + borders, the
-  depth-based grey blend (`greyBlend`, keyed on `rect.depth()` vs `depthLimit`),
-  the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`),
-  drawing the **published** down-skirt spans (`emitDownSkirts`, from `DownSkirtSpan`;
-  frontier spans `depth >= limit` suppressed), **upward occluder skirts**
-  (`emitOccluders`, Appearance `upwardSkirtHeight`, side-based interior nudge), and the
-  **hole beams** (`emitHoles`, from
-  `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
-  `showBeamsThroughWalls`) — `emit` draws only the published spans — the cyclic
-  depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
-  band), the level-identity reset,
-  `volatile` snapshot/occluder/down-skirt/hole/crouch handoff, and the
-  double-sided-winding requirement.
+  publish-on-action snapshot, the level-identity reset, and the `volatile`
+  snapshot/occluder/down-skirt/hole/crouch/`depthLimit` handoff into
+  `SurfaceEmitter`.
+- `widgets/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
+  depth-based grey blend (`Palette.colorForDepth`, keyed on `rect.depth()` vs
+  `depthLimit`), the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny
+  `SKIRT_OFFSET`), drawing the **published** down-skirt spans (`emitDownSkirts`,
+  from `DownSkirtSpan`; frontier spans `depth >= limit` suppressed), **upward
+  occluder skirts** (`emitOccluders`, Appearance `upwardSkirtHeight`, side-based
+  interior nudge), and the **hole beams** (`emitHoles`, from `HoleSpan`, into the
+  depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`)
+  — emit draws only the published spans — the cyclic depth-gradient color
+  (`Palette` / `DEPTH_CYCLE` hue band), and the double-sided-winding requirement.
 - `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak

@@ -144,12 +144,12 @@ category name: `"Appearance"`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `walkableColor` | `ConfigColor` | `#8066CC66` (light green, ~50% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill. Read live in `emit`. |
+| `walkableColor` | `ConfigColor` | `#8066CC66` (light green, ~50% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill. Read live in `SurfaceEmitter` / `Palette`. |
 | `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
-| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `emitHoles` draws beams at hole rims. When off: beams are skipped. |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter.emitHoles` draws beams at hole rims. When off: beams are skipped. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
-| `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `emit`. |
-| `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `emit`. |
+| `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `SurfaceEmitter`. |
+| `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `drawOnVisibleFace` | `ConfigBoolean` | `true` | When on: standable tops of taller-than-collision blocks (soul sand, mud) draw on the visible block face; when off, at the collision height. **Compute-side** — passed into `select` as `computeVisualTop`, so a value-change callback re-floods (the one Appearance option that touches compute). See `[geometry.md](geometry.md)` / `[rendering.md](rendering.md)`. |
 
 Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
@@ -167,8 +167,8 @@ name: `"Debug"`.
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
 | `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
-| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `greyBlend`. |
-| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`greyBlend`). When off: those ring depths are not drawn. |
+| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorForDepth`. |
+| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`Palette.colorForDepth`). When off: those ring depths are not drawn. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,

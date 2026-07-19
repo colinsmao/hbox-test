@@ -12,12 +12,14 @@ MobWalkClient / Configs / scroll / /mobwalk dump
         │
         ▼
 CollisionSurfaceOverlay  ←→  OverlayManager / RadiusIndicatorOverlay (HUD)
-        │ select / clear
+        │ select / clear / publish snapshots
         ▼
 SurfaceSelection  ──uses──►  RectMath (pure rect / interval algebra)
         │ StandableRect, OccluderSpan, DownSkirtSpan, HoleSpan
+        │
+        │ emit(snapshots…)
         ▼
-WorldOverlayManager (FILLED / SKIRT / BEAM) → GPU
+SurfaceEmitter (+ Palette) → WorldOverlayManager (FILLED / SKIRT / BEAM) → GPU
 ```
 
 ---
@@ -62,7 +64,8 @@ HoleSpan.java                                  // hole-beam span
 // client — surface compute + widget
 RectMath.java (~487)                           // pure rect/interval algebra (Rect, merge, flood, …)
 SurfaceSelection.java (~1290)                  // expose, LazyFlood, skirts, holes; last-select lists
-widgets/CollisionSurfaceOverlay.java (~730)    // wand input, publish snapshots, emit geometry
+widgets/CollisionSurfaceOverlay.java (~341)    // wand input, publish snapshots; emit → SurfaceEmitter
+widgets/SurfaceEmitter.java (~415)             // snapshot → geometry; nested Palette color
 
 // test (pure logic against RectMath / SurfaceSelection / EntityProfile / roster / records)
 EntityProfileTest.java
@@ -406,9 +409,11 @@ logFloodDebug / logFloodDebugRects             // [flood-debug] logger output
 
 ---
 
-## CollisionSurfaceOverlay.java (~730 lines)
+## CollisionSurfaceOverlay.java (~341 lines)
 
-`WorldOverlay` that drives `SurfaceSelection`, publishes snapshots, and emits geometry.
+`WorldOverlay` input/lifecycle driver: wand select/clear, radius/profile re-flood,
+publish into `volatile` snapshots, visibility. Geometry emission is delegated to
+`SurfaceEmitter`.
 
 ### WorldOverlay hooks and publish
 
@@ -417,6 +422,7 @@ id()                                           // "collision_surface"
 extract(ctx)                                   // samples wand / crouch / showSurfaces; clears on level change
 isVisible()                                    // published visibility flag
 publish()                                      // copies cache lists into the volatile snapshots
+emit(matrix, fill, skirt, beam)                // → SurfaceEmitter.emit(snapshots…)
 ```
 
 ### Input
@@ -434,25 +440,37 @@ dumpFloodDebug() → FloodDebugCounts            // arms dump, re-selects, retur
 record FloodDebugCounts(merged, occluders, skirts, holes)
 ```
 
+---
+
+## SurfaceEmitter.java (~415 lines)
+
+Turns published snapshots into buffer geometry. Reads only the immutable snapshot
+args + live `Configs` flags — never `SurfaceSelection`'s live lists.
+
 ### Emit
 
 ```
-emit(matrix, fill, skirt, beam)                // top fills (+ crouch borders), then
-                                               // emitDownSkirts, emitOccluders, emitHoles
-emitDownSkirts(skirt, matrix)                  // DownSkirtSpans → faded vertical quads
-emitOccluders(skirt, matrix)                   // OccluderSpans → upward quads
-emitHoles(beamOrSkirt, matrix)                 // HoleSpans → beams of height BEAM_HEIGHT
+emit(matrix, fill, skirt, beam,                // tops (+ crouch borders), then
+     rects, occluders, downSkirts, holes,      // emitDownSkirts, emitOccluders, emitHoles
+     depthLimit, crouching)
+emitDownSkirts(skirt, matrix, spans, limit)    // DownSkirtSpans → faded vertical quads
+emitOccluders(skirt, matrix, spans, limit)     // OccluderSpans → upward quads
+emitHoles(beamOrSkirt, matrix, spans)          // HoleSpans → beams of height BEAM_HEIGHT
 ```
 
-### Emit helpers
+### Quad helpers
 
 ```
 quad(...)                                      // double-sided horizontal quad (top / border)
 fadedSkirt(...) / vQuad(...)                   // vertical quad, alpha solid then fade
-surfaceRgb(depth)                              // walkableColor, or depthColor when shadeByDepth
-depthColor(depth) / hsvToRgb(...)              // hue cycles every DEPTH_CYCLE (20) rings
-inCutoffRing(depth, limit)                     // depth > limit − 2
-greyBlend(rgb, depth, limit)                   // blend toward grey at limit−1 and limit
+```
+
+### Nested Palette
+
+```
+Palette.colorForDepth(depth, limit)            // walkableColor or depthColor, then greyBlend
+Palette.inCutoffRing(depth, limit)             // depth > limit − 2
+depthColor / hsvToRgb / greyBlend / baseRgb    // internals (hue cycles every DEPTH_CYCLE 20)
 ```
 
 ---

@@ -21,8 +21,8 @@ overlay (`WorldOverlay` / `WorldOverlayManager`); how they draw is in
 `[rendering.md](rendering.md)`.
 
 The main widget is the **standable-surface selection** (`CollisionSurfaceOverlay` +
-`SurfaceSelection`): right-click a block with the wand (default stick; configurable
-item id in settings) and the mod floods outward over
+`SurfaceSelection` + `SurfaceEmitter`): right-click a block with the wand (default
+stick; configurable item id in settings) and the mod floods outward over
 walkable terrain within a spatial radius, painting every surface the chosen entity
 could stand on. The flood is **entity-size aware** — width dilation closes gaps
 smaller than the entity, and height headroom drops floors under low ceilings — for the
@@ -67,7 +67,7 @@ split over `LevelRenderEvents`.
 - **M3 — stick surface selection**: a walkable flood from the clicked block, drawn as
 fill + outline, with shift+scroll radius.
 - **M4 — entity-size awareness**: config-space width dilation and the
-output-sensitive lazy flood, verified set-equal to a full-window eager oracle.
+output-sensitive lazy flood (adjacency/reach guarded by unit-tested static `flood`).
 - **M4.5 — occluder-aware skirts + entity-height headroom**: upward skirts for
 walls/ceilings, and the `(T, T+H]` standing-column headroom test. First unit tests
 land here.
@@ -115,7 +115,8 @@ it.
   │   ├── SurfaceSelection.java            # size-aware surface compute: dilation + headroom + lazy flood + hole classification
   │   └── widgets/
   │       ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout
-  │       └── CollisionSurfaceOverlay.java  # standable-surface selection widget + drawing
+  │       ├── CollisionSurfaceOverlay.java  # standable-surface selection input / lifecycle / publish
+  │       └── SurfaceEmitter.java           # published snapshots → buffer geometry (+ Palette)
   ├── client/resources/assets/mobwalk/lang/en_us.json
   └── test/java/dev/kelianmao/mobwalk/client/ # pure-logic unit tests (fabric-loader-junit)
 ```
@@ -234,8 +235,8 @@ reference for the config stack, live Generic/Debug options, screen layout
 (flat list + LABEL sections), and MaLiLib option types (player-facing
 settings help is a separate publish-time doc).
 - **Surface / overlay code index:** [`surface-code-index.md`](surface-code-index.md)
-  — dense file/function map of `SurfaceSelection`, `CollisionSurfaceOverlay`, and
-  the shared surface records (what each type and method does).
+  — dense file/function map of `SurfaceSelection`, `RectMath`, `CollisionSurfaceOverlay`,
+  `SurfaceEmitter`, and the shared surface records (what each type and method does).
 
 
 

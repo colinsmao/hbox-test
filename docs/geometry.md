@@ -124,8 +124,8 @@ makes the output-sensitive flood possible.
 `select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
 reaches it, so cost tracks the reachable set (and its occluder shells) rather
 than the window volume — a large win in caves / against walls, and asymptotically
-on open ground. (During M4 it was cross-checked against a full-window eager scan;
-see [`project.md`](project.md) milestones.)
+on open ground. Adjacency/reach is guarded by the unit-tested static `flood`
+(see [`project.md`](project.md) milestones).
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the

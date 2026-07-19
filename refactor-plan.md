@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: emitter
     content: 'Extract geometry emission out of CollisionSurfaceOverlay into a new SurfaceEmitter class file (emit + emitDownSkirts/emitOccluders/emitHoles + quad helpers), with color derivation folded in as a nested static Palette helper. Reads only the published snapshots. Leaves CollisionSurfaceOverlay as the input/lifecycle driver. In-game checklist.'
-    status: pending
+    status: completed
   - id: package-split
     content: 'Group the flat client package into client.config / client.overlay / client.surface (bootstrap stays in client), retiring the widgets subpackage. Pure git mv + package-line + import repoint; each test moves into the same package as the type whose package-private surface it touches; widen to public only the members now accessed across a package boundary. Gate on ./gradlew test.'
     status: pending
