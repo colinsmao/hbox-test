@@ -164,13 +164,14 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Adjustable flood radius (shift+scroll).** Gated by Debug
   `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
   `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
-  holding the wand (in either hand) and sneaking**, changes the radius by the
-  scroll direction (`adjustRadius`), re-floods from the last seed so the change
-  is immediate, and returns `false` to cancel the vanilla slot change. When the
+  holding the wand (in either hand) and sneaking**, changes General `floodRadius`
+  via `Configs.setFloodRadius` (`adjustRadius`), re-floods from the last seed so the
+  change is immediate, and returns `false` to cancel the vanilla slot change. When the
   option is off, that gesture is inactive — scroll never changes the radius.
   The radius is clamped `[0, 30]` and steps by **1 up to 10, then by 2** (`12, 14, …,
   30`) — the window grows quadratically, so coarse steps keep the high end usable.
-  Each change pings `RadiusIndicatorOverlay`.
+  Each change pings `RadiusIndicatorOverlay`. The live option updates immediately;
+  JSON is flushed on play disconnect (and on config-screen close).
 - **Threading.** The selection is computed only on the client/extraction thread
   (`select`/`clear`); the render thread reads only the immutable snapshot via the
   `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
@@ -284,7 +285,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   blended toward **grey** (`Palette.colorForDepth`), so a depth-cutoff reads differently from a
   true boundary (a selection stopped by a real drop stays colored). When off, those
   ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
-  `depth` relative to `depthLimit` (= `selectionRadius`):
+  `depth` relative to `depthLimit` (= `Configs.floodRadius()`):
   `depth <= limit−2` → no grey; `depth == limit−1` → half grey; `depth >= limit` → full
   grey. This is possible because the **frontier-split merge**
   (`mergeCoplanarSplitFrontier`) keeps the frontier ring (depth == limit) as separate
@@ -347,7 +348,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
-  scroll input to the world overlay's radius and the HUD indicator — and the
+  scroll input to the flood-radius option and the HUD indicator — and the
   `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
 - `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,

@@ -100,6 +100,7 @@ onInitializeClient()
   OverlayManager.bootstrap()
   WorldOverlayManager.bootstrap()
   InitializationHandler ← InitHandler
+  ClientPlayConnectionEvents.DISCONNECT → Configs.saveToDisk()
   /mobwalk dump → dumpFloodDebug + chat summary
   ClientHotbarScrollEvents.ALLOW → wantsRadiusScroll / adjustRadius + HUD radius
   HudElementRegistry.attachElementBefore(CHAT, OverlayManager::render)
@@ -139,7 +140,7 @@ initCallbacks()                                // wand / radius / profile / draw
 syncAfterProfilesTableReset()
 configTableIsModified(table)
 roster() / hasEnabledProfile()
-showSurfaces() / wandItem() / floodRadius()
+showSurfaces() / wandItem() / floodRadius() / setFloodRadius() / saveToDisk()
 profileDisplayLabel(id) / mobProfile() / activeProfileId() / cycleMobProfile()
 walkableColor() / drawOnVisibleFace()
 showBeamsThroughWalls() / showHoleBeams() / holeBeamColor()
@@ -147,6 +148,7 @@ downSkirtHeight() / upwardSkirtHeight()
 crouchScrollRadius() / crouchSeeThroughWalls() / crouchCycleProfile()
 shadeByDepth() / showCutoffRing()
 load() / save() → config/mobwalk.json
+saveToDisk()                                   // disconnect flush (also screen close → save)
 
 // WandItem.java
 isValid(text) / resolve(text) / applyInvalidTooltip(field)
@@ -431,11 +433,11 @@ emit(matrix, fill, skirt, beam)                // → SurfaceEmitter.emit(snapsh
 onUseItem(player)                              // wand in main (or empty-main off-hand);
                                                // resolveDownward → select, or clear / sneak-cycle
 resolveDownward(level, start)                  // walk down through empty collision shapes
-applyFloodRadius(radius)                       // clamp and re-flood (settings callback)
+applyFloodRadius()                             // re-flood (settings / setFloodRadius callback)
 reselectWithMobProfile()                       // re-flood with Configs.mobProfile()
 clearSelectionForSoftDisable()                 // drop selection when roster has no enabled profile
 wantsRadiusScroll()                            // wand held && sneaking && crouchScrollRadius
-adjustRadius(delta)                            // ±1 to 10, then ±2; clamp [0,30]; re-flood; HUD
+adjustRadius(delta)                            // ±1 to 10, then ±2 → Configs.setFloodRadius
 dumpFloodDebug() → FloodDebugCounts            // arms dump, re-selects, returns list sizes
 record FloodDebugCounts(merged, occluders, skirts, holes)
 ```

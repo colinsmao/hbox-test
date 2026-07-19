@@ -9,6 +9,7 @@ import fi.dy.masa.malilib.event.InitializationHandler;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.fabric.api.event.client.player.ClientHotbarScrollEvents;
@@ -23,6 +24,10 @@ public final class MobWalkClient implements ClientModInitializer {
     OverlayManager.bootstrap();
     WorldOverlayManager.bootstrap();
     InitializationHandler.getInstance().registerInitializationHandler(new InitHandler());
+
+    // Flush live options (scroll radius, profile cycle, …) on leave-world /
+    // Save and Quit to Title. Config-screen close still saves via MaLiLib.
+    ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> Configs.saveToDisk());
 
     // /mobwalk dump — one-shot flood geometry dump to latest.log + short chat line.
     ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->

@@ -55,23 +55,16 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // the void; resolution also stops at world min-Y.
   private static final int MAX_DOWNWARD_STEPS = 64;
 
-  // Flood depth limit: the maximum BFS hop-count from the seed. Adjustable at
-  // runtime via shift+scroll while holding the wand (see adjustRadius), clamped.
-  private static final int MIN_RADIUS = 0;
-  private static final int MAX_RADIUS = 30;
-  private static final int INITIAL_FLOOD_RADIUS = 20;
+  // Flood radius lives in Configs.Generic.FLOOD_RADIUS (slider + shift+scroll).
   // Past this the scroll steps by 2, keeping the high end usable.
   private static final int COARSE_RADIUS = 10;
 
   // The computed surfaces, recomputed from scratch on each wand action
-  // (onUseItem (re)selects/clears/cycles; adjustRadius re-floods).
+  // (onUseItem (re)selects/clears/cycles; radius/profile callbacks re-flood).
   private final SurfaceSelection cache = new SurfaceSelection();
 
-  // Current flood radius and the last resolved seed block, so a radius change
-  // can re-flood from the same origin. Both touched only on the client thread
-  // (onUseItem and the scroll handler). lastSeed is null when nothing is
-  // selected.
-  private int selectionRadius = INITIAL_FLOOD_RADIUS;
+  // Last resolved seed block so a radius/profile change can re-flood from the
+  // same origin. Touched only on the client thread; null when nothing is selected.
   private BlockPos lastSeed;
 
   // Active mob profile comes from Configs.mobProfile() (settings source of
@@ -156,7 +149,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     occluderSnapshot = cache.allOccluders();
     downSkirtSnapshot = cache.allDownSkirts();
     holeSnapshot = cache.allHoles();
-    depthLimit = selectionRadius;
+    depthLimit = Configs.floodRadius();
   }
 
   // Walk down from the targeted block until a non-empty collision shape is
@@ -180,15 +173,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   }
 
   /**
-   * Live apply from MaLiLib flood-radius control: update the session radius and
-   * re-flood an active selection so the change shows immediately.
+   * Live apply from MaLiLib flood-radius control: re-flood an active selection
+   * so the change shows immediately. The option value is already on
+   * {@link Configs#floodRadius()}.
    */
-  public void applyFloodRadius(int radius) {
-    int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, radius));
-    if (updated == selectionRadius) {
-      return;
-    }
-    selectionRadius = updated;
+  public void applyFloodRadius() {
     reselectWithMobProfile();
   }
 
@@ -200,7 +189,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     Level level = Minecraft.getInstance().level;
     var profile = Configs.mobProfile();
     if (level != null && lastSeed != null && profile.isPresent()) {
-      cache.select(level, lastSeed, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
+      cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
       publish();
     }
   }
@@ -250,7 +239,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       } else {
         var profile = Configs.mobProfile();
         if (profile.isPresent()) {
-          cache.select(level, start, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
+          cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
           lastSeed = start;
         }
       }
@@ -290,21 +279,19 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       && player.isShiftKeyDown();
   }
 
-  // Change the flood radius by delta (clamped) and, if a selection is active,
-  // re-flood from its seed so the change shows immediately. Returns the new
-  // radius (for the on-screen indicator), even when clamping left it unchanged.
+  // Change the flood radius by delta (clamped) by writing Configs.FLOOD_RADIUS
+  // (same option as the settings slider). The value-change callback re-floods.
+  // Returns the new radius (for the on-screen indicator).
   public int adjustRadius(int delta) {
     // delta is a scroll direction (+/-1). Step by 2 in the coarse range so the
     // sequence is 0..10 by 1 then 12,14,..,20 (up: coarse once we reach the
     // threshold; down: coarse only while strictly above it, so 12->10->9).
+    int current = Configs.floodRadius();
     int dir = Integer.signum(delta);
-    int step = (dir > 0 ? selectionRadius >= COARSE_RADIUS : selectionRadius > COARSE_RADIUS) ? 2 : 1;
-    int updated = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, selectionRadius + dir * step));
-    if (updated != selectionRadius) {
-      selectionRadius = updated;
-      reselectWithMobProfile();
-    }
-    return selectionRadius;
+    int step = (dir > 0 ? current >= COARSE_RADIUS : current > COARSE_RADIUS) ? 2 : 1;
+    int updated = current + dir * step;
+    Configs.setFloodRadius(updated);
+    return Configs.floodRadius();
   }
 
   /**
@@ -319,7 +306,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       return null;
     }
     cache.requestDebugDump();
-    cache.select(level, lastSeed, selectionRadius, profile.get(), Configs.drawOnVisibleFace());
+    cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
     publish();
     return new FloodDebugCounts(
       cache.allRects().size(),

@@ -389,7 +389,7 @@ public final class Configs implements IConfigHandler {
     Generic.FLOOD_RADIUS.setValueChangeCallback(cfg -> {
       CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
       if (collision != null) {
-        collision.applyFloodRadius(cfg.getIntegerValue());
+        collision.applyFloodRadius();
       }
     });
     Generic.MOB_PROFILE.setValueChangeCallback(cfg -> {
@@ -520,6 +520,20 @@ public final class Configs implements IConfigHandler {
 
   public static int floodRadius() {
     return Generic.FLOOD_RADIUS.getIntegerValue();
+  }
+
+  /**
+   * Write the flood-radius option (shift+scroll). Clamps via MaLiLib; fires the
+   * live-apply callback when the value changes. Disk flush is on disconnect /
+   * config-screen close — not here.
+   */
+  public static void setFloodRadius(int radius) {
+    Generic.FLOOD_RADIUS.setIntegerValue(radius);
+  }
+
+  /** Flush live options to {@code config/mobwalk.json}. */
+  public static void saveToDisk() {
+    saveToFile();
   }
 
   /**

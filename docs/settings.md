@@ -19,6 +19,7 @@ General project facts live in `[project.md](project.md)`; rules in
 ```
 Pause → Mods (ModMenu) → Configure → GuiConfigs (MaLiLib GuiConfigsBase)
   → Configs (IConfigHandler) → config/mobwalk.json on screen close
+  → also Configs.saveToDisk() on ClientPlayConnectionEvents.DISCONNECT
 ```
 
 - **MaLiLib** `0.28.9` (`fi.dy.masa.malilib.`*) is the settings UI and JSON
@@ -32,7 +33,10 @@ config-screen factory with `Registry.CONFIG_SCREEN` (`ModInfo` → `GuiConfigs`)
 entrypoint `modmenu`).
 - Widgets write option values immediately; JSON is written on config-screen close
 through `IConfigHandler.save()` → `config/mobwalk.json` under the game config
-directory. Load runs at init via `IConfigHandler.load()`.
+directory, and again on play **disconnect** (Save and Quit to Title) via
+`Configs.saveToDisk()` so in-game flood gestures (shift+scroll radius, profile
+cycle) land on disk without opening Configure. Load runs at init via
+`IConfigHandler.load()`.
 
 Key files: `InitHandler.java`, `Configs.java`, `GuiConfigs.java`,
 `MobWalkModMenuIntegration.java`, lang `assets/mobwalk/lang/en_us.json`.
@@ -49,10 +53,10 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
 | `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
-| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
+| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
 
 Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
-`Configs.roster()`, `Configs.hasEnabledProfile()`.
+`Configs.setFloodRadius()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
@@ -165,7 +169,7 @@ name: `"Debug"`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
-| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
+| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll` → `Configs.setFloodRadius`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
 | `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorForDepth`. |
 | `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`Palette.colorForDepth`). When off: those ring depths are not drawn. |
