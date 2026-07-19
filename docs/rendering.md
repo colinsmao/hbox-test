@@ -346,19 +346,22 @@ through-walls, depth-on `SKIRT` occluded).
   scroll input to the world overlay's radius and the HUD indicator — and the
   `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
+- `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,
+  `union` re-cut + `mergeCoplanar` strip-merge, depth-aware
+  **`mergeCoplanarSplitFrontier`** (union inner and frontier separately, subtract
+  inner from frontier so they tile cleanly), `footprintAdjacent`, static `flood`,
+  `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
+  uses `mergeCoplanarSplitFrontier`).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
   BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
-  **`mergeCoplanarSplitFrontier`** — union inner and frontier separately, subtract
-  inner from frontier so they tile cleanly), dilation + **headroom** occlusion in
-  `exposeBox` (the `(T, T+H]` standing-column predicate, guillotine
-  `subtractRects`), the `union` re-cut + `mergeCoplanar` strip-merge (unit-tested
-  algebra; production merge-after-flood uses `mergeCoplanarSplitFrontier`), the
-  `footprintAdjacent` edge test + profile-`reach` gate, the
+  `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
+  `exposeBox` (the `(T, T+H]` standing-column predicate, calling
+  `RectMath.subtractRects`), the
   **compute-side occluder-span classification** (`computeOccluders` /
   `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
   `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
-  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **hole
+  `edgeDownSpans` / `RectMath.subtractIntervals`, published as `DownSkirtSpan`), the **hole
   classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
   strictly below the rim under the fall footprint, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,

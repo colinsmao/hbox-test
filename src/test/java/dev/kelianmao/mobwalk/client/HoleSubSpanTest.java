@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.ArrayList;
 import java.util.List;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.Rect;
+import dev.kelianmao.mobwalk.client.RectMath.Rect;
 
 import org.junit.jupiter.api.Test;
 

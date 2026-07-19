@@ -14,7 +14,7 @@ MobWalkClient / Configs / scroll / /mobwalk dump
 CollisionSurfaceOverlay  ←→  OverlayManager / RadiusIndicatorOverlay (HUD)
         │ select / clear
         ▼
-SurfaceSelection
+SurfaceSelection  ──uses──►  RectMath (pure rect / interval algebra)
         │ StandableRect, OccluderSpan, DownSkirtSpan, HoleSpan
         ▼
 WorldOverlayManager (FILLED / SKIRT / BEAM) → GPU
@@ -60,17 +60,18 @@ DownSkirtSpan.java                             // downward drop-skirt span
 HoleSpan.java                                  // hole-beam span
 
 // client — surface compute + widget
-SurfaceSelection.java (~1901)                  // flood, skirts, holes; holds last-select lists
-widgets/CollisionSurfaceOverlay.java (~668)    // wand input, publish snapshots, emit geometry
+RectMath.java (~487)                           // pure rect/interval algebra (Rect, merge, flood, …)
+SurfaceSelection.java (~1290)                  // expose, LazyFlood, skirts, holes; last-select lists
+widgets/CollisionSurfaceOverlay.java (~730)    // wand input, publish snapshots, emit geometry
 
-// test (pure logic against SurfaceSelection / EntityProfile / roster / records)
+// test (pure logic against RectMath / SurfaceSelection / EntityProfile / roster / records)
 EntityProfileTest.java
 ProfileRosterTest.java                         // sanitize / cycle / unique names
 WandItemTest.java                              // resolve / stick fallback
 CustomProfileTableRowsTest.java                // ADD seed index helper
-SurfaceGeometryTest.java                       // subtract / union / merge / flood / frontier / depth
+SurfaceGeometryTest.java                       // RectMath: subtract / union / merge / flood / frontier / depth
 HeadroomTest.java                              // exposeBox headroom / burial
-VisualTopTest.java                             // visualTopY raise / merge carry
+VisualTopTest.java                             // visualTopY raise / merge carry (uses RectMath.mergeCoplanar)
 OccluderClassificationTest.java                // occluderSpansForRect / mergeOccluderSpans
 DownSkirtComputeTest.java                      // computeDownSkirts
 DropClassificationTest.java                    // classifyDrop
@@ -262,22 +263,61 @@ record HoleSpan(alongX, maxSide, line, lo, hi, baseY, fallDistance, visualBaseY)
 
 ---
 
-## SurfaceSelection.java (~1901 lines)
+## RectMath.java (~487 lines)
+
+Pure, stateless rect/interval algebra used by `SurfaceSelection`. No world access
+and no held state. Package-private test surface for synthetic-rect unit tests.
+
+### Types
+
+```
+record Rect(minX,minZ,maxX,maxZ)                // XZ rectangle for clip / merge work
+record SpanKey(a, b)                           // quantized double pair for merge hashing
+```
+
+### Flood / adjacency / merge
+
+```
+static flood(rects, seeds, reach)              // BFS over a StandableRect list by adjacency
+static footprintAdjacent(a, b)                 // shared edge or area overlap (ε-tolerant)
+static mergeCoplanar(input)                    // group by topY → union → strip-merge
+static mergeCoplanarSplitFrontier(nodes, depths, limit)
+  // Merge depth < limit and depth >= limit as separate sets; subtract inner area
+  // from frontier so the two tile
+static union(rects)                            // X sweep, merge overlapping Z intervals
+static stripMerge / mergeAlong                 // merge equal-span abutting Rects to a fixpoint
+static depthForMerged(merged, raw, rawDepths)  // min raw depth among nodes a merged rect covers
+static withDepth(r, depth)                     // StandableRect copy with a depth tag
+static coversAnySeed(rect, seeds)
+static spanKey / minDepth
+```
+
+### Subtract / intersect
+
+```
+static subtractRects(base, occluders)          // guillotine XZ subtract → 0..N Rects
+static subtractOne(piece, occluder, out)       // one guillotine cut
+static subtractIntervals(lo, hi, covered)      // 1-D interval difference
+static intersectRect(a, b)                     // positive-area XZ ∩, or null
+```
+
+---
+
+## SurfaceSelection.java (~1290 lines)
 
 Holds the lists from the last `select`: `result`, `occluders`, `downSkirts`,
 `holes`. Each `select` replaces them wholesale; the overlay copies them into
-`volatile` fields for the render thread.
+`volatile` fields for the render thread. Calls into `RectMath` for merge /
+adjacency / subtract work.
 
 ### Internal types
 
 ```
-record Rect(minX,minZ,maxX,maxZ)                // XZ rectangle for clip / merge work
 record WorldBox(bx,by,bz, minX,minZ,maxX,maxZ, yMin,yMax, blockCollisionTop, blockOutlineTop)
                                                // one collision sub-box; bx/by/bz =
                                                // source block; block*Top = whole-shape tops
 record CellSurface(rect, cx, cz)               // dilated top tagged with its source cell
 record ColKey(x, z)                            // block-column key for the box index
-record SpanKey(a, b)                           // quantized double pair for merge hashing
 record SpanGroupKey(alongX, positiveSide, line, baseY)
                                                // key for merging abutting OccluderSpans
 enum DropClass { HOLE, BENIGN }
@@ -301,9 +341,8 @@ void requestDebugDump()                        // next select logs a [flood-debu
 ### Flood
 
 ```
-static flood(rects, seeds, reach)              // BFS over a StandableRect list by adjacency
 LazyFlood                                      // nested class: surface BFS with on-demand expose
-  run()                                        // seed → BFS → mergeCoplanarSplitFrontier
+  run()                                        // seed → BFS → RectMath.mergeCoplanarSplitFrontier
   collectSeedBlock()                           // tops whose source block Y equals seed Y
   collect(cx, cz, topLo, topHi)                // tops in a column inside a height window
   tops(box)                                    // memoized exposeBox for one WorldBox
@@ -319,26 +358,8 @@ static exposeBox(target, index, halfW, height, out)
   // headroom; set visualTopY; append surviving StandableRects
 static wallOccluder(box, topY, height)         // yMax > T && (yMin <= T || yMin < T+H)
 static occluderColumns(box, halfW) → int[4]    // column window that can overlap a top
-static subtractRects(base, occluders)          // guillotine XZ subtract → 0..N Rects
-static subtractOne(piece, occluder, out)       // one guillotine cut
 static visibleTop(level, pos, state, collTop, compute)
   // Per-BlockState outline-top memo (OUTLINE_TOP_REL); skipped when compute is false
-```
-
-### Merge and adjacency
-
-```
-static footprintAdjacent(a, b)                 // shared edge or area overlap (ε-tolerant)
-static mergeCoplanar(input)                    // group by topY → union → strip-merge
-static mergeCoplanarSplitFrontier(nodes, depths, limit)
-  // Merge depth < limit and depth >= limit as separate sets; subtract inner area
-  // from frontier so the two tile
-static union(rects)                            // X sweep, merge overlapping Z intervals
-static stripMerge / mergeAlong                 // merge equal-span abutting Rects to a fixpoint
-static depthForMerged(merged, raw, rawDepths)  // min raw depth among nodes a merged rect covers
-static withDepth(r, depth)                     // StandableRect copy with a depth tag
-static coversAnySeed(rect, seeds)
-static spanKey / minDepth
 ```
 
 ### Occluder spans
@@ -357,7 +378,7 @@ static computeDownSkirts(rects, occluders)     // collision-keyed (visual=false)
 static computeDownSkirts(rects, occluders, visual)
                                                // visual=true keys edges on visualTopY
 static edgeDownSpans(...)                      // one edge minus equal-height abutters minus occluders
-static subtractIntervals(lo, hi, covered)      // 1-D interval difference
+                                               // (uses RectMath.subtractIntervals)
 ```
 
 ### Hole spans
@@ -385,7 +406,7 @@ logFloodDebug / logFloodDebugRects             // [flood-debug] logger output
 
 ---
 
-## CollisionSurfaceOverlay.java (~668 lines)
+## CollisionSurfaceOverlay.java (~730 lines)
 
 `WorldOverlay` that drives `SurfaceSelection`, publishes snapshots, and emits geometry.
 
@@ -443,11 +464,12 @@ EntityProfileTest          // shipped sizes/reach; next(); Option cycle / fromSt
 ProfileRosterTest          // defaults, resolve/cycle, unique names, sanitize
 WandItemTest               // valid / bare / unknown → stick
 CustomProfileTableRowsTest // ADD seed source index
-SurfaceGeometryTest        // subtractRects, union, mergeCoplanar, footprintAdjacent,
+SurfaceGeometryTest        // RectMath: subtractRects, union, mergeCoplanar, footprintAdjacent,
                            // flood reach cases, depthForMerged, mergeCoplanarSplitFrontier,
                            // DownSkirtSpan depth inheritance
 HeadroomTest               // exposeBox burial / headroom / partial overhang / Point parity
 VisualTopTest              // visualTopY raise rules; merge max visual; ctor defaults
+                           // (mergeCoplanar via RectMath)
 OccluderClassificationTest // occluderSpansForRect cases; mergeOccluderSpans
 DownSkirtComputeTest       // computeDownSkirts full / seam / partial / occluder subtract
 DropClassificationTest     // classifyDrop HOLE vs BENIGN cases

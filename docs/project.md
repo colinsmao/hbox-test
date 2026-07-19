@@ -111,6 +111,7 @@ it.
   │   ├── OccluderSpan.java                # upward (wall/ceiling) skirt span (compute-side)
   │   ├── DownSkirtSpan.java               # downward drop-edge skirt span (compute-side)
   │   ├── HoleSpan.java                     # hole (unescapable drop) beam span (compute-side)
+  │   ├── RectMath.java                    # pure rect/interval algebra (Rect, merge, flood, …)
   │   ├── SurfaceSelection.java            # size-aware surface compute: dilation + headroom + lazy flood + hole classification
   │   └── widgets/
   │       ├── RadiusIndicatorOverlay.java   # transient flood-radius HUD readout

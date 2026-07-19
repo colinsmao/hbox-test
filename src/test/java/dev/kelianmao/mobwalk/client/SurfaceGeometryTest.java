@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.Rect;
+import dev.kelianmao.mobwalk.client.RectMath.Rect;
 
 import org.junit.jupiter.api.Test;
 
 /**
- * Stage 0 sanity tests over the existing pure rect ops in {@link SurfaceSelection}
+ * Sanity tests over the pure rect ops in {@link RectMath}
  * ({@code subtractRects} / {@code union} / {@code mergeCoplanar} /
  * {@code footprintAdjacent}). They build synthetic rects only — no world, no game
  * loop — and pin current behavior so later stages can refactor with a net.
@@ -30,14 +30,14 @@ final class SurfaceGeometryTest {
   @Test
   void subtractDisjointKeepsBase() {
     Rect base = new Rect(0, 0, 4, 4);
-    List<Rect> out = SurfaceSelection.subtractRects(base, List.of(new Rect(10, 10, 12, 12)));
+    List<Rect> out = RectMath.subtractRects(base, List.of(new Rect(10, 10, 12, 12)));
     assertEquals(16.0, area(out), EPS);
   }
 
   @Test
   void subtractCenterHoleLeavesFrame() {
     Rect base = new Rect(0, 0, 3, 3);
-    List<Rect> out = SurfaceSelection.subtractRects(base, List.of(new Rect(1, 1, 2, 2)));
+    List<Rect> out = RectMath.subtractRects(base, List.of(new Rect(1, 1, 2, 2)));
     // 9 minus the 1x1 hole, partitioned into non-overlapping pieces.
     assertEquals(8.0, area(out), EPS);
   }
@@ -45,14 +45,14 @@ final class SurfaceGeometryTest {
   @Test
   void subtractFullCoverLeavesNothing() {
     Rect base = new Rect(0, 0, 2, 2);
-    List<Rect> out = SurfaceSelection.subtractRects(base, List.of(new Rect(-1, -1, 3, 3)));
+    List<Rect> out = RectMath.subtractRects(base, List.of(new Rect(-1, -1, 3, 3)));
     assertTrue(out.isEmpty());
   }
 
   @Test
   void unionOfOverlappingRectsCoversCombinedArea() {
     // Two unit squares overlapping in a 1x1 quarter -> union area 7 (4+4-1).
-    List<Rect> out = SurfaceSelection.union(List.of(
+    List<Rect> out = RectMath.union(List.of(
       new Rect(0, 0, 2, 2),
       new Rect(1, 1, 3, 3)));
     assertEquals(7.0, area(out), EPS);
@@ -60,7 +60,7 @@ final class SurfaceGeometryTest {
 
   @Test
   void mergeCoplanarCollapsesAbuttingStrip() {
-    List<StandableRect> merged = SurfaceSelection.mergeCoplanar(List.of(
+    List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(1, 0, 2, 1, 64.0)));
     assertEquals(1, merged.size());
@@ -71,7 +71,7 @@ final class SurfaceGeometryTest {
 
   @Test
   void mergeCoplanarKeepsDistinctHeights() {
-    List<StandableRect> merged = SurfaceSelection.mergeCoplanar(List.of(
+    List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(1, 0, 2, 1, 65.0)));
     assertEquals(2, merged.size());
@@ -81,21 +81,21 @@ final class SurfaceGeometryTest {
   void footprintAdjacentEdgeSharingConnects() {
     StandableRect a = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect b = new StandableRect(1, 0, 2, 1, 64.0);
-    assertTrue(SurfaceSelection.footprintAdjacent(a, b));
+    assertTrue(RectMath.footprintAdjacent(a, b));
   }
 
   @Test
   void footprintAdjacentDiagonalDoesNotConnect() {
     StandableRect a = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect b = new StandableRect(1, 1, 2, 2, 64.0);
-    assertFalse(SurfaceSelection.footprintAdjacent(a, b));
+    assertFalse(RectMath.footprintAdjacent(a, b));
   }
 
   @Test
   void footprintAdjacentOverlapConnects() {
     StandableRect a = new StandableRect(0, 0, 2, 2, 64.0);
     StandableRect b = new StandableRect(1, 1, 3, 3, 64.0);
-    assertTrue(SurfaceSelection.footprintAdjacent(a, b));
+    assertTrue(RectMath.footprintAdjacent(a, b));
   }
 
   @Test
@@ -104,7 +104,7 @@ final class SurfaceGeometryTest {
     // |ΔY| = 2.0625 > reach 1.0 → only the seed height is reached.
     StandableRect carpet = new StandableRect(0, 0, 1, 1, 66.0625);
     StandableRect ground = new StandableRect(0, 0, 1, 1, 64.0);
-    List<StandableRect> reached = SurfaceSelection.flood(
+    List<StandableRect> reached = RectMath.flood(
       List.of(carpet, ground), List.of(carpet), 1.0);
     assertEquals(1, reached.size());
     assertEquals(66.0625, reached.get(0).topY(), EPS);
@@ -114,7 +114,7 @@ final class SurfaceGeometryTest {
   void floodReachesSameColumnWithinReach() {
     StandableRect upper = new StandableRect(0, 0, 1, 1, 65.0);
     StandableRect lower = new StandableRect(0, 0, 1, 1, 64.0);
-    List<StandableRect> reached = SurfaceSelection.flood(
+    List<StandableRect> reached = RectMath.flood(
       List.of(upper, lower), List.of(upper), 1.0);
     assertEquals(2, reached.size());
   }
@@ -123,9 +123,9 @@ final class SurfaceGeometryTest {
   void floodJoinsOneBlockPlusCarpetAtJumpReach() {
     StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect carpet = new StandableRect(0, 0, 1, 1, 65.0625);
-    assertEquals(1, SurfaceSelection.flood(
+    assertEquals(1, RectMath.flood(
       List.of(floor, carpet), List.of(floor), 1.0).size());
-    assertEquals(2, SurfaceSelection.flood(
+    assertEquals(2, RectMath.flood(
       List.of(floor, carpet), List.of(floor), EntityProfile.DEFAULT_JUMP_REACH).size());
   }
 
@@ -133,7 +133,7 @@ final class SurfaceGeometryTest {
   void floodRejectsOneBlockPlusSlabAtJumpReach() {
     StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect slab = new StandableRect(0, 0, 1, 1, 65.5);
-    assertEquals(1, SurfaceSelection.flood(
+    assertEquals(1, RectMath.flood(
       List.of(floor, slab), List.of(floor), EntityProfile.DEFAULT_JUMP_REACH).size());
   }
 
@@ -145,7 +145,7 @@ final class SurfaceGeometryTest {
     List<StandableRect> rawNodes = List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(1, 0, 2, 1, 64.0));
-    int[] depths = SurfaceSelection.depthForMerged(
+    int[] depths = RectMath.depthForMerged(
       List.of(merged), rawNodes, new int[] {0, 2});
     assertEquals(1, depths.length);
     assertEquals(0, depths[0]);
@@ -158,7 +158,7 @@ final class SurfaceGeometryTest {
     List<StandableRect> rawNodes = List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(3, 0, 4, 1, 64.0));
-    int[] depths = SurfaceSelection.depthForMerged(
+    int[] depths = RectMath.depthForMerged(
       List.of(merged), rawNodes, new int[] {0, 2});
     assertEquals(2, depths[0]);
   }
@@ -171,7 +171,7 @@ final class SurfaceGeometryTest {
     List<StandableRect> rawNodes = List.of(
       new StandableRect(0, 0, 1, 1, 60.0),
       new StandableRect(0, 0, 1, 1, 64.0));
-    int[] depths = SurfaceSelection.depthForMerged(
+    int[] depths = RectMath.depthForMerged(
       List.of(merged), rawNodes, new int[] {0, 5});
     assertEquals(5, depths[0]);
   }
@@ -198,7 +198,7 @@ final class SurfaceGeometryTest {
       new StandableRect(2, 0, 3, 1, 64.0));
     int[] depths = {0, 1, 2};
     int limit = 2;
-    List<StandableRect> result = SurfaceSelection.mergeCoplanarSplitFrontier(
+    List<StandableRect> result = RectMath.mergeCoplanarSplitFrontier(
       nodes, depths, limit);
 
     // Must produce at least two rects: one inner, one frontier.
@@ -228,7 +228,7 @@ final class SurfaceGeometryTest {
       new StandableRect(2, 0, 3, 1, 64.0));
     int[] depths = {0, 1, 2};
     int limit = 2;
-    List<StandableRect> result = SurfaceSelection.mergeCoplanarSplitFrontier(
+    List<StandableRect> result = RectMath.mergeCoplanarSplitFrontier(
       nodes, depths, limit);
 
     StandableRect inner = null;
@@ -262,7 +262,7 @@ final class SurfaceGeometryTest {
       new StandableRect(3, 0, 4, 1, 64.0));
     int[] depths = {0, 1, 2, 3};
     int limit = 3;
-    List<StandableRect> result = SurfaceSelection.mergeCoplanarSplitFrontier(
+    List<StandableRect> result = RectMath.mergeCoplanarSplitFrontier(
       nodes, depths, limit);
 
     double inputArea = 4.0;
@@ -281,7 +281,7 @@ final class SurfaceGeometryTest {
       new StandableRect(1, 0, 2, 1, 64.0));
     int[] depths = {0, 1};
     int limit = 5;
-    List<StandableRect> result = SurfaceSelection.mergeCoplanarSplitFrontier(
+    List<StandableRect> result = RectMath.mergeCoplanarSplitFrontier(
       nodes, depths, limit);
 
     assertEquals(1, result.size());

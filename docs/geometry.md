@@ -32,8 +32,8 @@ different surfaces, `visualTopY` because a raised patch and a flush neighbour dr
 different heights. The tuple is deliberately **extensible**: the next planned
 component is a **stand-on hazard class** (soul sand, magma), which lets benign terrain
 still merge into one rect while fencing a hazard region onto its own rects. Adding a
-component is a one-field change to the record plus one comparator in `mergeCoplanar` /
-`mergeCoplanarSplitFrontier`; while a component is uniform (e.g. hazards off ⇒ every
+component is a one-field change to the record plus one comparator in `RectMath.mergeCoplanar` /
+`RectMath.mergeCoplanarSplitFrontier`; while a component is uniform (e.g. hazards off ⇒ every
 rect `NONE`) the grouping collapses to the smaller-tuple behaviour at zero cost.
 `depth` is outside the tuple — it is aggregated by min over the covered nodes, not
 matched on. This is the durable idea behind every "group by …" description below:
@@ -70,7 +70,7 @@ defined by four rules:
    is grown by the profile half-width `W/2` before the spans-above test, so gaps and
    walls eat into the standable area by the entity's size.
 3. **Merge.** Coplanar (`|dTopY| < EPS`) rects that share a **merge class** are
-   unioned into maximal rectangles (`mergeCoplanar`: group by the merge class — the
+   unioned into maximal rectangles (`RectMath.mergeCoplanar`: group by the merge class — the
    extensible equality tuple, **currently `(topY, visualTopY)`**, see [Merge
    class](#representation-rectdouble-space) — re-cut each group to a non-overlapping
    `union`, then greedy strip-merge equal-span abutting rects along X then Z to a
@@ -111,7 +111,7 @@ Treat the entity as a point and pre-grow the world by its half-width `W/2`:
   *dilated* footprints, so cutting a buried lower top and supplying the higher one
   is one operation, not a separate subtract.
 - **`exposeBox` is the unit op.** It grows one box's footprint by `W/2`, then
-  subtracts (guillotine `subtractRects`) every *dilated* box that occludes its top
+  subtracts (guillotine `RectMath.subtractRects`) every *dilated* box that occludes its top
   (`yMax > T && (yMin <= T || yMin < T+H)` — the buried-or-headroom test, rule 1),
   yielding 0..N surviving top rects. The boxes it must subtract live in a bounded
   column window — see `occluderColumns` below.
@@ -328,7 +328,7 @@ inset is left **unfixed on purpose** because it is **Point-only**: a footprint
 dilates by `W/2` per side, so the dilated edge clears the block face whenever
 `W ≥ 2/16 = 0.125`, and
 every real entity is far past that (smallest vanilla mobs ~`0.4`; all shipped
-profiles `≥ 0.6`). Only the zero-width **Point** profile (the debug/oracle baseline)
+profiles `≥ 0.6`). Only the zero-width **Point** profile (debug)
 keeps the inset footprint. Fixing it would need a full **visual footprint** (four
 extra `StandableRect` coords + skirt re-draw + merge-seam handling) for a ~1px border
 on a few blocks — poor cost/benefit. The `visualTopY` mechanism generalizes to a
@@ -336,9 +336,10 @@ visual footprint if it ever becomes worth it.
 
 ### Known limitation — Point profile (not fixed)
 
-The zero-width **Point** profile (debug/oracle baseline) has a few edge-case
+The zero-width **Point** profile (debug) has a few other edge-case
 draw bugs that do not show up on the shipped dilated profiles. Left unfixed on
-purpose.
+purpose due to low ROI. Is a zero-width point supposed to fit through a zero
+size gap? Because a 4.0 wide ghast fits into a 4 block gap.
 
 ## Entity profiles (size + headroom)
 

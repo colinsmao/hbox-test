@@ -7,9 +7,12 @@ todos:
     status: completed
   - id: rectmath
     content: 'Extract pure rect/interval algebra out of SurfaceSelection into a new RectMath class file (holds the Rect record). Repoint SurfaceGeometryTest. Gate on ./gradlew test.'
-    status: pending
+    status: completed
   - id: emitter
     content: 'Extract geometry emission out of CollisionSurfaceOverlay into a new SurfaceEmitter class file (emit + emitDownSkirts/emitOccluders/emitHoles + quad helpers), with color derivation folded in as a nested static Palette helper. Reads only the published snapshots. Leaves CollisionSurfaceOverlay as the input/lifecycle driver. In-game checklist.'
+    status: pending
+  - id: package-split
+    content: 'Group the flat client package into client.config / client.overlay / client.surface (bootstrap stays in client), retiring the widgets subpackage. Pure git mv + package-line + import repoint; each test moves into the same package as the type whose package-private surface it touches; widen to public only the members now accessed across a package boundary. Gate on ./gradlew test.'
     status: pending
 isProject: false
 ---
@@ -45,8 +48,20 @@ flowchart TD
 1. **Delete the eager-flood oracle.** Remove `selectEager`, the `LAZY`/`PROFILE_FLOOD` flags, and the eager-only compare helpers (`coverageMatches`/`groupByTop`/`levelCoversSame`/`zSpan`/`intervalsEqual`). First, because it is the biggest single simplification, removes the two-implementation sync burden, and shrinks the file before any extraction moves code. Keep `/mobwalk dump` (`logFloodDebug*`), and keep the static `flood` + `SurfaceGeometryTest`'s flood cases as the standing guard on the adjacency/reach rule (deleting the oracle removes the automated `LazyFlood` cross-check, so this coverage matters more).
 2. **Extract `RectMath`.** Move the pure algebra listed above (with `Rect`) into `RectMath`; repoint `SurfaceSelection` call sites and `SurfaceGeometryTest`. Lowest-risk extraction, everything above it depends on it, and the unit tests pin it — do it before touching the render side so the engine is already thinned.
 3. **Extract `SurfaceEmitter`.** Move `emit`/`emit*`/quad helpers and the color logic (as the nested `Palette` helper) into `SurfaceEmitter`, consuming the published snapshot + render flags; `CollisionSurfaceOverlay.emit` becomes a one-line delegate. `emitDownSkirts`/`emitOccluders` no longer take a `skirtDepth` arg and occluder emission is style-independent, so the move is slightly simpler than earlier drafts implied; method names to move are otherwise unchanged. Leaves the overlay as the input driver and closes the client-thread/render-thread split.
+4. **Split the flat client package into subpackages.** Purely structural, after the extractions so it moves each file once. Group `client`'s 25 flat files into the layout below (`git mv` + rewrite each `package` line + repoint imports); retire the `widgets` subpackage. Done last because the extractions are the behavioral/risky part and this is a mechanical move that gates cleanly on `./gradlew test`.
 
-Each step updates its own docs in the same commit ([`surface-code-index.md`](docs/surface-code-index.md) file map; drop oracle/`PROFILE_FLOOD` mentions in [`geometry.md`](docs/geometry.md)/[`rendering.md`](docs/rendering.md)). Step 2 is pure-logic and may gate on `./gradlew test`; steps 1 and 3 touch flood/emit behavior and need an in-game checklist (tops/skirts/occluders/holes/cutoff-ring/visual-top intact; `/mobwalk dump` still writes counts).
+   **Target package layout** (in-world and HUD overlays share one `overlay` package — splitting a 3- and a 2-file package fragments too far):
+
+   | Package | Files |
+   |---|---|
+   | `client` (bootstrap) | `MobWalkClient`, `InitHandler` |
+   | `client.config` | `Configs`, `GuiConfigs`, `MobWalkModMenuIntegration`, `WandItem`, `ProfileRoster`, `RosterProfileOption`, `BuiltinProfilesTableEdit`, `CustomProfilesTableEdit`, `ProfilesTableEdit`, `ProfilesTableEditEntry`, `CustomProfileTableRows` |
+   | `client.overlay` | `Overlay`, `OverlayManager`, `RadiusIndicatorOverlay`, `WorldOverlay`, `WorldOverlayManager` |
+   | `client.surface` | `EntityProfile`, `StandableRect`, `OccluderSpan`, `DownSkirtSpan`, `HoleSpan`, `SurfaceSelection`, `RectMath`, `CollisionSurfaceOverlay`, `SurfaceEmitter` |
+
+   **Java package semantics that shape this step:** a package is one directory with no subpackage-visibility — `client.surface` and `client` cannot see each other's package-private (default-access) members. Two consequences: (a) every test must sit in the *same* package as the type whose package-private surface it exercises, so the tests move with their owners; (b) any package-private member now read across a new package boundary must be widened to `public`. Prefer keeping collaborators in the same package over widening; audit the cross-package call sites (`MobWalkClient`/`Configs` → `WorldOverlayManager.collisionSurface()`, overlay ↔ surface, config ↔ surface) and widen only what the compiler forces. **Test moves** (mirror source packages): `SurfaceGeometryTest`, `HeadroomTest`, `VisualTopTest`, `OccluderClassificationTest`, `DownSkirtComputeTest`, `DropClassificationTest`, `HoleFootprintTest`, `HoleSubSpanTest`, `EntityProfileTest` → `client.surface`; `ProfileRosterTest`, `WandItemTest`, `CustomProfileTableRowsTest` → `client.config`.
+
+Each step updates its own docs in the same commit ([`surface-code-index.md`](docs/surface-code-index.md) file map; drop oracle/`PROFILE_FLOOD` mentions in [`geometry.md`](docs/geometry.md)/[`rendering.md`](docs/rendering.md)). Step 2 is pure-logic and may gate on `./gradlew test`; steps 1 and 3 touch flood/emit behavior and need an in-game checklist (tops/skirts/occluders/holes/cutoff-ring/visual-top intact; `/mobwalk dump` still writes counts). Step 4 is a pure move gating on `./gradlew test`.
 
 ## API that must stay stable
 

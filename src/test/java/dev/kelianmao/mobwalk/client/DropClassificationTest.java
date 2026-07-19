@@ -6,7 +6,7 @@ import java.util.List;
 
 import dev.kelianmao.mobwalk.client.SurfaceSelection.DropClass;
 import dev.kelianmao.mobwalk.client.SurfaceSelection.DropClassification;
-import dev.kelianmao.mobwalk.client.SurfaceSelection.Rect;
+import dev.kelianmao.mobwalk.client.RectMath.Rect;
 
 import org.junit.jupiter.api.Test;
 

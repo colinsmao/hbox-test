@@ -2,7 +2,7 @@ package dev.kelianmao.mobwalk.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import dev.kelianmao.mobwalk.client.SurfaceSelection.Rect;
+import dev.kelianmao.mobwalk.client.RectMath.Rect;
 
 import org.junit.jupiter.api.Test;
 

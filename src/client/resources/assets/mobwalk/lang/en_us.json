@@ -8,7 +8,7 @@
   "mobwalk.gui.button.reset_cancel": "Cancel",
   "mobwalk.gui.button.reset_confirm": "Confirm",
 
-  "mobwalk.config.generic.comment.showSurfaces": "Whether to draw walkable surfaces: Never, While Holding Wand (in either hand), or Always.",
+  "mobwalk.config.generic.comment.showSurfaces": "Whether to draw walkable surfaces: Never (rendering disabled), While Holding Wand (in either hand), or Always.",
 
   "mobwalk.config.generic.showSurfaces.never": "Never",
   "mobwalk.config.generic.showSurfaces.whileHoldingWand": "While Holding Wand",
