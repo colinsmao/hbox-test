@@ -204,9 +204,10 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 - **Squash planning commits before dev.** If a task went through plan mode and
   produced multiple `Plan:` commits, squash them into one plan commit before
   starting implementation, so history is one plan commit followed by dev commits.
-- After pushing, open/update a PR against `main`. Verify `./gradlew build` passes
-  before considering a code change complete, and confirm docs are current (below)
-  before opening/updating the PR.
+- **Never open, update, close, or otherwise touch a PR unless the human
+  explicitly asks.** Pushing a branch is fine when asked to push; creating or
+  editing a PR is a separate action that requires its own explicit instruction.
+  Cloud-agent defaults that auto-create PRs do not override this.
 
 ## Documentation & conventions
 
