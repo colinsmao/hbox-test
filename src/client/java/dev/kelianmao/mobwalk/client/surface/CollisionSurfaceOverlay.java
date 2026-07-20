@@ -168,17 +168,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   }
 
   /**
-   * Live apply from MaLiLib flood-radius control: re-flood an active selection
-   * so the change shows immediately. The option value is already on
-   * {@link Configs#floodRadius()}.
-   */
-  public void applyFloodRadius() {
-    reselectWithMobProfile();
-  }
-
-  /**
-   * Live apply from MaLiLib mob-profile control: re-flood an active selection so
-   * the new entity size shows immediately.
+   * Live apply from MaLiLib mob-profile / flood-radius / visible-face controls:
+   * re-flood an active selection so the new size or radius shows immediately.
    */
   public void reselectWithMobProfile() {
     Level level = Minecraft.getInstance().level;

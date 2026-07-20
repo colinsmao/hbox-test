@@ -65,9 +65,9 @@ public final class RadiusIndicatorOverlay implements Overlay {
 
     Minecraft client = Minecraft.getInstance();
     Font font = client.font;
-    String text = this.text;
-    int x = (client.getWindow().getGuiScaledWidth() - font.width(text)) / 2;
+    String label = this.text;
+    int x = (client.getWindow().getGuiScaledWidth() - font.width(label)) / 2;
     int y = client.getWindow().getGuiScaledHeight() / 2 + CROSSHAIR_Y_OFFSET;
-    graphics.text(font, text, x, y, (alpha << 24) | RGB, true);
+    graphics.text(font, label, x, y, (alpha << 24) | RGB, true);
   }
 }

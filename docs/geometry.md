@@ -17,7 +17,7 @@ render taller than they collide (see [Visible-face top vs collision
 top](#visible-face-top-vs-collision-top)) and equals `collisionTopY` for
 everything else — nothing in the geometry layer reads it. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
-epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose: width dilation
+epsilon-tolerant (`RectMath.EPS = 1e-6`, shared with `SurfaceSelection`). Quantizing is skipped on purpose: width dilation
 (below) expands surfaces by entity-dependent amounts that are not `1/16`-aligned,
 so precision is left to the math rather than baked into a grid. Minecraft
 hitboxes are axis-aligned squares that never rotate, so the Minkowski sum of two
@@ -91,12 +91,10 @@ defined by four rules:
    that block's exposed ring because their footprints abut at the hole edges — no
    special case.
 
-**Radius is a spatial budget**, not a graph hop-count: the reached set is bounded by
-a Chebyshev cube around the seed — `|x-ox| <= radius` ∧ `|z-oz| <= radius` ∧ `|y-oy|
-<= radius` (block coords). It bounds by *physical distance*, so a spiral staircase
-is followed only while it stays inside the cube (it does not wind indefinitely) and
-a narrow cave only as far as the cube reaches. (A hop-count would be meaningless:
-after merge an open floor is a single rect, reached in one hop.)
+**Radius is a BFS depth limit** (max hop-count from the seed), not a spatial X/Z
+window: horizontal reach is unbounded; termination comes from the hop-count cap plus
+a Y band of about `oy ± radius`. Connectivity gating is unchanged (a drop `> reach`
+or a disconnected patch is never reached).
 
 A **Point** profile (`W = 0`) reproduces the original zero-width point-walker
 exactly (dilation is a no-op, tops only abut).
@@ -129,8 +127,9 @@ makes the output-sensitive flood possible.
 `select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
 reaches it, so cost tracks the reachable set (and its occluder shells) rather
 than the window volume — a large win in caves / against walls, and asymptotically
-on open ground. Adjacency/reach is guarded by the unit-tested static `flood`
-(see [`project.md`](project.md) milestones).
+on open ground. Adjacency uses `RectMath.footprintAdjacent`; reach is the
+profile height window in `LazyFlood` (see [`project.md`](project.md)
+milestones).
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the
@@ -309,12 +308,12 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   `collisionTopY` but different `visualTopY` (a path lip on a soul-sand cube top)
   therefore gets a down skirt **only from the raised/high side**, clamped to the
   lower face; soul sand's own remnant abutting that lip at the same `visualTopY` gets
-  none. `select` computes `dropEdges` once and, only when some rect is raised
-  (`hasRaisedRect`; never when the toggle gates the raise off), runs the second
+  none. `select` computes `dropEdges` once and, when the Appearance toggle enables
+  raise and some rect has `visualTopY != collisionTopY`, runs the second
   `visualTopY` pass — otherwise the single pass feeds both holes and skirts. Both
   heights on a span are **load-bearing**: collision `baseY` for the hole/geometry
   pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs every
-  skirt/beam from `visualBaseY`, keying color on the collision `depth`).
+  skirt/beam from `visualBaseY` and colors at draw).
 - **Neighbour-overlap raise (a merge-class split).** A dilated rect owned by block A
   can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
   reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine
@@ -356,8 +355,8 @@ size gap? Because a 4.0 wide ghast fits into a 4 block gap.
 
 `EntityProfile(name, width, height, reach)` selects the entity the flood is computed
 for. The profile is chosen live via the `mobProfile` setting (see
-[`settings.md`](settings.md)); the shipped roster is defined in `EntityProfile.Option`,
-so it grows there rather than in a table duplicated here.
+[`settings.md`](settings.md)); the shipped builtin sizes live on `EntityProfile`
+constants, with enables/order in `ProfileRoster`.
 
 Each field drives one part of the math: `W` drives dilation (above), `H` drives
 headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`. Skirt

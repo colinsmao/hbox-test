@@ -70,7 +70,6 @@ final class ProfileRosterTest {
       false, false, true, true, true, false
     );
     assertEquals(Optional.of("ravager"), roster.resolveActiveId("player"));
-    assertEquals(Optional.of("ravager"), roster.fallbackActiveId());
   }
 
   @Test
@@ -81,21 +80,20 @@ final class ProfileRosterTest {
     assertFalse(roster.hasEnabledProfile());
     assertTrue(roster.enabledEntries().isEmpty());
     assertEquals(Optional.empty(), roster.resolveActiveId("player"));
-    assertEquals(Optional.empty(), roster.cycle("player"));
-    assertEquals(Optional.empty(), roster.fallbackActiveId());
+    assertEquals(Optional.empty(), roster.cycle("player", true));
     assertEquals(Optional.empty(), roster.profileIfEnabled("player"));
   }
 
   @Test
   void cycleSkipsDisabledAndWraps() {
     ProfileRoster roster = ProfileRoster.defaults();
-    assertEquals(Optional.of("ravager"), roster.cycle("player"));
-    assertEquals(Optional.of("warden"), roster.cycle("ravager"));
-    assertEquals(Optional.of("zombie"), roster.cycle("warden"));
-    assertEquals(Optional.of("player"), roster.cycle("zombie"));
+    assertEquals(Optional.of("ravager"), roster.cycle("player", true));
+    assertEquals(Optional.of("warden"), roster.cycle("ravager", true));
+    assertEquals(Optional.of("zombie"), roster.cycle("warden", true));
+    assertEquals(Optional.of("player"), roster.cycle("zombie", true));
     // Disabled / unknown id → first enabled (same as resolve)
-    assertEquals(Optional.of("player"), roster.cycle("point"));
-    assertEquals(Optional.of("player"), roster.cycle("nope"));
+    assertEquals(Optional.of("player"), roster.cycle("point", true));
+    assertEquals(Optional.of("player"), roster.cycle("nope", true));
   }
 
   @Test
@@ -103,8 +101,8 @@ final class ProfileRosterTest {
     ProfileRoster roster = withBuiltinEnables(
       false, true, false, false, false, false
     );
-    assertEquals(Optional.of("player"), roster.cycle("player"));
-    assertEquals(Optional.of("player"), roster.cycle("ravager"));
+    assertEquals(Optional.of("player"), roster.cycle("player", true));
+    assertEquals(Optional.of("player"), roster.cycle("ravager", true));
   }
 
   @Test
@@ -123,7 +121,6 @@ final class ProfileRosterTest {
     );
     assertTrue(restored.repaired());
     assertEquals("Tall", restored.roster().customs().getFirst().profile().name());
-    assertTrue(restored.roster().customs().getFirst().participates());
 
     SanitizeResult fallback = ProfileRoster.sanitize(
       null,
@@ -135,7 +132,6 @@ final class ProfileRosterTest {
       ProfileRoster.FALLBACK_CUSTOM_NAME,
       fallback.roster().customs().getFirst().profile().name()
     );
-    assertTrue(fallback.roster().customs().getFirst().participates());
   }
 
   @Test
@@ -164,8 +160,8 @@ final class ProfileRosterTest {
       "zombie"
     );
     ProfileRoster roster = result.roster();
-    assertEquals(Optional.of("custom0"), roster.cycle("zombie"));
-    assertEquals(Optional.of("player"), roster.cycle("custom0"));
+    assertEquals(Optional.of("custom0"), roster.cycle("zombie", true));
+    assertEquals(Optional.of("player"), roster.cycle("custom0", true));
     assertEquals(2.5, roster.findById("custom0").orElseThrow().profile().height(), EPS);
   }
 
@@ -230,9 +226,9 @@ final class ProfileRosterTest {
     );
     assertTrue(result.repaired());
     ProfileRoster roster = result.roster();
-    assertEquals(Optional.of("custom0"), roster.cycle("zombie"));
-    assertEquals(Optional.of("custom1"), roster.cycle("custom0"));
-    assertEquals(Optional.of("player"), roster.cycle("custom1"));
+    assertEquals(Optional.of("custom0"), roster.cycle("zombie", true));
+    assertEquals(Optional.of("custom1"), roster.cycle("custom0", true));
+    assertEquals(Optional.of("player"), roster.cycle("custom1", true));
     // Builtin Ravager taken → customs are Ravager (1) and Ravager (2).
     assertEquals("Ravager (1)", roster.customs().get(0).profile().name());
     assertEquals("Ravager (2)", roster.customs().get(1).profile().name());
@@ -427,7 +423,7 @@ final class ProfileRosterTest {
       List.of("player", "ravager", "warden", "zombie"),
       roster.enabledEntries().stream().map(ProfileRoster.Entry::id).toList()
     );
-    assertEquals(Optional.of("ravager"), roster.cycle("player"));
+    assertEquals(Optional.of("ravager"), roster.cycle("player", true));
   }
 
   @Test
@@ -456,11 +452,6 @@ final class ProfileRosterTest {
     SanitizeResult result = ProfileRoster.sanitize(rows, List.of(), "ravager");
     assertFalse(enabled(result.roster(), "zombie"));
     assertEquals(EntityProfile.ZOMBIE_WITCH, result.roster().findById("zombie").orElseThrow().profile());
-  }
-
-  @Test
-  void playerDefaultCustomProfile() {
-    assertEquals(EntityProfile.PLAYER, ProfileRoster.playerDefaultCustomProfile());
   }
 
   private static boolean enabled(ProfileRoster roster, String id) {

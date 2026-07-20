@@ -66,12 +66,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * hole — "can't fall into a hole smaller than yourself". (This stage shows only
  * the <em>geometry</em>; explicit hole detection is a later milestone.)
  *
- * <p><b>Radius is a spatial budget</b> (the window half-extent in blocks), not a
- * graph hop-count: with merge an open floor is a single rect, so hop-count would
- * make the radius meaningless on open ground. Straight-line reach still matches a
- * per-block hop flood; the cutoff is a Chebyshev square rather than a taxicab
- * diamond. Connectivity gating is unchanged (a drop {@code > reach} or a
- * disconnected patch is never reached).
+ * <p><b>Radius is a BFS depth limit</b> (max hop-count from the seed), not a
+ * spatial X/Z window: horizontal reach is unbounded; termination comes from the
+ * hop-count cap plus a Y band of about {@code oy ± radius}. Connectivity gating is
+ * unchanged (a drop {@code > reach} or a disconnected patch is never reached).
  *
  * <p>Not thread-safe by design. It is mutated only on the client thread
  * ({@code select}/{@code clear}); the render thread reads only the immutable
@@ -110,9 +108,8 @@ public final class SurfaceSelection {
   record ColKey(int x, int z) {
   }
 
-  // Tolerance for the double coordinate compares (box edges are multiples of
-  // 1/16). Used to drop subtraction slivers and to test edge adjacency/overlap.
-  private static final double EPS = 1.0e-6;
+  // Tolerance for the double coordinate compares (box edges are multiples of 1/16).
+  private static final double EPS = RectMath.EPS;
 
   // Per-BlockState memo of the block's outline (visible) top, relative to the block
   // origin (i.e. state.getShape().max(Y)); NaN means "no separate outline, don't
@@ -162,9 +159,8 @@ public final class SurfaceSelection {
 
   /**
    * Replace the selection with the merged standable surfaces reachable from the
-   * surfaces of {@code start}, within a spatial window of half-extent
-   * {@code radius} blocks, for the entity's width/reach, across
-   * footprint-adjacent height-gated steps.
+   * surfaces of {@code start}, within BFS hop-count {@code radius} of the seed,
+   * for the entity's width/reach, across footprint-adjacent height-gated steps.
    *
    * <p>Runs the output-sensitive {@link LazyFlood} (on-demand column/row
    * exposure), then computes occluders, down-skirts, and holes.
@@ -188,7 +184,20 @@ public final class SurfaceSelection {
     }
     occluders = computeOccluders(level, result, profile);
     List<SkirtSpan> dropEdges = computeDownSkirts(result, occluders, false);
-    downSkirts = skirtSpansFor(result, occluders, dropEdges, computeVisualTop);
+    // Visual-keyed down-skirts when any rect draws above its collision top;
+    // otherwise dropEdges already match the render heights.
+    boolean raisedVisual = false;
+    if (computeVisualTop) {
+      for (StandableRect r : result) {
+        if (Math.abs(r.visualTopY() - r.collisionTopY()) > EPS) {
+          raisedVisual = true;
+          break;
+        }
+      }
+    }
+    downSkirts = raisedVisual
+      ? computeDownSkirts(result, occluders, true)
+      : dropEdges;
     holes = computeHoles(level, result, dropEdges, profile, radius);
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop);
@@ -247,7 +256,7 @@ public final class SurfaceSelection {
     debugReachedPreMerge = List.of();
   }
 
-  /** Immutable snapshot of the reached surfaces (height-tinted at draw time). */
+  /** Immutable snapshot of the reached surfaces (colored at draw). */
   public List<StandableRect> allRects() {
     return result;
   }
@@ -309,12 +318,12 @@ public final class SurfaceSelection {
       target.minX() - halfW, target.minZ() - halfW,
       target.maxX() + halfW, target.maxZ() + halfW);
 
-    List<RectMath.Rect> occluders = new ArrayList<>();
+    List<RectMath.Rect> clipRects = new ArrayList<>();
     // Neighbours that render taller than they collide (soul sand, mud, …) and
     // taller than this top: a dilated footprint that sits over their undilated
     // column would paint buried under their full-cube mesh, so those cores raise
     // visualTopY on the overlap only (collisionTopY stays). Collected in the
-    // same column window as occluders — they are often not occluders (their
+    // same column window as clipRects — they are often not occluders (their
     // collision top is below T, e.g. path 15/16 over soul sand 14/16).
     List<RectMath.Rect> raiseCores = new ArrayList<>();
     List<Double> raiseOutlines = new ArrayList<>();
@@ -338,7 +347,7 @@ public final class SurfaceSelection {
           boolean buried = other.yMin() <= collisionTopY + EPS;
           boolean headroomCeiling = other.yMin() < collisionTopY + height - EPS;
           if (other.yMax() > collisionTopY + EPS && (buried || headroomCeiling)) {
-            occluders.add(new RectMath.Rect(
+            clipRects.add(new RectMath.Rect(
               other.minX() - halfW, other.minZ() - halfW,
               other.maxX() + halfW, other.maxZ() + halfW));
           }
@@ -352,7 +361,7 @@ public final class SurfaceSelection {
       }
     }
 
-    for (RectMath.Rect exposed : RectMath.subtractRects(base, occluders)) {
+    for (RectMath.Rect exposed : RectMath.subtractRects(base, clipRects)) {
       emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, raiseCores, raiseOutlines, out);
     }
   }
@@ -549,28 +558,28 @@ public final class SurfaceSelection {
       // Coalesced spans can come from different surfaces (same edge line/height,
       // different depth); take the min so the merged marker reads as the nearest
       // surface's band (mirrors the max-stop handling above).
-      int depth = head.depth();
+      int spanDepth = head.depth();
       for (int i = 1; i < group.size(); i++) {
         SkirtSpan s = group.get(i);
         if (s.lo() <= hi + EPS) {
           hi = Math.max(hi, s.hi());
           stop = Math.max(stop, s.visualBaseY() + s.maxExtent());
           visualBase = Math.max(visualBase, s.visualBaseY());
-          depth = RectMath.minDepth(depth, s.depth());
+          spanDepth = RectMath.minDepth(spanDepth, s.depth());
         } else {
           out.add(new SkirtSpan(head.alongX(), head.maxSide(),
             head.line(), lo, hi, head.baseY(), visualBase,
-            SkirtSpan.Direction.UP, stop - visualBase, depth));
+            SkirtSpan.Direction.UP, stop - visualBase, spanDepth));
           lo = s.lo();
           hi = s.hi();
           stop = s.visualBaseY() + s.maxExtent();
           visualBase = s.visualBaseY();
-          depth = s.depth();
+          spanDepth = s.depth();
         }
       }
       out.add(new SkirtSpan(head.alongX(), head.maxSide(),
         head.line(), lo, hi, head.baseY(), visualBase,
-        SkirtSpan.Direction.UP, stop - visualBase, depth));
+        SkirtSpan.Direction.UP, stop - visualBase, spanDepth));
     }
     return out;
   }
@@ -631,32 +640,6 @@ public final class SurfaceSelection {
     return new DropClassification(DropClass.BENIGN, collisionTopY - landY);
   }
 
-  // The rendered down-skirts: the visualTopY-keyed pass when any rect draws above its
-  // collision top, else the already-computed collision drop edges (identical then, so
-  // one pass suffices). The render toggle off keeps every visualTopY == collisionTopY, so the
-  // gate makes the common case take the shared pass for free — one soul sand in view
-  // is what forks it (see docs/geometry.md; a localized diff is the escalation if it
-  // ever profiles hot).
-  private static List<SkirtSpan> skirtSpansFor(List<StandableRect> rects,
-      List<SkirtSpan> occluders, List<SkirtSpan> dropEdges, boolean computeVisualTop) {
-    if (computeVisualTop && hasRaisedRect(rects)) {
-      return computeDownSkirts(rects, occluders, true);
-    }
-    return dropEdges;
-  }
-
-  // True iff some rect draws above its collision top (an own or neighbour visual
-  // raise), so the visualTopY-keyed skirt pass can diverge from the collision drop
-  // pass. False in the common case (no render-taller-than-collide block, or toggle off).
-  private static boolean hasRaisedRect(List<StandableRect> rects) {
-    for (StandableRect r : rects) {
-      if (Math.abs(r.visualTopY() - r.collisionTopY()) > EPS) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   // Compute the downward drop-skirt spans of the whole reached set, once per
   // select. For each merged rect edge: the edge minus the parts covered by an
   // equal-height neighbour abutting across it (a merge seam, not a drop) minus the
@@ -682,13 +665,6 @@ public final class SurfaceSelection {
       edgeDownSpans(rects, occluders, r, false, true, visual, out);  // +X edge
     }
     return out;
-  }
-
-  // Collision-keyed drop edges (visual=false): the hole-candidate substrate and the
-  // backward-compatible entry point for the unit tests.
-  static List<SkirtSpan> computeDownSkirts(List<StandableRect> rects,
-      List<SkirtSpan> occluders) {
-    return computeDownSkirts(rects, occluders, false);
   }
 
   // Append the drop sub-spans of one rect edge (see computeDownSkirts). alongX: the
@@ -1155,10 +1131,10 @@ public final class SurfaceSelection {
    * {@link RectMath#footprintAdjacent}, and within {@code reach}.
    *
    * <p><b>Depth-bounded</b> (debug mode): the flood stops when BFS hop-count
-   * exceeds {@code radius} (now interpreted as a max-depth limit, not a spatial
-   * window). There is no spatial X/Z bound on which columns the flood can reach;
-   * the depth limit itself provides termination. A generous Y band
-   * ({@code oy ± radius + 2}) still constrains vertical scanning since each step
+   * exceeds {@code depthLimit} (Flood Radius in settings). There is no spatial
+   * X/Z bound on which columns the flood can reach; the depth limit itself
+   * provides termination. A generous Y band
+   * ({@code oy ± depthLimit + 2}) still constrains vertical scanning since each step
    * changes height by at most {@code reach}. The merge/union runs <b>after</b>
    * the flood on the reached set only (area-preserving, so connectivity is
    * unchanged — {@code RectMath.footprintAdjacent} already treats overlap as connected).
@@ -1168,7 +1144,7 @@ public final class SurfaceSelection {
     private final int ox;
     private final int oy;
     private final int oz;
-    private final int radius;
+    private final int depthLimit;
     private final double halfW;
     private final double height;
     private final double reach;
@@ -1193,21 +1169,21 @@ public final class SurfaceSelection {
     // Pre-merge BFS reached set (for /mobwalk dump); empty until run() finishes.
     private List<StandableRect> preMergeReached = List.of();
 
-    LazyFlood(Level level, BlockPos start, int radius, EntityProfile profile,
+    LazyFlood(Level level, BlockPos start, int depthLimit, EntityProfile profile,
         boolean computeVisualTop) {
       this.level = level;
       BlockPos origin = start.immutable();
       this.ox = origin.getX();
       this.oy = origin.getY();
       this.oz = origin.getZ();
-      this.radius = radius;
+      this.depthLimit = depthLimit;
       this.halfW = profile.width() / 2.0;
       this.height = profile.height();
       this.reach = profile.reach();
       this.neighbour = (int) Math.floor(profile.width()) + 1;
       this.computeVisualTop = computeVisualTop;
-      this.yLo = Math.max(oy - radius - 1, level.getMinY());
-      this.yHi = Math.min(oy + radius + 1, level.getMaxY());
+      this.yLo = Math.max(oy - depthLimit - 1, level.getMinY());
+      this.yHi = Math.min(oy + depthLimit + 1, level.getMaxY());
     }
 
     List<StandableRect> preMergeReached() {
@@ -1222,13 +1198,13 @@ public final class SurfaceSelection {
         preMergeReached = List.of();
         return List.of();
       }
-      // depth doubles as the visited set: a key is present iff visited, and its
+      // hopCount doubles as the visited set: a key is present iff visited, and its
       // value is the BFS hop-count from the seed (0 = seed). FIFO queue + set on
       // enqueue makes this the shortest surface-graph distance.
-      Map<CellSurface, Integer> depth = new HashMap<>();
+      Map<CellSurface, Integer> hopCount = new HashMap<>();
       Deque<CellSurface> queue = new ArrayDeque<>();
       for (CellSurface seed : seeds) {
-        if (depth.putIfAbsent(seed, 0) == null) {
+        if (hopCount.putIfAbsent(seed, 0) == null) {
           queue.addLast(seed);
         }
       }
@@ -1238,11 +1214,11 @@ public final class SurfaceSelection {
       List<Integer> reachedDepths = new ArrayList<>();
       while (!queue.isEmpty()) {
         CellSurface s = queue.pollFirst();
-        int d = depth.get(s);
+        int d = hopCount.get(s);
         reached.add(s.rect());
         reachedDepths.add(d);
         // At the depth limit: emit this node but don't explore its neighbors.
-        if (d >= radius) {
+        if (d >= depthLimit) {
           continue;
         }
         double h = s.rect().collisionTopY();
@@ -1251,11 +1227,11 @@ public final class SurfaceSelection {
             // Only tops within a single step of h can connect, so scan
             // just that height window of the neighbour column.
             for (CellSurface t : collect(cx, cz, h - reach, h + reach)) {
-              if (depth.containsKey(t)) {
+              if (hopCount.containsKey(t)) {
                 continue;
               }
               if (RectMath.footprintAdjacent(s.rect(), t.rect())) {
-                depth.put(t, d + 1);
+                hopCount.put(t, d + 1);
                 queue.addLast(t);
               }
             }
@@ -1271,7 +1247,7 @@ public final class SurfaceSelection {
       for (int i = 0; i < rawDepths.length; i++) {
         rawDepths[i] = reachedDepths.get(i);
       }
-      return RectMath.mergeCoplanarSplitFrontier(reached, rawDepths, radius);
+      return RectMath.mergeCoplanarSplitFrontier(reached, rawDepths, depthLimit);
     }
 
     // Standable tops of the clicked seed block (source block Y == oy). Keyed on
@@ -1314,7 +1290,7 @@ public final class SurfaceSelection {
       for (int i = 0; i < count; i++) {
         WorldBox box = column.get(i);
         // Outside the cube's vertical band -> occluder only, never a node.
-        if (Math.abs(box.by() - oy) > radius) {
+        if (Math.abs(box.by() - oy) > depthLimit) {
           continue;
         }
         if (box.yMax() < topLo - EPS || box.yMax() > topHi + EPS) {

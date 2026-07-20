@@ -8,8 +8,7 @@ import java.util.Optional;
 import fi.dy.masa.malilib.config.IConfigOptionListEntry;
 
 /**
- * MaLiLib cycle-list entry backed by {@link ProfileRoster} enabled ids (not the
- * closed {@link EntityProfile.Option} enum).
+ * MaLiLib cycle-list entry backed by {@link ProfileRoster} enabled ids.
  */
 public final class RosterProfileOption implements IConfigOptionListEntry {
   private final String id;

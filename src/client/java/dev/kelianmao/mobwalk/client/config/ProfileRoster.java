@@ -32,18 +32,13 @@ public final class ProfileRoster {
 
   /**
    * One roster row after sanitize. Builtin geometry always matches the seed;
-   * blank custom names still participate when enabled (cycle label
-   * {@code <empty>}).
+   * blank custom names still cycle when enabled (label {@code <empty>} until
+   * sanitize restores a name).
    */
   public record Entry(String id, EntityProfile profile, boolean enabled, boolean builtin) {
     public Entry {
       Objects.requireNonNull(id, "id");
       Objects.requireNonNull(profile, "profile");
-    }
-
-    /** Enabled customs always participate (blank name → {@code <empty>} label). */
-    public boolean participates() {
-      return true;
     }
   }
 
@@ -97,14 +92,6 @@ public final class ProfileRoster {
     return new ProfileRoster(builtins, List.of());
   }
 
-  /**
-   * Player-sized custom row template (ADD / dummy): name {@code Player}, Player
-   * width/height/reach, enabled.
-   */
-  public static EntityProfile playerDefaultCustomProfile() {
-    return EntityProfile.PLAYER;
-  }
-
   public List<Entry> builtins() {
     return builtins;
   }
@@ -122,12 +109,12 @@ public final class ProfileRoster {
   }
 
   /**
-   * Enabled rows that participate in cycle / flood (skips disabled).
+   * Enabled rows (cycle / flood eligibility).
    */
   public List<Entry> enabledEntries() {
     List<Entry> out = new ArrayList<>();
     for (Entry e : allEntries()) {
-      if (e.enabled() && e.participates()) {
+      if (e.enabled()) {
         out.add(e);
       }
     }
@@ -151,22 +138,22 @@ public final class ProfileRoster {
   }
 
   /**
-   * Profile for an id when that row is enabled and participates; otherwise
-   * empty (soft-disabled or unknown / disabled id).
+   * Profile for an id when that row is enabled; otherwise empty (soft-disabled
+   * or unknown / disabled id).
    */
   public Optional<EntityProfile> profileIfEnabled(String id) {
     return findById(id)
-      .filter(e -> e.enabled() && e.participates())
+      .filter(Entry::enabled)
       .map(Entry::profile);
   }
 
   /**
-   * Resolve an active id: keep it if enabled+participating; otherwise the first
-   * enabled entry’s id; empty when soft-disabled.
+   * Resolve an active id: keep it if enabled; otherwise the first enabled
+   * entry’s id; empty when soft-disabled.
    */
   public Optional<String> resolveActiveId(String activeId) {
     Optional<Entry> current = findById(activeId);
-    if (current.isPresent() && current.get().enabled() && current.get().participates()) {
+    if (current.isPresent() && current.get().enabled()) {
       return Optional.of(current.get().id());
     }
     List<Entry> enabled = enabledEntries();
@@ -177,18 +164,10 @@ public final class ProfileRoster {
   }
 
   /**
-   * Next enabled id after {@code currentId} (wrap forward). Same id when fewer
-   * than two enabled entries; empty when soft-disabled. If {@code currentId} is
-   * missing or disabled, returns the first enabled id (same as
-   * {@link #resolveActiveId}).
-   */
-  public Optional<String> cycle(String currentId) {
-    return cycle(currentId, true);
-  }
-
-  /**
    * Cycle enabled ids. {@code forward == false} walks backward. Empty when
-   * soft-disabled; single enabled entry returns that id.
+   * soft-disabled; single enabled entry returns that id. If {@code currentId}
+   * is missing or disabled, returns the first enabled id (same as
+   * {@link #resolveActiveId}).
    */
   public Optional<String> cycle(String currentId, boolean forward) {
     List<Entry> enabled = enabledEntries();
@@ -228,18 +207,6 @@ public final class ProfileRoster {
       return found.get().id();
     }
     return name;
-  }
-
-  /**
-   * After disabling / removing the active profile: first remaining enabled id,
-   * or empty when soft-disabled.
-   */
-  public Optional<String> fallbackActiveId() {
-    List<Entry> enabled = enabledEntries();
-    if (enabled.isEmpty()) {
-      return Optional.empty();
-    }
-    return Optional.of(enabled.getFirst().id());
   }
 
   /**
@@ -382,7 +349,7 @@ public final class ProfileRoster {
     Optional<String> resolved = roster.resolveActiveId(activeId);
     if (activeId != null && !activeId.isBlank()) {
       Optional<String> kept = roster.findById(activeId)
-        .filter(e -> e.enabled() && e.participates())
+        .filter(Entry::enabled)
         .map(Entry::id);
       if (kept.isEmpty() && resolved.isPresent()) {
         repaired = true;
@@ -531,11 +498,6 @@ public final class ProfileRoster {
       }
     }
     return Optional.empty();
-  }
-
-  /** Lowercase id helper for customs (stable index ids preferred). */
-  public static String customId(int index) {
-    return "custom" + index;
   }
 
   @Override

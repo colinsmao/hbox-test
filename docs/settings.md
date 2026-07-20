@@ -53,7 +53,7 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
 | `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
-| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
+| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
 
 Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
 `Configs.setFloodRadius()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
@@ -103,16 +103,16 @@ are not kept: sanitize strips trailing spaces, restores the previous non-empty n
 at that index (else `"Custom"`), then rewrites **new or renamed** colliding customs
 to `Name (1)`, `Name (2)`, … (builtins count, including disabled). Existing names
 that still appear are left unchanged. An open `CustomProfilesTableEdit` rebuilds so
-repaired fields show without closing. Blank-name `participates()` skip remains a
-safety net. Custom ids are `custom0`, `custom1`, … in table order.
+repaired fields show without closing. Custom ids are `custom0`, `custom1`, … in
+table order.
 
 ### Shared roster behavior
 
-- **Cycle order:** enabled builtins (table order), then enabled participating customs.
+- **Cycle order:** enabled builtins (table order), then enabled customs.
 New/renamed colliding names are uniquified into the stored Name (ids `custom0`,
 `custom1`, …); existing names are not reindexed. `Configs.profileDisplayLabel` /
 settings button use that stored name. Cycle still skips disabled.
-- **Soft-disable:** every participating profile Off → `hasEnabledProfile()` false;
+- **Soft-disable:** every profile Off → `hasEnabledProfile()` false;
 overlay select floods stay off; wand air- or block-click pings HUD
 `no profiles active`; `showSurfaces` is unchanged. Shift+scroll radius still works.
 - **ConfigTable RESET enable:** MaLiLib `ConfigTable.isModified()` compares defaults
@@ -171,8 +171,8 @@ name: `"Debug"`.
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
 | `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll` → `Configs.setFloodRadius`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
-| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorForDepth`. |
-| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`Palette.colorForDepth`). When off: those ring depths are not drawn. |
+| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorAtDepth`. |
+| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`Palette.colorAtDepth`). When off: those ring depths are not drawn. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,

@@ -23,14 +23,14 @@ overlay (`WorldOverlay` / `WorldOverlayManager`); how they draw is in
 The main widget is the **standable-surface selection** (`CollisionSurfaceOverlay` +
 `SurfaceSelection` + `SurfaceEmitter`): right-click a block with the wand (default
 stick; configurable item id in settings) and the mod floods outward over
-walkable terrain within a spatial radius, painting every surface the chosen entity
+walkable terrain within a BFS hop-count flood radius, painting every surface the chosen entity
 could stand on. The flood is **entity-size aware** — width dilation closes gaps
 smaller than the entity, and height headroom drops floors under low ceilings — for the
 profile chosen in settings (builtin roster: Point / Player / Ravager / Warden /
 Zombie-Witch / Skeleton, plus enable toggles and uncapped custom profiles). The
 geometry and the output-sensitive flood live in `[geometry.md](geometry.md)`.
 
-Each reached surface draws as a height-tinted top fill with edge markers that read the
+Each reached surface draws as a filled top quad colored at draw with edge markers that read the
 terrain:
 
 - **Skirts** — an **upward** wall face where an edge meets a wall or ceiling, a
@@ -54,7 +54,7 @@ persisted to `config/mobwalk.json`; General’s `Edit Built-in Profiles` and
 
 ## Status & milestones
 
-Milestones 1–6.5 are merged; **Milestone 7 (settings) is in progress**. The repo is a
+Milestones 1–8 are merged. The repo is a
 client-only Fabric Gradle project generated from `FabricMC/fabric-example-mod` and
 trimmed to client-only (see **Repository layout** below). `./gradlew build` passes
 (produces `build/libs/mobwalk-1.0.0.jar`). Per-area detail lives in the subsystem
@@ -67,17 +67,19 @@ split over `LevelRenderEvents`.
 - **M3 — stick surface selection**: a walkable flood from the clicked block, drawn as
 fill + outline, with shift+scroll radius.
 - **M4 — entity-size awareness**: config-space width dilation and the
-output-sensitive lazy flood (adjacency/reach guarded by unit-tested static `flood`).
+output-sensitive lazy flood (adjacency via `footprintAdjacent`, reach via height window).
 - **M4.5 — occluder-aware skirts + entity-height headroom**: upward skirts for
 walls/ceilings, and the `(T, T+H]` standing-column headroom test. First unit tests
 land here.
 - **M5 — hole detection**: trapped-drop beams vs benign drops, classified
 compute-side and subdivided so only the unsafe portion of an edge beams.
 - **M6 / 6.5 — bug fixes**: 2-block grey cutoff ring, visible-face surface height, flood seeded from the clicked block's tops, the documented jump reach, and `/mobwalk dump`.
-- **M7 — settings (in progress)**: MaLiLib + ModMenu config screen with
+- **M7 — settings**: MaLiLib + ModMenu config screen with
 General / Appearance / Debug tabs, live apply, save-on-close, and General
 **Built-in Profiles** / **Custom Profiles** roster (enables + order, soft-disable,
 uncapped customs); see `[settings.md](settings.md)`.
+- **M8 — surface/overlay pipeline refactor**: extract `RectMath` / `SurfaceEmitter`,
+split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygiene.
 
 
 
@@ -185,7 +187,7 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
   beam at the rim; a drop onto reachable ground (even deep / roundabout via stairs
    elsewhere) does **not**; an edge over a floor that is only reachable by landing on an
    intermediate ledge does (the ledge would trap the mob). A long dangerous rim shows a
-   row of beams. Tops are colored violet (low) → orange (high), never red. Skirts and
+   row of beams. Tops are colored at draw. Skirts and
    beams at the very outermost radius edge are not drawn.
 6. **Surface height (Appearance `drawOnVisibleFace`, default on):** on a **soul
    sand / mud** block (renders full-height but collides at 14/16), the standable top
@@ -194,7 +196,7 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    turning it on restores the visible face. A dilated path lip reaching over a soul-sand
    cube paints on the cube top (with its own down-skirt at the step), while its collision
    stays a path. Ordinary full blocks / slabs / stairs look identical in both modes, and
-   the height colors don't shift when toggling.
+   the fill color doesn't shift when toggling.
 7. **Through water:** right-clicking the bottom of a pond paints its surface,
   visible through the water (water-tinted) **without** crouching; a surface behind
    opaque terrain (a hill) is still occluded unless crouching. (Water itself is not

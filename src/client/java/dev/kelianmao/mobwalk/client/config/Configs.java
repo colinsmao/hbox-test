@@ -243,11 +243,6 @@ public final class Configs implements IConfigHandler {
     static TableRow customRow(EntityProfile p, boolean enabled) {
       return CustomProfileTableRows.customRow(p, enabled);
     }
-
-    /** Clone a custom table row (enabled + name + sizes). */
-    static TableRow copyCustomRow(TableRow source) {
-      return CustomProfileTableRows.copyCustomRow(source);
-    }
   }
 
   public static final class Appearance {
@@ -392,7 +387,7 @@ public final class Configs implements IConfigHandler {
     Generic.FLOOD_RADIUS.setValueChangeCallback(cfg -> {
       CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
       if (collision != null) {
-        collision.applyFloodRadius();
+        collision.reselectWithMobProfile();
       }
     });
     Generic.MOB_PROFILE.setValueChangeCallback(cfg -> {
@@ -437,10 +432,6 @@ public final class Configs implements IConfigHandler {
   /** Snapshot custom-table row identities after load/sync/seed. */
   private static void rememberCustomRows() {
     lastCustomRows = List.copyOf(Profiles.CUSTOM_PROFILES.getTable());
-  }
-
-  private static boolean isKnownCustomRow(TableRow row) {
-    return CustomProfileTableRows.isKnownCustomRow(row, lastCustomRows);
   }
 
   /**

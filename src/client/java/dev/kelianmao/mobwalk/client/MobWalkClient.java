@@ -38,10 +38,10 @@ public final class MobWalkClient implements ClientModInitializer {
       dispatcher.register(ClientCommands.literal("mobwalk")
         .then(ClientCommands.literal("dump").executes(ctx -> {
           Minecraft client = Minecraft.getInstance();
-          CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
-          if (client.player == null || collision == null) {
+          if (client.player == null) {
             return 0;
           }
+          CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
           FloodDebugCounts counts = collision.dumpFloodDebug();
           if (counts == null) {
             client.player.sendSystemMessage(
@@ -62,7 +62,7 @@ public final class MobWalkClient implements ClientModInitializer {
     // cancels the vanilla slot change. Plain scroll is left untouched.
     ClientHotbarScrollEvents.ALLOW.register((inventory, currentSlot, newSlot, xOffset, yOffset) -> {
       CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
-      if (collision == null || !collision.wantsRadiusScroll()) {
+      if (!collision.wantsRadiusScroll()) {
         return true;
       }
       int radius = collision.adjustRadius(yOffset > 0 ? 1 : -1);

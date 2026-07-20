@@ -1,18 +1,16 @@
 package dev.kelianmao.mobwalk.client.surface;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Pure, stateless rect/interval algebra used by {@link SurfaceSelection}:
- * subtract/union/merge, footprint adjacency, the static flood, and related
- * helpers. No world access and no held state.
+ * subtract/union/merge, footprint adjacency, and related helpers. No world
+ * access and no held state.
  */
 public final class RectMath {
   private RectMath() {
@@ -32,94 +30,8 @@ public final class RectMath {
 
   // Tolerance for the double coordinate compares (box edges are multiples of
   // 1/16). Used to drop subtraction slivers and to test edge adjacency/overlap.
-  private static final double EPS = 1.0e-6;
-
-  // BFS over merged rects: an edge exists iff footprints share an edge with
-  // positive overlap and the height difference is within reach (a single
-  // threshold). Seeds are the merged rects that cover a seed surface. Each
-  // reached rect is re-emitted carrying its BFS hop-count from the seed (0 =
-  // seed) as its debug flood-depth tag (see StandableRect.depth).
-  // Package-private for unit tests (synthetic rects, no world).
-  static List<StandableRect> flood(List<StandableRect> rects, List<StandableRect> seeds, double reach) {
-    int n = rects.size();
-    boolean[] visited = new boolean[n];
-    int[] depth = new int[n];
-    Deque<Integer> queue = new ArrayDeque<>();
-    for (int i = 0; i < n; i++) {
-      if (coversAnySeed(rects.get(i), seeds)) {
-        visited[i] = true;
-        depth[i] = 0;
-        queue.addLast(i);
-      }
-    }
-
-    List<StandableRect> out = new ArrayList<>();
-    while (!queue.isEmpty()) {
-      int i = queue.pollFirst();
-      StandableRect cur = rects.get(i);
-      out.add(withDepth(cur, depth[i]));
-      for (int j = 0; j < n; j++) {
-        if (visited[j]) {
-          continue;
-        }
-        StandableRect other = rects.get(j);
-        if (Math.abs(other.collisionTopY() - cur.collisionTopY()) <= reach + EPS && footprintAdjacent(cur, other)) {
-          visited[j] = true;
-          depth[j] = depth[i] + 1;
-          queue.addLast(j);
-        }
-      }
-    }
-    return out;
-  }
-
-  // Copy of a rect carrying a debug flood-depth tag (see StandableRect.depth).
-  private static StandableRect withDepth(StandableRect r, int depth) {
-    return new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-      r.collisionTopY(), r.visualTopY(), depth);
-  }
-
-  // For each merged rect, the min flood-depth over the raw (pre-merge) reached
-  // nodes it covers: same collision top (|dTopY| < EPS) and positive-area XZ
-  // overlap. Merge is area-preserving over the reached nodes, so every merged
-  // rect is covered by >= 1 node and thus gets a depth (never left at -1).
-  // Package-private for unit tests (synthetic rects, no world).
-  static int[] depthForMerged(List<StandableRect> merged, List<StandableRect> rawNodes, int[] rawDepths) {
-    int[] out = new int[merged.size()];
-    for (int i = 0; i < merged.size(); i++) {
-      StandableRect m = merged.get(i);
-      int best = -1;
-      for (int k = 0; k < rawNodes.size(); k++) {
-        StandableRect r = rawNodes.get(k);
-        if (Math.abs(r.collisionTopY() - m.collisionTopY()) > EPS) {
-          continue;
-        }
-        if (Math.min(r.maxX(), m.maxX()) - Math.max(r.minX(), m.minX()) <= EPS
-            || Math.min(r.maxZ(), m.maxZ()) - Math.max(r.minZ(), m.minZ()) <= EPS) {
-          continue;
-        }
-        if (best < 0 || rawDepths[k] < best) {
-          best = rawDepths[k];
-        }
-      }
-      out[i] = best;
-    }
-    return out;
-  }
-
-  // A merged rect is a seed iff it is coplanar with and overlaps (positive area)
-  // one of the seed block's surfaces; merge partitions the union, so the surface
-  // lands in exactly one merged rect.
-  private static boolean coversAnySeed(StandableRect rect, List<StandableRect> seeds) {
-    for (StandableRect seed : seeds) {
-      if (Math.abs(rect.collisionTopY() - seed.collisionTopY()) <= EPS
-          && Math.min(rect.maxX(), seed.maxX()) - Math.max(rect.minX(), seed.minX()) > EPS
-          && Math.min(rect.maxZ(), seed.maxZ()) - Math.max(rect.minZ(), seed.minZ()) > EPS) {
-        return true;
-      }
-    }
-    return false;
-  }
+  // Package-visible so SurfaceSelection shares one epsilon.
+  static final double EPS = 1.0e-6;
 
   // Two surfaces are footprint-connected if their rects either overlap with
   // positive area (the same walkable patch — happens once dilated neighbor tops

@@ -142,7 +142,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
   stays agnostic to which item (the wand) a widget cares about.
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
-  `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
+  `SurfaceSelection.allRects()`, colored at draw so no per-rect tag — is
   (re)published into a `volatile` field on each wand action (select / clear / radius
   scroll / profile cycle). `extract` samples the visibility flag and crouch, and does the
   **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
@@ -169,7 +169,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   change is immediate, and returns `false` to cancel the vanilla slot change. When the
   option is off, that gesture is inactive — scroll never changes the radius.
   The radius is clamped `[0, 30]` and steps by **1 up to 10, then by 2** (`12, 14, …,
-  30`) — the window grows quadratically, so coarse steps keep the high end usable.
+  30`) — coarse steps keep the high end usable.
   Each change pings `RadiusIndicatorOverlay`. The live option updates immediately;
   JSON is flushed on play disconnect (and on config-screen close).
 - **Threading.** The selection is computed only on the client/extraction thread
@@ -189,7 +189,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
   switches RGB to the cyclic BFS-depth hue band (`Palette` / `depthColor`, blue at
   depth 0, cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color. Cutoff ring greying (`Palette.colorForDepth` → `greyBlend`)
+  out-of-sequence color. Cutoff ring greying (`Palette.colorAtDepth` → `greyBlend`)
   applies in both modes when Debug `showCutoffRing` is on (default); when off, those
   ring depths are not drawn.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
@@ -274,8 +274,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   and **written into each rect's `visualTopY` / span `visualBaseY`**. `emit` then
   *always* draws the top fill, borders, and the up/down/hole skirts at that render
   height — which equals the collision top when the setting is off (the raise isn't
-  computed then). The height-gradient **color stays keyed on `collisionTopY`**, so
-  the palette doesn't shift when toggling. Because the flag gates the compute, a
+  computed then). Draw color is unchanged by the toggle. Because the flag gates the compute, a
   value-change callback (`Configs.initCallbacks`) **re-floods** from the last seed via
   `reselectWithMobProfile` (cheap: toggling is rare). This is the one Appearance option
   that touches compute — an accepted exception to "Appearance is draw-only," since the
@@ -283,7 +282,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   (collision-top only); this is purely where the paint is drawn.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
   `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
-  blended toward **grey** (`Palette.colorForDepth`), so a depth-cutoff reads differently from a
+  blended toward **grey** (`Palette.colorAtDepth`), so a depth-cutoff reads differently from a
   true boundary (a selection stopped by a real drop stays colored). When off, those
   ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
   `depth` relative to `depthLimit` (= `Configs.floodRadius()`):
@@ -336,7 +335,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   snapshot/occluder/down-skirt/hole/crouch/`depthLimit` handoff into
   `SurfaceEmitter`.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
-  depth-based grey blend (`Palette.colorForDepth`, keyed on `rect.depth()` vs
+  depth-based grey blend (`Palette.colorAtDepth`, keyed on `rect.depth()` vs
   `depthLimit`), the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny
   `SKIRT_OFFSET`), drawing the **published** skirt spans (`emitSkirts`, from
   `SkirtSpan` UP/DOWN lists; length `min(Appearance height, maxExtent)`; frontier
@@ -355,7 +354,7 @@ the published snapshots into `SurfaceEmitter.emit`.
 - `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,
   `union` re-cut + strip-merge, depth-aware
   **`mergeCoplanarSplitFrontier`** (union inner and frontier separately, subtract
-  inner from frontier so they tile cleanly), `footprintAdjacent`, static `flood`,
+  inner from frontier so they tile cleanly), `footprintAdjacent`,
   `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
   uses `mergeCoplanarSplitFrontier`).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface

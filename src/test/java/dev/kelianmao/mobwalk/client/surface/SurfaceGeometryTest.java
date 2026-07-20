@@ -99,88 +99,10 @@ final class SurfaceGeometryTest {
   }
 
   @Test
-  void floodFromHighSeedDoesNotReachDeepSameColumn() {
-    // Seeded carpet at 66.0625 with ground at 64 in the same footprint:
-    // |ΔY| = 2.0625 > reach 1.0 → only the seed height is reached.
-    StandableRect carpet = new StandableRect(0, 0, 1, 1, 66.0625);
-    StandableRect ground = new StandableRect(0, 0, 1, 1, 64.0);
-    List<StandableRect> reached = RectMath.flood(
-      List.of(carpet, ground), List.of(carpet), 1.0);
-    assertEquals(1, reached.size());
-    assertEquals(66.0625, reached.get(0).collisionTopY(), EPS);
-  }
-
-  @Test
-  void floodReachesSameColumnWithinReach() {
-    StandableRect upper = new StandableRect(0, 0, 1, 1, 65.0);
-    StandableRect lower = new StandableRect(0, 0, 1, 1, 64.0);
-    List<StandableRect> reached = RectMath.flood(
-      List.of(upper, lower), List.of(upper), 1.0);
-    assertEquals(2, reached.size());
-  }
-
-  @Test
-  void floodJoinsOneBlockPlusCarpetAtJumpReach() {
-    StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
-    StandableRect carpet = new StandableRect(0, 0, 1, 1, 65.0625);
-    assertEquals(1, RectMath.flood(
-      List.of(floor, carpet), List.of(floor), 1.0).size());
-    assertEquals(2, RectMath.flood(
-      List.of(floor, carpet), List.of(floor), EntityProfile.DEFAULT_JUMP_REACH).size());
-  }
-
-  @Test
-  void floodRejectsOneBlockPlusSlabAtJumpReach() {
-    StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
-    StandableRect slab = new StandableRect(0, 0, 1, 1, 65.5);
-    assertEquals(1, RectMath.flood(
-      List.of(floor, slab), List.of(floor), EntityProfile.DEFAULT_JUMP_REACH).size());
-  }
-
-  @Test
-  void depthForMergedTakesMinOverCoveringNodes() {
-    // One merged rect [0,2] covers two same-height raw nodes at depths {0, 2};
-    // the merged depth is the min (0 = nearest the flood reached this patch).
-    StandableRect merged = new StandableRect(0, 0, 2, 1, 64.0);
-    List<StandableRect> rawNodes = List.of(
-      new StandableRect(0, 0, 1, 1, 64.0),
-      new StandableRect(1, 0, 2, 1, 64.0));
-    int[] depths = RectMath.depthForMerged(
-      List.of(merged), rawNodes, new int[] {0, 2});
-    assertEquals(1, depths.length);
-    assertEquals(0, depths[0]);
-  }
-
-  @Test
-  void depthForMergedPicksTheOverlappingNodeOnly() {
-    // A merged rect overlapping only the depth-2 node gets 2, not the disjoint 0.
-    StandableRect merged = new StandableRect(3, 0, 4, 1, 64.0);
-    List<StandableRect> rawNodes = List.of(
-      new StandableRect(0, 0, 1, 1, 64.0),
-      new StandableRect(3, 0, 4, 1, 64.0));
-    int[] depths = RectMath.depthForMerged(
-      List.of(merged), rawNodes, new int[] {0, 2});
-    assertEquals(2, depths[0]);
-  }
-
-  @Test
-  void depthForMergedIgnoresDifferentHeightNodes() {
-    // A node at a different collision top does not contribute; the only covering
-    // node at the merged rect's height is the depth-5 one.
-    StandableRect merged = new StandableRect(0, 0, 1, 1, 64.0);
-    List<StandableRect> rawNodes = List.of(
-      new StandableRect(0, 0, 1, 1, 60.0),
-      new StandableRect(0, 0, 1, 1, 64.0));
-    int[] depths = RectMath.depthForMerged(
-      List.of(merged), rawNodes, new int[] {0, 5});
-    assertEquals(5, depths[0]);
-  }
-
-  @Test
   void downSkirtInheritsSurfaceDepth() {
     // A skirt span carries its source rect's flood-depth so the two share a band.
     StandableRect r = new StandableRect(0, 0, 1, 1, 64.0, 64.0, 3);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of());
+    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(), false);
     assertFalse(spans.isEmpty());
     for (SkirtSpan s : spans) {
       assertEquals(3, s.depth());

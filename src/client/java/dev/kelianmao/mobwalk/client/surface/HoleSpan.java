@@ -31,9 +31,4 @@ package dev.kelianmao.mobwalk.client.surface;
  */
 public record HoleSpan(boolean alongX, boolean maxSide, double line,
     double lo, double hi, double baseY, double fallDistance, double visualBaseY) {
-  /** A span whose visible base coincides with its collision base (the common case). */
-  public HoleSpan(boolean alongX, boolean maxSide, double line,
-      double lo, double hi, double baseY, double fallDistance) {
-    this(alongX, maxSide, line, lo, hi, baseY, fallDistance, baseY);
-  }
 }

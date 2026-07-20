@@ -57,10 +57,10 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
     }
   }
 
-  private int createButton(int x, int y, int width, ConfigGuiTab tab) {
-    ButtonGeneric button = new ButtonGeneric(x, y, width, 20, tab.getDisplayName());
-    button.setEnabled(GuiConfigs.tab != tab);
-    this.addButton(button, new ButtonListener(tab, this));
+  private int createButton(int x, int y, int width, ConfigGuiTab targetTab) {
+    ButtonGeneric button = new ButtonGeneric(x, y, width, 20, targetTab.getDisplayName());
+    button.setEnabled(GuiConfigs.tab != targetTab);
+    this.addButton(button, new ButtonListener(targetTab, this));
     return button.getWidth();
   }
 
@@ -162,10 +162,10 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
     return Collections.emptyList();
   }
 
-  private record ButtonListener(ConfigGuiTab tab, GuiConfigs parent) implements IButtonActionListener {
+  private record ButtonListener(ConfigGuiTab targetTab, GuiConfigs parent) implements IButtonActionListener {
     @Override
     public void actionPerformedWithButton(ButtonBase button, int mouseButton) {
-      GuiConfigs.tab = this.tab;
+      GuiConfigs.tab = this.targetTab;
       this.parent.reCreateListWidget();
       if (this.parent.getListWidget() != null) {
         this.parent.getListWidget().resetScrollbarPosition();

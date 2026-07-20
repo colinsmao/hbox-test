@@ -33,7 +33,7 @@ final class DownSkirtComputeTest {
   @Test
   void loneRectSkirtsAllFourEdgesFully() {
     StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of());
+    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(), false);
     assertEquals(4, spans.size());
     // -Z / +Z edges run along X over [0,1]; -X / +X edges run along Z over [0,1].
     SkirtSpan minZ = find(spans, true, false, 0.0);
@@ -55,7 +55,7 @@ final class DownSkirtComputeTest {
     // edge drops no skirt; the four outer edges do.
     StandableRect left = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect right = new StandableRect(1, 0, 2, 1, 64.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(left, right), List.of());
+    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(left, right), List.of(), false);
     // left's +X edge (x = 1) and right's -X edge (x = 1) are both fully shared.
     assertTrue(find(spans, false, true, 1.0) == null, "left +X seam suppressed");
     assertTrue(find(spans, false, false, 1.0) == null, "right -X seam suppressed");
@@ -70,7 +70,7 @@ final class DownSkirtComputeTest {
     // only z in [0,0.4]: the +X edge drops a skirt only over the unshared z [0.4,1].
     StandableRect big = new StandableRect(0, 0, 2, 1, 64.0);
     StandableRect sliver = new StandableRect(2, 0, 3, 0.4, 64.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(big, sliver), List.of());
+    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(big, sliver), List.of(), false);
     // Big's +X edge (x = 2) leftover after the [0,0.4] seam -> [0.4,1].
     SkirtSpan remainder = null;
     for (SkirtSpan s : spans) {
@@ -92,7 +92,7 @@ final class DownSkirtComputeTest {
     StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
     SkirtSpan wall = new SkirtSpan(false, true, 1.0, 0.0, 1.0, 64.0, 64.0,
       SkirtSpan.Direction.UP, 1.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(wall));
+    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(wall), false);
     assertTrue(find(spans, false, true, 1.0) == null, "+X edge is a wall, no down skirt");
     assertEquals(3, spans.size());
   }

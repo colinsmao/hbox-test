@@ -1,17 +1,14 @@
 package dev.kelianmao.mobwalk.client.surface;
 
-import fi.dy.masa.malilib.config.IConfigOptionListEntry;
-
 /**
  * The size/reach of the entity the standable-surface flood is computed for. A
  * Minecraft hitbox is an axis-aligned {@code width x width} square footprint, so
  * {@code width} fully describes the horizontal extent; {@code reach} is the
  * walkable height threshold (see {@code docs/geometry.md} "Reachability model").
  *
- * <p>Builtin seeds (roster order) live here as constants; enable flags and the
- * live cycle are owned by {@link dev.kelianmao.mobwalk.client.config.ProfileRoster}. {@link #next()} /
- * {@link Option} still cycle the original three (Point / Player / Ravager) until
- * settings wires the roster.
+ * <p>Builtin seeds live here as constants; enable flags, order, and the live
+ * cycle are owned by {@link dev.kelianmao.mobwalk.client.config.ProfileRoster}
+ * / {@link dev.kelianmao.mobwalk.client.config.RosterProfileOption}.
  *
  * <p>{@code width 0} makes config-space dilation a no-op, so {@link #POINT}
  * reproduces the pre-profile point-particle behavior — the oracle baseline.
@@ -45,84 +42,4 @@ public record EntityProfile(String name, double width, double height, double rea
   public static final EntityProfile ZOMBIE_WITCH =
     new EntityProfile("Zombie/Witch", 0.6, 1.95, DEFAULT_JUMP_REACH);
   public static final EntityProfile SKELETON = new EntityProfile("Skeleton", 0.6, 1.99, DEFAULT_JUMP_REACH);
-
-  // Legacy three-way cycle for settings / sneak+right-click until ProfileRoster wires in.
-  private static final EntityProfile[] CYCLE = {POINT, PLAYER, RAVAGER};
-
-  /** The next profile in the cycle ({@code Point -> Player -> Ravager -> Point}). */
-  public EntityProfile next() {
-    for (int i = 0; i < CYCLE.length; i++) {
-      if (CYCLE[i].equals(this)) {
-        return CYCLE[(i + 1) % CYCLE.length];
-      }
-    }
-    return PLAYER;
-  }
-
-  /**
-   * MaLiLib {@link fi.dy.masa.malilib.config.options.ConfigOptionList} entries for
-   * the shipped profiles. JSON ids are lowercase; display names match
-   * {@link EntityProfile#name()}.
-   */
-  public enum Option implements IConfigOptionListEntry {
-    POINT(EntityProfile.POINT, "point"),
-    PLAYER(EntityProfile.PLAYER, "player"),
-    RAVAGER(EntityProfile.RAVAGER, "ravager");
-
-    private final EntityProfile profile;
-    private final String id;
-
-    Option(EntityProfile profile, String id) {
-      this.profile = profile;
-      this.id = id;
-    }
-
-    public EntityProfile profile() {
-      return profile;
-    }
-
-    @Override
-    public String getStringValue() {
-      return id;
-    }
-
-    @Override
-    public String getDisplayName() {
-      return profile.name();
-    }
-
-    @Override
-    public IConfigOptionListEntry cycle(boolean forward) {
-      Option[] values = values();
-      int i = ordinal();
-      return values[forward
-        ? (i + 1) % values.length
-        : (i - 1 + values.length) % values.length];
-    }
-
-    @Override
-    public IConfigOptionListEntry fromString(String value) {
-      if (value != null) {
-        for (Option option : values()) {
-          if (option.id.equalsIgnoreCase(value)
-            || option.profile.name().equalsIgnoreCase(value)) {
-            return option;
-          }
-        }
-      }
-      return PLAYER;
-    }
-
-    /** Map a live {@link EntityProfile} to its option entry (unknown → Player). */
-    public static Option of(EntityProfile profile) {
-      if (profile != null) {
-        for (Option option : values()) {
-          if (option.profile.equals(profile)) {
-            return option;
-          }
-        }
-      }
-      return PLAYER;
-    }
-  }
 }
