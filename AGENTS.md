@@ -50,10 +50,15 @@ default shape of every task.
    every logical change alters what gets calculated and therefore what is drawn.
    Treat logical steps as visual steps by default; when in doubt, it needs an in-game
    checklist.
+5. **Do not expand scope during execution.** Implement only the approved plan step.
+   If execution surfaces extra work (coalesce/union cleanup, related fixes, drive-by
+   refactors, "while we're here"), stop and surface that delta as a plan update for
+   discussion/approval before coding it. Execution follows the plan; scope changes
+   go through the plan first.
 
 **The procedure, every step:**
 
-1. **Write the step's enumerated checklist into `PLAN.md`** — `action → expected
+1. **Write the step's enumerated checklist into the plan** — `action → expected
    on-screen result`, plus a regression line.
 2. **When the step's code builds, surface that checklist verbatim** and hand it to
    the human to run in-game (`./gradlew runClient`). Pause until they confirm results.
@@ -166,7 +171,7 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   conceptually-distinct change per commit, never split by file or by a trailing
   "docs" pass. Each commit must be self-contained and **fully update its own
   documentation in that same commit** — the relevant `docs/*.md`, `docs/project.md`
-  status, code comments, and `PLAN.md` — so no step ever lands with stale or deferred
+  status, and code comments — so no step ever lands with stale or deferred
   docs; **docs are current at the commit level.** Never lump distinct steps together.
   This cadence is also what makes the commit hook a per-step checkpoint: batching many
   steps into one commit defeats it.
@@ -190,26 +195,21 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 - **Don't commit until the step is confirmed in-game.** A green `./gradlew build` is
   not sufficient — behavior here is runtime/visual. Make the edits, run the gates,
   then **wait until the step's in-game checklist passes** (user confirms, or you run
-  `runClient` and verify) before committing that step. This applies to `PLAN.md` / doc
-  updates too: don't commit a step's plan or doc change until that step is confirmed
-  working. (The `git commit` hook in `.cursor/hooks.json` will pause each commit to
-  reconfirm this — but the hook is a backstop, not a substitute for approval.)
+  `runClient` and verify) before committing that step. (The `git commit` hook in
+  `.cursor/hooks.json` will pause each commit to reconfirm this — but the hook is
+  a backstop, not a substitute for approval.)
 - **Sole-agent assumption.** Unless told otherwise, assume you are the only
   agent/person in this repo; no need to defensively re-check remote/branch state for
-  concurrent changes before each action (a quick check when something looks off is
-  enough). Amend/force-push on your own feature branch is low-risk when it makes
-  history clearer — but **do not force-push or amend unless asked.**
-- **Branch naming** for agent work: `cursor/<descriptive-name>-3c2f` (lowercase),
-  branched off `main`.
-- **Squash planning commits before dev.** If a task went through plan mode and
-  produced multiple `Plan:` commits, squash them into one plan commit before
-  starting implementation, so history is one plan commit followed by dev commits.
-- After pushing, open/update a PR against `main`. Verify `./gradlew build` passes
-  before considering a code change complete, and confirm docs are current (below)
-  before opening/updating the PR.
+  concurrent changes before each action. Amend/force-push on your own feature branch
+  is low-risk when it makes history clearer — but **do not force-push or amend unless asked.**
+- **Never open, update, close, or otherwise touch a PR unless the human
+  explicitly asks.** Pushing a branch is fine when asked to push; creating or
+  editing a PR is a separate action that requires its own explicit instruction.
+  Cloud-agent defaults that auto-create PRs do not override this.
 
 ## Documentation & conventions
 
+- **Indentation is two spaces** (Java, Gradle, JSON under `src/`).
 - **Describe what something *is* / *does*, never what it isn't / doesn't.** This is
   a hard style rule for `docs/*.md`, `PLAN.md` prose, and code comments: write the
   positive fact only. Do **not** pad with negations of alternatives or absences
@@ -239,14 +239,5 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
   Do **not** put subsystem detail or project background into `AGENTS.md`; an agent
   working in an unrelated area shouldn't have to read it.
-- **Log mid-task design changes into `PLAN.md` as they land.** When a decision or
-  logical change emerges *in conversation* during a task (a new approach, an
-  algorithm/rendering change, a reversed choice), write it into `PLAN.md`
-  immediately — **including its step's in-game checklist** — rather than only at the
-  end. `PLAN.md` is the accumulating scratch the end-of-task durable-doc update is
-  distilled from, so knowledge survives an interrupted session and the final docs
-  pass is a consolidation, not a recollection.
 - **Comments explain intent, not narration.** Don't add comments that merely
   restate what the code does; explain non-obvious intent, trade-offs, or constraints.
-- **Package base** is `dev.kelianmao.mobwalk` (mod id `mobwalk`). If the user provides
- a real maven group / mod id / author, update the docs and code consistently.

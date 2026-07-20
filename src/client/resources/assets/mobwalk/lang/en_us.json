@@ -1,14 +1,14 @@
 {
   "mobwalk.gui.title.configs": "MobWalk Configs",
 
-	"mobwalk.gui.button.config_gui.general": "General",
+  "mobwalk.gui.button.config_gui.general": "General",
   "mobwalk.gui.button.config_gui.appearance": "Appearance",
   "mobwalk.gui.button.config_gui.debug": "Debug",
 
   "mobwalk.gui.button.reset_cancel": "Cancel",
   "mobwalk.gui.button.reset_confirm": "Confirm",
 
-  "mobwalk.config.generic.comment.showSurfaces": "Whether to draw walkable surfaces: Never, While Holding Wand (in either hand), or Always.",
+  "mobwalk.config.generic.comment.showSurfaces": "Whether to draw walkable surfaces: Never (rendering disabled), While Holding Wand (in either hand), or Always.",
 
   "mobwalk.config.generic.showSurfaces.never": "Never",
   "mobwalk.config.generic.showSurfaces.whileHoldingWand": "While Holding Wand",

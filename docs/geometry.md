@@ -10,14 +10,14 @@ space**, never a pixel raster (a raster rewrite was prototyped and rejected — 
 ## Representation: rect/double space
 
 A standable surface is a
-`StandableRect(double minX, minZ, maxX, maxZ, topY, visualTopY)` in absolute world
-coordinates (the owning `BlockPos` folded in). `topY` is the **collision** top that
+`StandableRect(double minX, minZ, maxX, maxZ, collisionTopY, visualTopY)` in absolute world
+coordinates (the owning `BlockPos` folded in). `collisionTopY` is the **collision** top that
 all math below is keyed on; `visualTopY` is a **draw-only** raise for blocks that
 render taller than they collide (see [Visible-face top vs collision
-top](#visible-face-top-vs-collision-top)) and equals `topY` for
+top](#visible-face-top-vs-collision-top)) and equals `collisionTopY` for
 everything else — nothing in the geometry layer reads it. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
-epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose: width dilation
+epsilon-tolerant (`RectMath.EPS = 1e-6`, shared with `SurfaceSelection`). Quantizing is skipped on purpose: width dilation
 (below) expands surfaces by entity-dependent amounts that are not `1/16`-aligned,
 so precision is left to the math rather than baked into a grid. Minecraft
 hitboxes are axis-aligned squares that never rotate, so the Minkowski sum of two
@@ -27,17 +27,20 @@ over rectangles**, no rounding and no new primitive.
 **Merge class — the equality tuple.** Two coplanar rects union (rule 3 below) only
 when they agree on every component of their **merge class**: the per-rect attributes
 the renderer must draw distinctly and therefore may not blend across. Today the tuple
-is **`(topY, visualTopY)`** — `topY` because different collision levels are genuinely
+is **`(collisionTopY, visualTopY)`** — `collisionTopY` because different collision levels are genuinely
 different surfaces, `visualTopY` because a raised patch and a flush neighbour draw at
 different heights. The tuple is deliberately **extensible**: the next planned
 component is a **stand-on hazard class** (soul sand, magma), which lets benign terrain
 still merge into one rect while fencing a hazard region onto its own rects. Adding a
-component is a one-field change to the record plus one comparator in `mergeCoplanar` /
-`mergeCoplanarSplitFrontier`; while a component is uniform (e.g. hazards off ⇒ every
+component is a one-field change to the record plus one comparator in
+`RectMath.mergeCoplanarSplitFrontier`; while a component is uniform (e.g. hazards off ⇒ every
 rect `NONE`) the grouping collapses to the smaller-tuple behaviour at zero cost.
-`depth` is outside the tuple — it is aggregated by min over the covered nodes, not
-matched on. This is the durable idea behind every "group by …" description below:
-those descriptions name the *current* components of one growing equality tuple.
+A future generalization of the frontier split — priority-ordered coplanar layers that
+union each layer then subtract higher-priority area from lower — could host the
+hazard class as such a priority layer. `depth` is outside the tuple — it is aggregated
+by min over the covered nodes, not matched on. This is the durable idea behind every
+"group by …" description below: those descriptions name the *current* components of
+one growing equality tuple.
 
 ## What the selection is (the computed result)
 
@@ -64,19 +67,21 @@ defined by four rules:
    headroom from the floor **below** it (the removal zone extends downward by `H`, it
    is not "extend occluders upward"). A partial overhang yields a **partial** surface
    via the same guillotine subtract. Non-burying overlaps (an air gap larger than `H`
-   between two tops) stay **distinct levels** — never collapsed to `max topY` — so
+   between two tops) stay **distinct levels** — never collapsed to `max collisionTopY` — so
    stacked surfaces (overhangs, spiral staircases) are preserved.
 2. **Entity-width dilation** (see [below](#entity-width-dilation)): every footprint
    is grown by the profile half-width `W/2` before the spans-above test, so gaps and
    walls eat into the standable area by the entity's size.
 3. **Merge.** Coplanar (`|dTopY| < EPS`) rects that share a **merge class** are
-   unioned into maximal rectangles (`mergeCoplanar`: group by the merge class — the
-   extensible equality tuple, **currently `(topY, visualTopY)`**, see [Merge
-   class](#representation-rectdouble-space) — re-cut each group to a non-overlapping
-   `union`, then greedy strip-merge equal-span abutting rects along X then Z to a
-   fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
-   skirts, fewer quads. Greedy is not a minimal partition, but a missed merge only
-   costs an extra interior skirt, **never reachability**.
+   unioned into maximal rectangles (`RectMath.mergeCoplanarSplitFrontier`: group by the
+   merge class — the extensible equality tuple, **currently `(collisionTopY, visualTopY)`**,
+   see [Merge class](#representation-rectdouble-space) — partition into inner and
+   frontier by flood depth, re-cut each group to a non-overlapping `union`, then
+   greedy strip-merge equal-span abutting rects along X then Z to a fixpoint, with
+   inner area subtracted from frontier so they tile cleanly). A flat floor collapses
+   from a grid of unit cells to one rect → clean skirts, fewer quads. Greedy is not a
+   minimal partition, but a missed merge only costs an extra interior skirt,
+   **never reachability**.
 4. **Flood / reachability.** Starting from the clicked seed block's surface(s), a
    surface is reached iff it connects to an already-reached surface by **one
    geometric adjacency rule**: the footprints share an edge with positive overlap
@@ -86,12 +91,10 @@ defined by four rules:
    that block's exposed ring because their footprints abut at the hole edges — no
    special case.
 
-**Radius is a spatial budget**, not a graph hop-count: the reached set is bounded by
-a Chebyshev cube around the seed — `|x-ox| <= radius` ∧ `|z-oz| <= radius` ∧ `|y-oy|
-<= radius` (block coords). It bounds by *physical distance*, so a spiral staircase
-is followed only while it stays inside the cube (it does not wind indefinitely) and
-a narrow cave only as far as the cube reaches. (A hop-count would be meaningless:
-after merge an open floor is a single rect, reached in one hop.)
+**Radius is a BFS depth limit** (max hop-count from the seed), not a spatial X/Z
+window: horizontal reach is unbounded; termination comes from the hop-count cap plus
+a Y band of about `oy ± radius`. Connectivity gating is unchanged (a drop `> reach`
+or a disconnected patch is never reached).
 
 A **Point** profile (`W = 0`) reproduces the original zero-width point-walker
 exactly (dilation is a no-op, tops only abut).
@@ -111,7 +114,7 @@ Treat the entity as a point and pre-grow the world by its half-width `W/2`:
   *dilated* footprints, so cutting a buried lower top and supplying the higher one
   is one operation, not a separate subtract.
 - **`exposeBox` is the unit op.** It grows one box's footprint by `W/2`, then
-  subtracts (guillotine `subtractRects`) every *dilated* box that occludes its top
+  subtracts (guillotine `RectMath.subtractRects`) every *dilated* box that occludes its top
   (`yMax > T && (yMin <= T || yMin < T+H)` — the buried-or-headroom test, rule 1),
   yielding 0..N surviving top rects. The boxes it must subtract live in a bounded
   column window — see `occluderColumns` below.
@@ -121,16 +124,12 @@ makes the output-sensitive flood possible.
 
 ## How it is computed: the output-sensitive (lazy) flood
 
-`select` dispatches to **`selectLazy`** (the production path, `LAZY = true`). A
-full-window reference implementation, **`selectEager`** (enumerate the whole
-`radius + margin` cube → dilate all → merge → flood), is kept behind a flag as the
-**correctness oracle**; a `PROFILE_FLOOD` switch runs both per call, asserts they
-cover the same area, and logs timing/exposure counts. The lazy path is verified
-**set-equal** to eager for Point/Player/Ravager at radii `0..20`.
-
-`LazyFlood` is a **surface BFS that exposes geometry only as it reaches it**, so
-cost tracks the reachable set (and its occluder shells) rather than the window
-volume — a large win in caves / against walls, and asymptotically on open ground.
+`select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
+reaches it, so cost tracks the reachable set (and its occluder shells) rather
+than the window volume — a large win in caves / against walls, and asymptotically
+on open ground. Adjacency uses `RectMath.footprintAdjacent`; reach is the
+profile height window in `LazyFlood` (see [`project.md`](project.md)
+milestones).
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the
@@ -140,8 +139,8 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   cells are within Chebyshev `floor(W) + 1` of `c` (`1` for Point/Player, `2` for
   Ravager). This is the cell distance at which two dilated tops can still bridge or
   abut (raw gap `Δ-1 <= W`). It is **not** `ceil(W)`: that is `0` for Point and would
-  never connect adjacent floor tiles. The same `floor(W)+1` is the eager occluder
-  margin too — one reach everywhere.
+  never connect adjacent floor tiles. The same `floor(W)+1` is the occluder-shell
+  reach used when exposing neighbours — one reach everywhere.
 - **Lazy in XZ.** A cell's collision boxes are queried on first touch and cached
   per-column, so a column is exposed at most once and only reachable columns (plus
   the occluder shells around them) are ever touched.
@@ -167,10 +166,10 @@ volume — a large win in caves / against walls, and asymptotically on open grou
   column `(cx,*)` spans `[cx, cx+1]`, dilated to `[cx-W/2, cx+1+W/2]`, which overlaps
   the target's dilated footprint iff `floor(min - W) <= cx <= ceil(max + W) - 1` per
   axis. This is the exact (full-block-conservative) window — for Point (`W=0`) it
-  collapses to the box's own column. It is shared by `exposeBox` (so the eager path
-  shifts identically) and `LazyFlood.ensureRows`, keeping the index and the scan in
-  lock-step. Tightening it is **result-preserving**: the dropped columns abut with
-  zero overlap and trimmed nothing.
+  collapses to the box's own column. It is shared by `exposeBox` and
+  `LazyFlood.ensureRows`, keeping the index and the scan in lock-step. Tightening
+  it is **result-preserving**: the dropped columns abut with zero overlap and
+  trimmed nothing.
 
 Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
 first factor; lazy-Y trims the second — orthogonal, and they compose.
@@ -228,7 +227,7 @@ there are artifacts of the radius cutoff. Interior border uncertainty is a rende
 a hole beam in the grey ring is blended toward grey by the same distance falloff that
 greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
-The candidate drop spans are the compute-side `DownSkirtSpan`s (every genuine drop
+The candidate drop spans are the compute-side down `SkirtSpan`s (every genuine drop
 edge). `computeHoles` walks them once per select: for each it builds the **fall
 footprint** (a one-block band just beyond the rim, on the drop side), gathers ledges, and
 classifies. Because **one edge can span reached and unreached ground**,
@@ -239,7 +238,7 @@ ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at t
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
 **Ledge gather Y band — occluders from below.** `gatherLedges` re-runs `exposeBox`
-on world boxes whose tops lie in `(landY, topY)`. Candidate tops are only in that
+on world boxes whose tops lie in `(landY, collisionTopY)`. Candidate tops are only in that
 open interval, but the occluder index starts at `floor(landY) - 1` so collision
 that *lives in the block row below* `landY` and rises into the band (vanilla
 walls/fences at height 1.5) still participates in burial. Those occluders-from-below
@@ -255,13 +254,13 @@ further below.
 
 ## Visible-face top vs collision top
 
-Everything above derives from `getCollisionShape`, so `StandableRect.topY` is the
+Everything above derives from `getCollisionShape`, so `StandableRect.collisionTopY` is the
 collision `yMax`. A handful of blocks **render taller than they collide** — soul
 sand collides at `14/16` (`0.875`) but outlines as a full cube, mud at ~`0.9` — so a
 marker drawn at the collision top sits **buried inside the visible block**. The fix
 is a **draw-only** second height, `StandableRect.visualTopY`, carried alongside the
 collision top; the renderer can draw on the face you actually see while **all
-walkability math stays on the collision `topY`** (reach, occlusion, holes are
+walkability math stays on `collisionTopY`** (reach, occlusion, holes are
 unchanged — a mob really does stand at `0.875`, we just don't want the paint hidden).
 
 - **Source data (paid once per state, no heuristic).** `WorldBox` carries the source
@@ -282,43 +281,49 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
   Occluder-only / ledge scans leave the auxiliary-constructor default (`= yMax`), so
-  they never raise. Both tops are computed at the two node-producing scan sites only
-  (the eager oracle and `LazyFlood.ensureRows`).
+  they never raise. Both tops are computed at the node-producing scan site
+  (`LazyFlood.ensureRows`).
 - **The raise rule (`exposeBox`).**
-  `visualTopY = (|topY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > topY) ?
-  blockOutlineTop : topY`. Gating on *"this sub-box is the block's topmost collision
+  `visualTopY = (|collisionTopY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > collisionTopY) ?
+  blockOutlineTop : collisionTopY`. Gating on *"this sub-box is the block's topmost collision
   surface"* is what leaves **stair treads, bottom slabs, and fences** untouched (a
   stair's lower tread is not the block's top; a fence's outline is *shorter* than its
-  `1.5` collision top, so `blockOutlineTop > topY` is false). Only full-render-but-
+  `1.5` collision top, so `blockOutlineTop > collisionTopY` is false). Only full-render-but-
   short-collision tops lift.
 - **Through merge.** `visualTopY` is a component of the [merge
   class](#representation-rectdouble-space), so a raised patch and a flush coplanar
   neighbour fall into **different** classes and stay separate rects — the raised paint
-  keeps its own height. `DownSkirtSpan` / `OccluderSpan` / `HoleSpan` each carry a
+  keeps its own height. Up and down `SkirtSpan`s and `HoleSpan` each carry a
   `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
 - **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
-  the merged rects keyed on a chosen height: **collision `topY`** (`dropEdges`, the
-  hole-classifier substrate — an equal-`topY` abutting neighbour is a merge seam, not a
-  drop) or **`visualTopY`** (the rendered down-skirts — an equal-`visualTopY` neighbour
-  is a flush continuation). They differ only where a raise happened, so a visible step
-  between two rects at the same collision `topY` but different `visualTopY` (a path lip
-  on a soul-sand cube top) gets its skirt, while soul sand's own remnant abutting that
-  lip at the same `visualTopY` gets none. `select` computes `dropEdges` once and, only
-  when some rect is raised (`hasRaisedRect`; never when the toggle gates the raise off),
-  runs the second `visualTopY` pass — otherwise the single pass feeds both holes and
-  skirts. Both heights on a span are **load-bearing**: collision `baseY` for the
-  hole/geometry pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs
-  every skirt/beam from `visualBaseY`, keying color on the collision `depth`).
+  the merged rects keyed on a chosen height: **`collisionTopY`** (`dropEdges`, the
+  hole-classifier substrate — an equal-`collisionTopY` abutting neighbour is a merge seam, not a
+  drop) or **`visualTopY`** (the rendered down-skirts). On the visual pass, an abutting
+  neighbour with **equal or higher** `visualTopY` covers the edge: equal is a flush
+  continuation, higher is a taller face the lower side must not hang a reverse
+  down-skirt into. A **lower** abutting neighbour is a **land stop**: leftover drop
+  intervals get `maxExtent = rimKey − neighbourKey` so the curtain stops at that
+  surface (open drops stay unlimited). Adjacent leftover pieces with the same
+  `maxExtent` coalesce into one span. A visible step between two rects at the same
+  `collisionTopY` but different `visualTopY` (a path lip on a soul-sand cube top)
+  therefore gets a down skirt **only from the raised/high side**, clamped to the
+  lower face; soul sand's own remnant abutting that lip at the same `visualTopY` gets
+  none. `select` computes `dropEdges` once and, when the Appearance toggle enables
+  raise and some rect has `visualTopY != collisionTopY`, runs the second
+  `visualTopY` pass — otherwise the single pass feeds both holes and skirts. Both
+  heights on a span are **load-bearing**: collision `baseY` for the hole/geometry
+  pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs every
+  skirt/beam from `visualBaseY` and colors at draw).
 - **Neighbour-overlap raise (a merge-class split).** A dilated rect owned by block A
   can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
   reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine
-  A surface at A's collision `topY`, but where it overlaps B's footprint the paint
+  A surface at A's `collisionTopY`, but where it overlaps B's footprint the paint
   would sit **inside B's taller mesh**. The raise lifts `visualTopY` to B's outline top
   **only on that intersection**, splitting the one rect into two pieces:
-  `(topY_A, B.outlineTop)` over B and `(topY_A, topY_A)` elsewhere. Because
+  `(collisionTopY_A, B.outlineTop)` over B and `(collisionTopY_A, collisionTopY_A)` elsewhere. Because
   `visualTopY` is a merge-class component, the two pieces are automatically different
   classes — the split is literally "reassign the overlap subregion to another equality
-  class." Collision `topY` (hence all walkability) is untouched, and B's own exposed
+  class." `collisionTopY` (hence all walkability) is untouched, and B's own exposed
   remnant keeps its own raise, so the covered face reads at one height.
 
 ### Known limitation — horizontal inset (not fixed)
@@ -333,7 +338,7 @@ inset is left **unfixed on purpose** because it is **Point-only**: a footprint
 dilates by `W/2` per side, so the dilated edge clears the block face whenever
 `W ≥ 2/16 = 0.125`, and
 every real entity is far past that (smallest vanilla mobs ~`0.4`; all shipped
-profiles `≥ 0.6`). Only the zero-width **Point** profile (the debug/oracle baseline)
+profiles `≥ 0.6`). Only the zero-width **Point** profile (debug)
 keeps the inset footprint. Fixing it would need a full **visual footprint** (four
 extra `StandableRect` coords + skirt re-draw + merge-seam handling) for a ~1px border
 on a few blocks — poor cost/benefit. The `visualTopY` mechanism generalizes to a
@@ -341,16 +346,17 @@ visual footprint if it ever becomes worth it.
 
 ### Known limitation — Point profile (not fixed)
 
-The zero-width **Point** profile (debug/oracle baseline) has a few edge-case
+The zero-width **Point** profile (debug) has a few other edge-case
 draw bugs that do not show up on the shipped dilated profiles. Left unfixed on
-purpose.
+purpose due to low ROI. Is a zero-width point supposed to fit through a zero
+size gap? Because a 4.0 wide ghast fits into a 4 block gap.
 
 ## Entity profiles (size + headroom)
 
 `EntityProfile(name, width, height, reach)` selects the entity the flood is computed
 for. The profile is chosen live via the `mobProfile` setting (see
-[`settings.md`](settings.md)); the shipped roster is defined in `EntityProfile.Option`,
-so it grows there rather than in a table duplicated here.
+[`settings.md`](settings.md)); the shipped builtin sizes live on `EntityProfile`
+constants, with enables/order in `ProfileRoster`.
 
 Each field drives one part of the math: `W` drives dilation (above), `H` drives
 headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`. Skirt
@@ -363,7 +369,7 @@ model. Two examples anchor the range:
   jump peak, shared by the larger Ravager).
 - **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
   zero height reduces headroom to the buried test, so Point stays the pure
-  point-walker and the eager-vs-lazy oracle baseline.
+  point-walker and geometric baseline.
 
 ## Appendix A: rejected pixel raster
 

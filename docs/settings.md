@@ -19,6 +19,7 @@ General project facts live in `[project.md](project.md)`; rules in
 ```
 Pause → Mods (ModMenu) → Configure → GuiConfigs (MaLiLib GuiConfigsBase)
   → Configs (IConfigHandler) → config/mobwalk.json on screen close
+  → also Configs.saveToDisk() on ClientPlayConnectionEvents.DISCONNECT
 ```
 
 - **MaLiLib** `0.28.9` (`fi.dy.masa.malilib.`*) is the settings UI and JSON
@@ -32,7 +33,10 @@ config-screen factory with `Registry.CONFIG_SCREEN` (`ModInfo` → `GuiConfigs`)
 entrypoint `modmenu`).
 - Widgets write option values immediately; JSON is written on config-screen close
 through `IConfigHandler.save()` → `config/mobwalk.json` under the game config
-directory. Load runs at init via `IConfigHandler.load()`.
+directory, and again on play **disconnect** (Save and Quit to Title) via
+`Configs.saveToDisk()` so in-game flood gestures (shift+scroll radius, profile
+cycle) land on disk without opening Configure. Load runs at init via
+`IConfigHandler.load()`.
 
 Key files: `InitHandler.java`, `Configs.java`, `GuiConfigs.java`,
 `MobWalkModMenuIntegration.java`, lang `assets/mobwalk/lang/en_us.json`.
@@ -49,10 +53,10 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
 | `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
-| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. `setValueChangeCallback` → `CollisionSurfaceOverlay.applyFloodRadius` (updates session radius and re-floods an active selection). |
+| `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
 
 Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
-`Configs.roster()`, `Configs.hasEnabledProfile()`.
+`Configs.setFloodRadius()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
@@ -99,16 +103,16 @@ are not kept: sanitize strips trailing spaces, restores the previous non-empty n
 at that index (else `"Custom"`), then rewrites **new or renamed** colliding customs
 to `Name (1)`, `Name (2)`, … (builtins count, including disabled). Existing names
 that still appear are left unchanged. An open `CustomProfilesTableEdit` rebuilds so
-repaired fields show without closing. Blank-name `participates()` skip remains a
-safety net. Custom ids are `custom0`, `custom1`, … in table order.
+repaired fields show without closing. Custom ids are `custom0`, `custom1`, … in
+table order.
 
 ### Shared roster behavior
 
-- **Cycle order:** enabled builtins (table order), then enabled participating customs.
+- **Cycle order:** enabled builtins (table order), then enabled customs.
 New/renamed colliding names are uniquified into the stored Name (ids `custom0`,
 `custom1`, …); existing names are not reindexed. `Configs.profileDisplayLabel` /
 settings button use that stored name. Cycle still skips disabled.
-- **Soft-disable:** every participating profile Off → `hasEnabledProfile()` false;
+- **Soft-disable:** every profile Off → `hasEnabledProfile()` false;
 overlay select floods stay off; wand air- or block-click pings HUD
 `no profiles active`; `showSurfaces` is unchanged. Shift+scroll radius still works.
 - **ConfigTable RESET enable:** MaLiLib `ConfigTable.isModified()` compares defaults
@@ -144,12 +148,12 @@ category name: `"Appearance"`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `walkableColor` | `ConfigColor` | `#8066CC66` (light green, ~50% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill. Read live in `emit`. |
+| `walkableColor` | `ConfigColor` | `#8066CC66` (light green, ~50% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill. Read live in `SurfaceEmitter` / `Palette`. |
 | `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
-| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `emitHoles` draws beams at hole rims. When off: beams are skipped. |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter.emitHoles` draws beams at hole rims. When off: beams are skipped. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
-| `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `emit`. |
-| `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `emit`. |
+| `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `SurfaceEmitter`. |
+| `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `drawOnVisibleFace` | `ConfigBoolean` | `true` | When on: standable tops of taller-than-collision blocks (soul sand, mud) draw on the visible block face; when off, at the collision height. **Compute-side** — passed into `select` as `computeVisualTop`, so a value-change callback re-floods (the one Appearance option that touches compute). See `[geometry.md](geometry.md)` / `[rendering.md](rendering.md)`. |
 
 Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
@@ -165,10 +169,10 @@ name: `"Debug"`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
-| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll`). When off: that gesture is inactive — scroll never changes the radius. |
+| `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll` → `Configs.setFloodRadius`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
-| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `greyBlend`. |
-| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`greyBlend`). When off: those ring depths are not drawn. |
+| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorAtDepth`. |
+| `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the outermost flood-depth rings greyed (`Palette.colorAtDepth`). When off: those ring depths are not drawn. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,
@@ -209,6 +213,8 @@ Match the existing Generic / Debug pattern in `Configs.java`:
 5. Wire live apply with `setValueChangeCallback` when changing the value should
   update an overlay immediately (see `FLOOD_RADIUS`); otherwise read the
   option live from a `Configs.*()` helper.
+  (`Configs` ↔ `CollisionSurfaceOverlay`/`SurfaceEmitter` is a package cycle today;
+  a live-apply listener would invert the config→overlay edge, low priority.)
 6. Persistence is automatic via `ConfigUtils.readConfigBase` /
   `writeConfigBase` over that category’s `OPTIONS` — keep the option on that list.
 

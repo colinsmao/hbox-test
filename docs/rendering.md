@@ -111,17 +111,18 @@ Config UI, persistence, and MaLiLib option types live in
   cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
-  mid-session renderer reload). `CollisionSurfaceOverlay` (below)
-  is the widget that currently exercises this framework.
+  mid-session renderer reload). `CollisionSurfaceOverlay` + `SurfaceEmitter`
+  (below) exercise this framework.
 
-## Block-hitbox rendering: `CollisionSurfaceOverlay` + `SurfaceSelection`
+## Block-hitbox rendering: `CollisionSurfaceOverlay` + `SurfaceSelection` + `SurfaceEmitter`
 
 Draws the **standable surfaces** of blocks — the upward-facing collision faces an
 entity of a chosen size can stand on — for a region the player selects with the
 wand (General `wandItem`, default stick), where the region follows **walkable terrain** outward from the clicked
 block. The geometry (occlusion-aware tops, entity-width dilation, the
 output-sensitive flood) is computed by `SurfaceSelection` and documented in
-[`geometry.md`](geometry.md); this section covers the **widget and its drawing**.
+[`geometry.md`](geometry.md); this section covers the **widget lifecycle** and
+**`SurfaceEmitter` drawing**.
 
 ### Selection lifecycle (input → snapshot)
 
@@ -141,7 +142,7 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
   stays agnostic to which item (the wand) a widget cares about.
 - **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
-  `SurfaceSelection.allRects()`, height-tinted at draw so no per-rect tag — is
+  `SurfaceSelection.allRects()`, colored at draw so no per-rect tag — is
   (re)published into a `volatile` field on each wand action (select / clear / radius
   scroll / profile cycle). `extract` samples the visibility flag and crouch, and does the
   **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
@@ -163,30 +164,34 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Adjustable flood radius (shift+scroll).** Gated by Debug
   `crouchScrollRadius` (default on; see [`settings.md`](settings.md)). When on,
   `MobWalkClient` registers `ClientHotbarScrollEvents.ALLOW` and, **only while
-  holding the wand (in either hand) and sneaking**, changes the radius by the
-  scroll direction (`adjustRadius`), re-floods from the last seed so the change
-  is immediate, and returns `false` to cancel the vanilla slot change. When the
+  holding the wand (in either hand) and sneaking**, changes General `floodRadius`
+  via `Configs.setFloodRadius` (`adjustRadius`), re-floods from the last seed so the
+  change is immediate, and returns `false` to cancel the vanilla slot change. When the
   option is off, that gesture is inactive — scroll never changes the radius.
   The radius is clamped `[0, 30]` and steps by **1 up to 10, then by 2** (`12, 14, …,
-  30`) — the window grows quadratically, so coarse steps keep the high end usable.
-  Each change pings `RadiusIndicatorOverlay`.
+  30`) — coarse steps keep the high end usable.
+  Each change pings `RadiusIndicatorOverlay`. The live option updates immediately;
+  JSON is flushed on play disconnect (and on config-screen close).
 - **Threading.** The selection is computed only on the client/extraction thread
   (`select`/`clear`); the render thread reads only the immutable snapshot via the
   `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
-  result list — each action recomputes from scratch.
+  result list — each action recomputes from scratch. `SurfaceEmitter` receives those
+  published lists as args and never reads the live compute lists.
 
-### Per-surface drawing (`emit`)
+### Per-surface drawing (`SurfaceEmitter.emit`)
 
 Each reached `StandableRect` is drawn as a **top fill**, an optional **border**, and
 **skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
-through-walls, depth-on `SKIRT` occluded).
+through-walls, depth-on `SKIRT` occluded). `CollisionSurfaceOverlay.emit` forwards
+the published snapshots into `SurfaceEmitter.emit`.
 
 - **Top fill, Appearance-colored (or depth-hue debug).** Tops use Appearance
   `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
-  switches RGB to the cyclic BFS-depth hue band (`depthColor`, blue at depth 0,
-  cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color. Cutoff ring greying (`greyBlend`) applies in both modes when
-  Debug `showCutoffRing` is on (default); when off, those ring depths are not drawn.
+  switches RGB to the cyclic BFS-depth hue band (`Palette` / `depthColor`, blue at
+  depth 0, cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
+  out-of-sequence color. Cutoff ring greying (`Palette.colorAtDepth` → `greyBlend`)
+  applies in both modes when Debug `showCutoffRing` is on (default); when off, those
+  ring depths are not drawn.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
   `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
   surfaces *through* blocks is a debug aid, so when the option is on the top is
@@ -211,7 +216,7 @@ through-walls, depth-on `SKIRT` occluded).
   dodge z-fighting the coplanar terrain face (`Y_OFFSET` is likewise 0.002). *Skirts are
   square, not splayed: a trapezoidal/dilated skirt clips the block's upper edge and
   re-introduces overlap.*
-- **Skirt-diff, computed compute-side (`computeDownSkirts` / `DownSkirtSpan`).** Any
+- **Skirt-diff, computed compute-side (`computeDownSkirts` / down `SkirtSpan`).** Any
   rectangle partition of a holed / L-shaped level has *internal* edges between
   equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
   can't hide it where it overhangs air near a hole). So each edge is skirted only over
@@ -219,13 +224,15 @@ through-walls, depth-on `SKIRT` occluded).
   per-edge 1-D interval subtraction), **and** minus the wall/ceiling occluder sub-spans
   on that edge (they get an upward skirt instead). Partial sharing is handled (a big
   rect's edge shared with a sliver over only part of its length skirts just the unshared
-  remainder); true drops / hole outlines / unshared remainders keep their skirts. It is
-  computed **compute-side once per select** (`SurfaceSelection.computeDownSkirts`) and
-  published as `DownSkirtSpan`s (edge orientation, side, line, `[lo,hi]`, base `T`),
-  which `emit` just draws — one pass per select keeps large/bumpy selections smooth
-  (the alternative, an `O(n²)` `openSpans` scan over the merged rects every frame,
-  hitches). This is the shared drop-edge pass the hole classifier plugs into (a drop
-  span is a hole candidate).
+  remainder); true drops / hole outlines / unshared remainders keep their skirts.
+  Abutting **lower** reached surfaces set `maxExtent` on those leftovers (gap to the
+  lower face); open drops stay unlimited. It is computed **compute-side once per
+  select** (`SurfaceSelection.computeDownSkirts`) and published as down `SkirtSpan`s
+  (edge orientation, side, line, `[lo,hi]`, base `T`, `maxExtent`), which `emit` just
+  draws — one pass per select keeps large/bumpy selections smooth (the alternative, an
+  `O(n²)` `openSpans` scan over the merged rects every frame, hitches). This is the
+  shared drop-edge pass the hole classifier plugs into (a drop span is a hole
+  candidate).
 - **Upward (occluder) skirts — wall-vs-drop classification.** A
   surface edge bordering a **wall** (a box rising above the surface) or a **ceiling**
   (an overhang within the entity's headroom) is *not* a drop, so a downward skirt
@@ -234,23 +241,22 @@ through-walls, depth-on `SKIRT` occluded).
   marker top (every height fades out at the top). Because the wall/drop split needs
   collision-box data the render thread may not query, the classification is done
   **compute-side** (`SurfaceSelection.computeOccluders`, once per wand action) and
-  published as `OccluderSpan`s in the snapshot. The *downward* skirts are computed
+  published as up `SkirtSpan`s in the snapshot. The *downward* skirts are computed
   compute-side too (`computeDownSkirts`, above) with the occluder sub-spans already
-  subtracted, so an edge is never double-skirted; `emit`
-  simply draws the published down spans (`emitDownSkirts`) and the published occluder
-  spans as upward skirts (`emitOccluders`). Each span carries its orientation, **side**
-  (so the
-  skirt is nudged toward the surface interior to dodge z-fighting the wall face, and
-  opposite-side edges at one coordinate aren't merged), the dilated edge line, the
-  `[lo,hi]` interval, the base height `T`, and the occluder top. The marker sits at
-  the **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
+  subtracted, so an edge is never double-skirted; `emit` draws both lists through
+  `emitSkirts` (`length = min(Appearance height, maxExtent)`). Each span carries its
+  orientation, **side** (so the skirt is nudged toward the surface interior to dodge
+  z-fighting the wall face, and opposite-side edges at one coordinate aren't merged),
+  the dilated edge line, the `[lo,hi]` interval, the base height `T`, and `maxExtent`
+  (wall stop above for UP; land gap or unlimited for DOWN). The marker sits at the
+  **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
   `W = 0`, at the face). This per-edge wall-vs-drop classification is the
   **prerequisite for hole detection**: the drop-classified edges are the
   hole candidates.
-- **Upward (occluder) skirts.** Drawn from published `OccluderSpan`s at Appearance
-  `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to the available wall
-  above the surface, solid at the base and fading to transparent at the tip. Same
-  depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
+- **Upward (occluder) skirts.** Drawn from published up `SkirtSpan`s at Appearance
+  `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to `maxExtent` (wall
+  available above the surface), solid at the base and fading to transparent at the tip.
+  Same depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
   `SKIRT_OFFSET`.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a wand
   selection active it re-runs `select` once with a one-shot flag, writes a single
@@ -268,8 +274,7 @@ through-walls, depth-on `SKIRT` occluded).
   and **written into each rect's `visualTopY` / span `visualBaseY`**. `emit` then
   *always* draws the top fill, borders, and the up/down/hole skirts at that render
   height — which equals the collision top when the setting is off (the raise isn't
-  computed then). The height-gradient **color stays keyed on the collision `topY`**, so
-  the palette doesn't shift when toggling. Because the flag gates the compute, a
+  computed then). Draw color is unchanged by the toggle. Because the flag gates the compute, a
   value-change callback (`Configs.initCallbacks`) **re-floods** from the last seed via
   `reselectWithMobProfile` (cheap: toggling is rare). This is the one Appearance option
   that touches compute — an accepted exception to "Appearance is draw-only," since the
@@ -277,18 +282,18 @@ through-walls, depth-on `SKIRT` occluded).
   (collision-top only); this is purely where the paint is drawn.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
   `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
-  blended toward **grey** (`greyBlend`), so a depth-cutoff reads differently from a
+  blended toward **grey** (`Palette.colorAtDepth`), so a depth-cutoff reads differently from a
   true boundary (a selection stopped by a real drop stays colored). When off, those
   ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
-  `depth` relative to `depthLimit` (= `selectionRadius`):
+  `depth` relative to `depthLimit` (= `Configs.floodRadius()`):
   `depth <= limit−2` → no grey; `depth == limit−1` → half grey; `depth >= limit` → full
   grey. This is possible because the **frontier-split merge**
   (`mergeCoplanarSplitFrontier`) keeps the frontier ring (depth == limit) as separate
   rects from the inner blob: raw nodes are partitioned into inner (depth < limit) and
   frontier (depth >= limit), each is unioned/strip-merged independently, and the inner
   area is subtracted from the frontier nodes so the two tile cleanly (inner has priority
-  in the dilation overlap zone). Without the split, `mergeCoplanar` would collapse the
-  whole same-height area into one rect at `min` depth (0), defeating the depth-based
+  in the dilation overlap zone). Without the split, a plain coplanar merge would collapse
+  the whole same-height area into one rect at `min` depth (0), defeating the depth-based
   grey and perimeter suppression. Down-skirt spans and hole beams at the frontier
   (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
   real geometry.
@@ -323,42 +328,45 @@ through-walls, depth-on `SKIRT` occluded).
 
 ## Where the file-specific gotchas live (inline comments)
 
-- `widgets/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
+- `surface/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
-  publish-on-action snapshot, the crouch-gated through-walls top + borders, the
-  depth-based grey blend (`greyBlend`, keyed on `rect.depth()` vs `depthLimit`),
-  the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny `SKIRT_OFFSET`),
-  drawing the **published** down-skirt spans (`emitDownSkirts`, from `DownSkirtSpan`;
-  frontier spans `depth >= limit` suppressed), **upward occluder skirts**
-  (`emitOccluders`, Appearance `upwardSkirtHeight`, side-based interior nudge), and the
-  **hole beams** (`emitHoles`, from
+  publish-on-action snapshot, the level-identity reset, and the `volatile`
+  snapshot/occluder/down-skirt/hole/crouch/`depthLimit` handoff into
+  `SurfaceEmitter`.
+- `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
+  depth-based grey blend (`Palette.colorAtDepth`, keyed on `rect.depth()` vs
+  `depthLimit`), the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny
+  `SKIRT_OFFSET`), drawing the **published** skirt spans (`emitSkirts`, from
+  `SkirtSpan` UP/DOWN lists; length `min(Appearance height, maxExtent)`; frontier
+  spans `depth >= limit` suppressed), and the **hole beams** (`emitHoles`, from
   `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
-  `showBeamsThroughWalls`) — `emit` draws only the published spans — the cyclic
-  depth-gradient color (`depthColor`, `DEPTH_CYCLE` hue
-  band), the level-identity reset,
-  `volatile` snapshot/occluder/down-skirt/hole/crouch handoff, and the
+  `showBeamsThroughWalls`) — emit draws only the published spans — the cyclic
+  depth-gradient color (`Palette` / `DEPTH_CYCLE` hue band), and the
   double-sided-winding requirement.
-- `widgets/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
+- `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
-  scroll input to the world overlay's radius and the HUD indicator — and the
+  scroll input to the flood-radius option and the HUD indicator — and the
   `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
+- `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,
+  `union` re-cut + strip-merge, depth-aware
+  **`mergeCoplanarSplitFrontier`** (union inner and frontier separately, subtract
+  inner from frontier so they tile cleanly), `footprintAdjacent`,
+  `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
+  uses `mergeCoplanarSplitFrontier`).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
   BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
-  **`mergeCoplanarSplitFrontier`** — union inner and frontier separately, subtract
-  inner from frontier so they tile cleanly), the `selectEager` oracle +
-  `PROFILE_FLOOD` parity/timing harness, dilation + **headroom** occlusion in
-  `exposeBox` (the `(T, T+H]` standing-column predicate, guillotine
-  `subtractRects`), the `union` re-cut + `mergeCoplanar` strip-merge (used by eager
-  path), the `footprintAdjacent` edge test + profile-`reach` gate, the
-  **compute-side occluder-span classification** (`computeOccluders` /
-  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
-  `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
-  `edgeDownSpans` / `subtractIntervals`, published as `DownSkirtSpan`), the **hole
+  `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
+  `exposeBox` (the `(T, T+H]` standing-column predicate, calling
+  `RectMath.subtractRects`), the
+  **compute-side skirt classification** (`computeOccluders` /
+  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, and
+  `computeDownSkirts` / `edgeDownSpans` / land-clamped `maxExtent`, published as
+  up and down `SkirtSpan` lists), the **hole
   classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
   strictly below the rim under the fall footprint, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,
