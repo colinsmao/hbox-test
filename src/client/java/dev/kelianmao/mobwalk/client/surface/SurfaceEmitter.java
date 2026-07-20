@@ -36,11 +36,11 @@ public final class SurfaceEmitter {
   // don't visibly overlap neighbours.
   private static final double SKIRT_OFFSET = 0.002;
 
-  // Upward (occluder) skirts: drawn where a surface edge borders a wall/ceiling
-  // (the compute-side OccluderSpans), solid at the surface top and fading to
-  // transparent at the marker top. A lighter shade than the (darker) downward drop
-  // skirts so the two read distinctly. Draw height from Appearance upwardSkirtHeight
-  // (0 skips draw), clamped to the available wall above the surface.
+  // Upward skirts: drawn where a surface edge borders a wall/ceiling (compute-side
+  // SkirtSpan UP), solid at the surface top and fading to transparent at the marker
+  // top. A lighter shade than the (darker) downward drop skirts so the two read
+  // distinctly. Draw height from Appearance upwardSkirtHeight (0 skips draw),
+  // clamped to span.maxExtent (wall top above the surface).
   private static final float UP_SKIRT_SHADE = 0.85f;
   private static final float UP_SKIRT_ALPHA = 0.7f;
 
@@ -53,13 +53,13 @@ public final class SurfaceEmitter {
   }
 
   /**
-   * Emit tops (+ crouch borders), then downward skirts, upward occluders, and
-   * hole beams from the published snapshots.
+   * Emit tops (+ crouch borders), then skirts (up and down), and hole beams from
+   * the published snapshots.
    */
   public static void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer,
       BufferBuilder skirtBuffer, BufferBuilder beamBuffer,
-      List<StandableRect> rects, List<OccluderSpan> occluders,
-      List<DownSkirtSpan> downSkirts, List<HoleSpan> holes,
+      List<StandableRect> rects, List<SkirtSpan> occluders,
+      List<SkirtSpan> downSkirts, List<HoleSpan> holes,
       int depthLimit, boolean crouching) {
     if (rects.isEmpty()) {
       return;
@@ -97,21 +97,9 @@ public final class SurfaceEmitter {
 
     }
 
-    // Downward drop skirts: now published compute-side (openSpans minus the
-    // wall/ceiling occluder sub-spans, so a wall edge is not double-skirted),
-    // drawn once per span into the depth-tested layer, pushed out by a tiny
-    // SKIRT_OFFSET so they clear the coplanar terrain face without z-fighting.
-    // Each span carries its edge line, [lo,hi], side, base height, and its
-    // surface's flood-depth (the debug color and fade derive here).
-    emitDownSkirts(skirtBuffer, positionMatrix, downSkirts, limit);
+    emitSkirts(skirtBuffer, positionMatrix, downSkirts, limit);
+    emitSkirts(skirtBuffer, positionMatrix, occluders, limit);
 
-    // Upward (occluder) skirts: drawn once per published span, into the same
-    // depth-tested layer, at Appearance upwardSkirtHeight.
-    emitOccluders(skirtBuffer, positionMatrix, occluders, limit);
-
-    // Hole beams: depth-off beam layer when showBeamsThroughWalls, else
-    // depth-tested skirt layer (occluded by terrain). Emit after skirts so
-    // beams still sit above skirt quads when sharing that buffer.
     BufferBuilder holeBuffer = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
     emitHoles(holeBuffer, positionMatrix, holes);
   }
@@ -159,110 +147,86 @@ public final class SurfaceEmitter {
     }
   }
 
-  // Draw every published downward drop-skirt span: solid over its top half, fading
-  // to transparent over the bottom half (so a deep drop doesn't read as a hard
-  // floating wall), depth-colored (inherited from its surface) and shaded darker.
-  // Spans at the outermost depth ring are suppressed (depth-cutoff artifacts).
-  // Appearance downSkirtHeight <= 0 skips the draw entirely.
-  private static void emitDownSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-      List<DownSkirtSpan> spans, int limit) {
-    float skirtDepth = (float) Configs.downSkirtHeight();
-    if (skirtDepth <= 0.0f) {
-      return;
-    }
+  // Draw published skirts (UP and DOWN) into the depth-tested layer. Length is
+  // min(Appearance height for the direction, span.maxExtent). Spans at the
+  // outermost depth ring are suppressed.
+  private static void emitSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
+      List<SkirtSpan> spans, int limit) {
     if (spans.isEmpty()) {
       return;
     }
     float o = (float) SKIRT_OFFSET;
-    for (DownSkirtSpan sp : spans) {
+    for (SkirtSpan sp : spans) {
       if (sp.depth() >= limit) {
         continue;
       }
       if (!Configs.showCutoffRing() && Palette.inCutoffRing(sp.depth(), limit)) {
         continue;
       }
-      float[] rgb = Palette.colorForDepth(sp.depth(), limit);
-      float sr = rgb[0] * SKIRT_SHADE;
-      float sg = rgb[1] * SKIRT_SHADE;
-      float sb = rgb[2] * SKIRT_SHADE;
-      // Hang from the rect's render height (visualBaseY); color still keyed on the
-      // collision baseY (palette stable across the mode toggle).
-      float yTop = (float) sp.visualBaseY() + (float) Y_OFFSET;
-      float yBot = yTop - skirtDepth;
-      float push = sp.maxSide() ? o : -o;
-      if (sp.alongX()) {
-        float z = (float) sp.line() + push;
-        fadedSkirt(skirtBuffer, positionMatrix,
-          (float) sp.lo() - o, z, (float) sp.hi() + o, z, yTop, yBot, sr, sg, sb);
+      if (sp.isDown()) {
+        float configured = (float) Configs.downSkirtHeight();
+        if (configured <= 0.0f) {
+          continue;
+        }
+        float extent = (float) Math.min(configured, sp.maxExtent());
+        if (!(extent > 0.0f)) {
+          continue;
+        }
+        float[] rgb = Palette.colorForDepth(sp.depth(), limit);
+        float sr = rgb[0] * SKIRT_SHADE;
+        float sg = rgb[1] * SKIRT_SHADE;
+        float sb = rgb[2] * SKIRT_SHADE;
+        float yTop = (float) sp.visualBaseY() + (float) Y_OFFSET;
+        float yBot = yTop - extent;
+        // Exterior push to prevent z-fighting.
+        float push = sp.maxSide() ? o : -o;
+        if (sp.alongX()) {
+          float z = (float) sp.line() + push;
+          fadedSkirt(skirtBuffer, positionMatrix,
+            (float) sp.lo() - o, z, (float) sp.hi() + o, z, yTop, yBot, sr, sg, sb);
+        } else {
+          float x = (float) sp.line() + push;
+          fadedSkirt(skirtBuffer, positionMatrix,
+            x, (float) sp.lo() - o, x, (float) sp.hi() + o, yTop, yBot, sr, sg, sb);
+        }
       } else {
-        float x = (float) sp.line() + push;
-        fadedSkirt(skirtBuffer, positionMatrix,
-          x, (float) sp.lo() - o, x, (float) sp.hi() + o, yTop, yBot, sr, sg, sb);
+        float configured = (float) Configs.upwardSkirtHeight();
+        if (configured <= 0.0f) {
+          continue;
+        }
+        float available = (float) sp.maxExtent();
+        if (available <= 0.0f) {
+          continue;
+        }
+        float markerHeight = Math.min(configured, available);
+        float base = (float) sp.visualBaseY();
+        float yTopMarker = base + markerHeight;
+        float[] rgb = Palette.colorForDepth(sp.depth(), limit);
+        float r = rgb[0] * UP_SKIRT_SHADE;
+        float g = rgb[1] * UP_SKIRT_SHADE;
+        float b = rgb[2] * UP_SKIRT_SHADE;
+        // Interior nudge to prevent z-fighting.
+        float shift = sp.maxSide() ? -o : o;
+        float xa;
+        float za;
+        float xb;
+        float zb;
+        if (sp.alongX()) {
+          float line = (float) sp.line() + shift;
+          xa = (float) sp.lo();
+          xb = (float) sp.hi();
+          za = line;
+          zb = line;
+        } else {
+          float line = (float) sp.line() + shift;
+          za = (float) sp.lo();
+          zb = (float) sp.hi();
+          xa = line;
+          xb = line;
+        }
+        vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
+          r, g, b, 0.0f, UP_SKIRT_ALPHA);
       }
-    }
-  }
-
-  // Draw every published upward (occluder) skirt span at Appearance upwardSkirtHeight,
-  // solid at the surface top and fading to transparent at the marker top, the
-  // marker pulled toward the surface interior by SKIRT_OFFSET to clear the wall face.
-  // Spans at the outermost depth ring are suppressed (depth-cutoff artifacts).
-  // upwardSkirtHeight <= 0 skips the draw entirely.
-  private static void emitOccluders(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-      List<OccluderSpan> spans, int limit) {
-    float configuredHeight = (float) Configs.upwardSkirtHeight();
-    if (configuredHeight <= 0.0f) {
-      return;
-    }
-    if (spans.isEmpty()) {
-      return;
-    }
-    float o = (float) SKIRT_OFFSET;
-    for (OccluderSpan span : spans) {
-      if (span.depth() >= limit) {
-        continue;
-      }
-      if (!Configs.showCutoffRing() && Palette.inCutoffRing(span.depth(), limit)) {
-        continue;
-      }
-      // Rise from the rect's render height (visualBaseY); the wall top (span.topY)
-      // is unchanged, so the marker just starts a touch higher.
-      float base = (float) span.visualBaseY();
-      float available = (float) (span.topY()) - base;
-      if (available <= 0.0f) {
-        continue;
-      }
-      float markerHeight = Math.min(configuredHeight, available);
-      float yTopMarker = base + markerHeight;
-
-      float[] rgb = Palette.colorForDepth(span.depth(), limit);
-      float r = rgb[0] * UP_SKIRT_SHADE;
-      float g = rgb[1] * UP_SKIRT_SHADE;
-      float b = rgb[2] * UP_SKIRT_SHADE;
-
-      // Nudge toward the surface interior (away from the wall face) to dodge
-      // z-fighting; the interior is on the -axis side when the occluder is on +.
-      float shift = span.positiveSide() ? -o : o;
-      float xa;
-      float za;
-      float xb;
-      float zb;
-      if (span.alongX()) {
-        float line = (float) span.line() + shift;
-        xa = (float) span.lo();
-        xb = (float) span.hi();
-        za = line;
-        zb = line;
-      } else {
-        float line = (float) span.line() + shift;
-        za = (float) span.lo();
-        zb = (float) span.hi();
-        xa = line;
-        xb = line;
-      }
-
-      // Solid at the base (T), fading to transparent at the marker top.
-      vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
-        r, g, b, 0.0f, UP_SKIRT_ALPHA);
     }
   }
 

@@ -81,11 +81,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   private volatile List<StandableRect> snapshot = List.of();
   // Upward (occluder) skirt spans, published with the snapshot (compute-side, since
   // they read collision boxes). Read per-frame in emit. See SurfaceSelection.
-  private volatile List<OccluderSpan> occluderSnapshot = List.of();
+  private volatile List<SkirtSpan> occluderSnapshot = List.of();
   // Downward drop-skirt spans, published with the snapshot (compute-side, once per
   // select — was a per-frame openSpans scan). Read per-frame in emit. See
   // SurfaceSelection.computeDownSkirts.
-  private volatile List<DownSkirtSpan> downSkirtSnapshot = List.of();
+  private volatile List<SkirtSpan> downSkirtSnapshot = List.of();
   // Hole spans (through-walls beam markers), published with the snapshot
   // (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
   // See SurfaceSelection.computeHoles.

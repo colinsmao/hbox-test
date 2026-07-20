@@ -65,7 +65,8 @@ final class TerrainEdgeContractTest {
       double sourceCollisionTop,
       double sourceVisualTop,
       double otherCollisionTop,
-      double otherVisualTop) {}
+      double otherVisualTop,
+      double maxExtent) {}
 
   record Fixture(RowDirection direction, double halfWidth, List<BlockSpec> blocks) {}
 
@@ -112,6 +113,7 @@ final class TerrainEdgeContractTest {
   }
 
   private static List<BoundarySpan> expectedInternalSpans(RowDirection direction) {
+    double pixel = 1.0 / 16.0;
     return List.of(
       /*
        * Soul -> path at the set-back u=.7: collision rises by 1/16, so this is
@@ -119,16 +121,16 @@ final class TerrainEdgeContractTest {
        * DOWN edge at this visually flush junction.
        */
       edge(direction, SpanKind.UP, 0.7, -0.3, 1.3, true,
-        SOUL_TOP, FULL_TOP, PATH_TOP, FULL_TOP),
+        SOUL_TOP, FULL_TOP, PATH_TOP, FULL_TOP, PATH_TOP - FULL_TOP),
 
       /*
        * Raised path patch -> ordinary path at u=1: collision is continuous but
        * visible height falls by 1/16. Only the raised side points DOWN. The
        * interval is exactly v=[0,1], the undilated soul footprint; it must not
-       * leak into the two .3-wide dilation wings.
+       * leak into the two .3-wide dilation wings. Curtain length = 1/16.
        */
       edge(direction, SpanKind.DOWN, 1.0, 0.0, 1.0, true,
-        PATH_TOP, FULL_TOP, PATH_TOP, PATH_TOP),
+        PATH_TOP, FULL_TOP, PATH_TOP, PATH_TOP, pixel),
 
       /*
        * Path -> full block at the set-back u=1.7. Movement from path meets a
@@ -136,9 +138,9 @@ final class TerrainEdgeContractTest {
        * opposite oriented edges over exactly the same shared interval.
        */
       edge(direction, SpanKind.UP, 1.7, -0.3, 1.3, true,
-        PATH_TOP, PATH_TOP, FULL_TOP, FULL_TOP),
+        PATH_TOP, PATH_TOP, FULL_TOP, FULL_TOP, pixel),
       edge(direction, SpanKind.DOWN, 1.7, -0.3, 1.3, false,
-        FULL_TOP, FULL_TOP, PATH_TOP, PATH_TOP));
+        FULL_TOP, FULL_TOP, PATH_TOP, PATH_TOP, pixel));
   }
 
   private static SurfaceSpec surface(RowDirection direction,
@@ -150,20 +152,20 @@ final class TerrainEdgeContractTest {
   private static BoundarySpan edge(RowDirection direction, SpanKind kind,
       double u, double loV, double hiV, boolean towardPlusU,
       double sourceCollisionTop, double sourceVisualTop,
-      double otherCollisionTop, double otherVisualTop) {
+      double otherCollisionTop, double otherVisualTop, double maxExtent) {
     return switch (direction) {
       case PLUS_X -> new BoundarySpan(kind, false, towardPlusU,
         ORIGIN_X + u, ORIGIN_Z + loV, ORIGIN_Z + hiV,
-        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop);
+        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop, maxExtent);
       case MINUS_X -> new BoundarySpan(kind, false, !towardPlusU,
         ORIGIN_X - u, ORIGIN_Z + loV, ORIGIN_Z + hiV,
-        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop);
+        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop, maxExtent);
       case PLUS_Z -> new BoundarySpan(kind, true, towardPlusU,
         ORIGIN_Z + u, ORIGIN_X + loV, ORIGIN_X + hiV,
-        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop);
+        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop, maxExtent);
       case MINUS_Z -> new BoundarySpan(kind, true, !towardPlusU,
         ORIGIN_Z - u, ORIGIN_X + loV, ORIGIN_X + hiV,
-        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop);
+        sourceCollisionTop, sourceVisualTop, otherCollisionTop, otherVisualTop, maxExtent);
     };
   }
 
@@ -225,34 +227,34 @@ final class TerrainEdgeContractTest {
     }
     List<StandableRect> merged = RectMath.mergeCoplanar(raw);
 
-    List<OccluderSpan> occluders = new ArrayList<>();
+    List<SkirtSpan> occluders = new ArrayList<>();
     for (StandableRect r : merged) {
       SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, occluders);
     }
     occluders = SurfaceSelection.mergeOccluderSpans(occluders);
 
-    List<DownSkirtSpan> down =
+    List<SkirtSpan> down =
       SurfaceSelection.computeDownSkirts(merged, occluders, true);
 
     boolean rowAlongX = fixture.direction() == RowDirection.PLUS_X
       || fixture.direction() == RowDirection.MINUS_X;
 
     List<BoundarySpan> internal = new ArrayList<>();
-    for (OccluderSpan s : occluders) {
+    for (SkirtSpan s : occluders) {
       // Shared faces between blocks in the row are perpendicular to the row axis.
       if (s.alongX() == rowAlongX) {
         continue;
       }
-      SurfaceSpec other = abuttingSurface(merged, s.alongX(), s.positiveSide(), s.line(),
+      SurfaceSpec other = abuttingSurface(merged, s.alongX(), s.maxSide(), s.line(),
         s.lo(), s.hi());
       if (other == null) {
         continue;
       }
-      internal.add(new BoundarySpan(SpanKind.UP, s.alongX(), s.positiveSide(),
+      internal.add(new BoundarySpan(SpanKind.UP, s.alongX(), s.maxSide(),
         s.line(), s.lo(), s.hi(),
-        s.baseY(), s.visualBaseY(), other.collisionTop(), other.visualTop()));
+        s.baseY(), s.visualBaseY(), other.collisionTop(), other.visualTop(), s.maxExtent()));
     }
-    for (DownSkirtSpan s : down) {
+    for (SkirtSpan s : down) {
       if (s.alongX() == rowAlongX) {
         continue;
       }
@@ -263,7 +265,7 @@ final class TerrainEdgeContractTest {
       }
       internal.add(new BoundarySpan(SpanKind.DOWN, s.alongX(), s.maxSide(),
         s.line(), s.lo(), s.hi(),
-        s.baseY(), s.visualBaseY(), other.collisionTop(), other.visualTop()));
+        s.baseY(), s.visualBaseY(), other.collisionTop(), other.visualTop(), s.maxExtent()));
     }
 
     List<SurfaceSpec> surfaces = new ArrayList<>();
@@ -443,7 +445,8 @@ final class TerrainEdgeContractTest {
         && close(x.sourceCollisionTop(), y.sourceCollisionTop())
         && close(x.sourceVisualTop(), y.sourceVisualTop())
         && close(x.otherCollisionTop(), y.otherCollisionTop())
-        && close(x.otherVisualTop(), y.otherVisualTop());
+        && close(x.otherVisualTop(), y.otherVisualTop())
+        && close(x.maxExtent(), y.maxExtent());
     }
     return a.equals(b);
   }
@@ -456,6 +459,9 @@ final class TerrainEdgeContractTest {
   }
 
   private static boolean close(double a, double b) {
+    if (Double.isInfinite(a) || Double.isInfinite(b)) {
+      return a == b;
+    }
     return Math.abs(a - b) <= EPS;
   }
 }

@@ -50,6 +50,11 @@ default shape of every task.
    every logical change alters what gets calculated and therefore what is drawn.
    Treat logical steps as visual steps by default; when in doubt, it needs an in-game
    checklist.
+5. **Do not expand scope during execution.** Implement only the approved plan step.
+   If execution surfaces extra work (coalesce/union cleanup, related fixes, drive-by
+   refactors, "while we're here"), stop and surface that delta as a plan update for
+   discussion/approval before coding it. Execution follows the plan; scope changes
+   go through the plan first.
 
 **The procedure, every step:**
 

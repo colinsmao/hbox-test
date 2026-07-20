@@ -223,7 +223,7 @@ there are artifacts of the radius cutoff. Interior border uncertainty is a rende
 a hole beam in the grey ring is blended toward grey by the same distance falloff that
 greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
-The candidate drop spans are the compute-side `DownSkirtSpan`s (every genuine drop
+The candidate drop spans are the compute-side down `SkirtSpan`s (every genuine drop
 edge). `computeHoles` walks them once per select: for each it builds the **fall
 footprint** (a one-block band just beyond the rim, on the drop side), gathers ledges, and
 classifies. Because **one edge can span reached and unreached ground**,
@@ -289,7 +289,7 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
 - **Through merge.** `visualTopY` is a component of the [merge
   class](#representation-rectdouble-space), so a raised patch and a flush coplanar
   neighbour fall into **different** classes and stay separate rects — the raised paint
-  keeps its own height. `DownSkirtSpan` / `OccluderSpan` / `HoleSpan` each carry a
+  keeps its own height. Up and down `SkirtSpan`s and `HoleSpan` each carry a
   `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
 - **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
   the merged rects keyed on a chosen height: **collision `topY`** (`dropEdges`, the
@@ -297,15 +297,19 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   drop) or **`visualTopY`** (the rendered down-skirts). On the visual pass, an abutting
   neighbour with **equal or higher** `visualTopY` covers the edge: equal is a flush
   continuation, higher is a taller face the lower side must not hang a reverse
-  down-skirt into. A visible step between two rects at the same collision `topY` but
-  different `visualTopY` (a path lip on a soul-sand cube top) therefore gets a down
-  skirt **only from the raised/high side**; soul sand's own remnant abutting that lip
-  at the same `visualTopY` gets none. `select` computes `dropEdges` once and, only when
-  some rect is raised (`hasRaisedRect`; never when the toggle gates the raise off),
-  runs the second `visualTopY` pass — otherwise the single pass feeds both holes and
-  skirts. Both heights on a span are **load-bearing**: collision `baseY` for the
-  hole/geometry pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs
-  every skirt/beam from `visualBaseY`, keying color on the collision `depth`).
+  down-skirt into. A **lower** abutting neighbour is a **land stop**: leftover drop
+  intervals get `maxExtent = rimKey − neighbourKey` so the curtain stops at that
+  surface (open drops stay unlimited). Adjacent leftover pieces with the same
+  `maxExtent` coalesce into one span. A visible step between two rects at the same
+  collision `topY` but different `visualTopY` (a path lip on a soul-sand cube top)
+  therefore gets a down skirt **only from the raised/high side**, clamped to the
+  lower face; soul sand's own remnant abutting that lip at the same `visualTopY` gets
+  none. `select` computes `dropEdges` once and, only when some rect is raised
+  (`hasRaisedRect`; never when the toggle gates the raise off), runs the second
+  `visualTopY` pass — otherwise the single pass feeds both holes and skirts. Both
+  heights on a span are **load-bearing**: collision `baseY` for the hole/geometry
+  pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs every
+  skirt/beam from `visualBaseY`, keying color on the collision `depth`).
 - **Neighbour-overlap raise (a merge-class split).** A dilated rect owned by block A
   can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
   reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine

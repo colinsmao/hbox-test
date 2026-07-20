@@ -20,7 +20,7 @@ import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
 final class HoleSubSpanTest {
   private static final double EPS = 1.0e-6;
 
-  private static List<HoleSpan> run(DownSkirtSpan sp, List<StandableRect> reached,
+  private static List<HoleSpan> run(SkirtSpan sp, List<StandableRect> reached,
       List<StandableRect> ledges) {
     Rect band = SurfaceSelection.fallFootprint(sp);
     List<HoleSpan> out = new ArrayList<>();
@@ -28,7 +28,7 @@ final class HoleSubSpanTest {
     return out;
   }
 
-  private static List<HoleSpan> run(DownSkirtSpan sp, List<StandableRect> reached) {
+  private static List<HoleSpan> run(SkirtSpan sp, List<StandableRect> reached) {
     return run(sp, reached, List.of());
   }
 
@@ -36,7 +36,7 @@ final class HoleSubSpanTest {
   void heterogeneousEdgeSplitsHoleFromSafe() {
     // Span x in [0,2]; a reached floor covers x in [1,2] below; x in [0,1] has
     // nothing reached below -> exactly one hole sub-span [0,1].
-    DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(1, 1, 2, 2, 60.0);
     List<HoleSpan> holes = run(sp, List.of(reachedFloor));
     assertEquals(1, holes.size());
@@ -52,7 +52,7 @@ final class HoleSubSpanTest {
   @Test
   void fullyVoidEdgeCoalescesToOneSpan() {
     // Nothing reached below anywhere -> one hole span over the whole edge [0,2].
-    DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     List<HoleSpan> holes = run(sp, List.of());
     assertEquals(1, holes.size());
     assertEquals(0.0, holes.get(0).lo(), EPS);
@@ -63,7 +63,7 @@ final class HoleSubSpanTest {
   void safeMiddleSplitsIntoTwoHoles() {
     // Span x in [0,3]; a reached floor covers only x in [1,2] below; the two
     // void flanks [0,1] and [2,3] are separate holes.
-    DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 3.0, 64.0);
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 3.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(1, 1, 2, 2, 60.0);
     List<HoleSpan> holes = run(sp, List.of(reachedFloor));
     assertEquals(2, holes.size());
@@ -76,7 +76,7 @@ final class HoleSubSpanTest {
   @Test
   void fullyReachedEdgeHasNoHoles() {
     // A reached floor covers the entire footprint -> no holes.
-    DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
     List<HoleSpan> holes = run(sp, List.of(reachedFloor));
     assertEquals(0, holes.size());
@@ -86,7 +86,7 @@ final class HoleSubSpanTest {
   void ledgeBetweenEdgeAndReachedFloorIsHole() {
     // A reached floor at Y=60 covers the footprint, but a ledge at Y=62
     // (between 60 and 64) also overlaps -> HOLE (entity trapped on ledge).
-    DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
     StandableRect ledge = new StandableRect(0, 1, 2, 2, 62.0);
     List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
@@ -98,7 +98,7 @@ final class HoleSubSpanTest {
   @Test
   void ledgeNotOverlappingFootprintIsIgnored() {
     // A ledge at Y=62 exists but at x=[3,4] (no XZ overlap) -> benign.
-    DownSkirtSpan sp = new DownSkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0);
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
     StandableRect ledge = new StandableRect(3, 1, 4, 2, 62.0);
     List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));

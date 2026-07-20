@@ -216,7 +216,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   dodge z-fighting the coplanar terrain face (`Y_OFFSET` is likewise 0.002). *Skirts are
   square, not splayed: a trapezoidal/dilated skirt clips the block's upper edge and
   re-introduces overlap.*
-- **Skirt-diff, computed compute-side (`computeDownSkirts` / `DownSkirtSpan`).** Any
+- **Skirt-diff, computed compute-side (`computeDownSkirts` / down `SkirtSpan`).** Any
   rectangle partition of a holed / L-shaped level has *internal* edges between
   equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
   can't hide it where it overhangs air near a hole). So each edge is skirted only over
@@ -224,13 +224,15 @@ the published snapshots into `SurfaceEmitter.emit`.
   per-edge 1-D interval subtraction), **and** minus the wall/ceiling occluder sub-spans
   on that edge (they get an upward skirt instead). Partial sharing is handled (a big
   rect's edge shared with a sliver over only part of its length skirts just the unshared
-  remainder); true drops / hole outlines / unshared remainders keep their skirts. It is
-  computed **compute-side once per select** (`SurfaceSelection.computeDownSkirts`) and
-  published as `DownSkirtSpan`s (edge orientation, side, line, `[lo,hi]`, base `T`),
-  which `emit` just draws — one pass per select keeps large/bumpy selections smooth
-  (the alternative, an `O(n²)` `openSpans` scan over the merged rects every frame,
-  hitches). This is the shared drop-edge pass the hole classifier plugs into (a drop
-  span is a hole candidate).
+  remainder); true drops / hole outlines / unshared remainders keep their skirts.
+  Abutting **lower** reached surfaces set `maxExtent` on those leftovers (gap to the
+  lower face); open drops stay unlimited. It is computed **compute-side once per
+  select** (`SurfaceSelection.computeDownSkirts`) and published as down `SkirtSpan`s
+  (edge orientation, side, line, `[lo,hi]`, base `T`, `maxExtent`), which `emit` just
+  draws — one pass per select keeps large/bumpy selections smooth (the alternative, an
+  `O(n²)` `openSpans` scan over the merged rects every frame, hitches). This is the
+  shared drop-edge pass the hole classifier plugs into (a drop span is a hole
+  candidate).
 - **Upward (occluder) skirts — wall-vs-drop classification.** A
   surface edge bordering a **wall** (a box rising above the surface) or a **ceiling**
   (an overhang within the entity's headroom) is *not* a drop, so a downward skirt
@@ -239,23 +241,22 @@ the published snapshots into `SurfaceEmitter.emit`.
   marker top (every height fades out at the top). Because the wall/drop split needs
   collision-box data the render thread may not query, the classification is done
   **compute-side** (`SurfaceSelection.computeOccluders`, once per wand action) and
-  published as `OccluderSpan`s in the snapshot. The *downward* skirts are computed
+  published as up `SkirtSpan`s in the snapshot. The *downward* skirts are computed
   compute-side too (`computeDownSkirts`, above) with the occluder sub-spans already
-  subtracted, so an edge is never double-skirted; `emit`
-  simply draws the published down spans (`emitDownSkirts`) and the published occluder
-  spans as upward skirts (`emitOccluders`). Each span carries its orientation, **side**
-  (so the
-  skirt is nudged toward the surface interior to dodge z-fighting the wall face, and
-  opposite-side edges at one coordinate aren't merged), the dilated edge line, the
-  `[lo,hi]` interval, the base height `T`, and the occluder top. The marker sits at
-  the **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
+  subtracted, so an edge is never double-skirted; `emit` draws both lists through
+  `emitSkirts` (`length = min(Appearance height, maxExtent)`). Each span carries its
+  orientation, **side** (so the skirt is nudged toward the surface interior to dodge
+  z-fighting the wall face, and opposite-side edges at one coordinate aren't merged),
+  the dilated edge line, the `[lo,hi]` interval, the base height `T`, and `maxExtent`
+  (wall stop above for UP; land gap or unlimited for DOWN). The marker sits at the
+  **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
   `W = 0`, at the face). This per-edge wall-vs-drop classification is the
   **prerequisite for hole detection**: the drop-classified edges are the
   hole candidates.
-- **Upward (occluder) skirts.** Drawn from published `OccluderSpan`s at Appearance
-  `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to the available wall
-  above the surface, solid at the base and fading to transparent at the tip. Same
-  depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
+- **Upward (occluder) skirts.** Drawn from published up `SkirtSpan`s at Appearance
+  `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to `maxExtent` (wall
+  available above the surface), solid at the base and fading to transparent at the tip.
+  Same depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
   `SKIRT_OFFSET`.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a wand
   selection active it re-runs `select` once with a one-shot flag, writes a single
@@ -337,13 +338,13 @@ the published snapshots into `SurfaceEmitter.emit`.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
   depth-based grey blend (`Palette.colorForDepth`, keyed on `rect.depth()` vs
   `depthLimit`), the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny
-  `SKIRT_OFFSET`), drawing the **published** down-skirt spans (`emitDownSkirts`,
-  from `DownSkirtSpan`; frontier spans `depth >= limit` suppressed), **upward
-  occluder skirts** (`emitOccluders`, Appearance `upwardSkirtHeight`, side-based
-  interior nudge), and the **hole beams** (`emitHoles`, from `HoleSpan`, into the
-  depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`)
-  — emit draws only the published spans — the cyclic depth-gradient color
-  (`Palette` / `DEPTH_CYCLE` hue band), and the double-sided-winding requirement.
+  `SKIRT_OFFSET`), drawing the **published** skirt spans (`emitSkirts`, from
+  `SkirtSpan` UP/DOWN lists; length `min(Appearance height, maxExtent)`; frontier
+  spans `depth >= limit` suppressed), and the **hole beams** (`emitHoles`, from
+  `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
+  `showBeamsThroughWalls`) — emit draws only the published spans — the cyclic
+  depth-gradient color (`Palette` / `DEPTH_CYCLE` hue band), and the
+  double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
@@ -363,10 +364,10 @@ the published snapshots into `SurfaceEmitter.emit`.
   `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
   `exposeBox` (the `(T, T+H]` standing-column predicate, calling
   `RectMath.subtractRects`), the
-  **compute-side occluder-span classification** (`computeOccluders` /
-  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, published as
-  `OccluderSpan`), the **compute-side down-skirt pass** (`computeDownSkirts` /
-  `edgeDownSpans` / `RectMath.subtractIntervals`, published as `DownSkirtSpan`), the **hole
+  **compute-side skirt classification** (`computeOccluders` /
+  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, and
+  `computeDownSkirts` / `edgeDownSpans` / land-clamped `maxExtent`, published as
+  up and down `SkirtSpan` lists), the **hole
   classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
   strictly below the rim under the fall footprint, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,

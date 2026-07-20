@@ -109,7 +109,7 @@ it.
   │   │   ├── Overlay.java / OverlayManager.java / RadiusIndicatorOverlay.java
   │   │   └── WorldOverlay.java / WorldOverlayManager.java
   │   └── surface/                         # compute + selection widget + emit
-  │       ├── EntityProfile / StandableRect / OccluderSpan / DownSkirtSpan / HoleSpan
+  │       ├── EntityProfile / StandableRect / SkirtSpan / HoleSpan
   │       ├── RectMath.java / SurfaceSelection.java
   │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java
   ├── client/resources/assets/mobwalk/lang/en_us.json
@@ -173,7 +173,9 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    painted block updates or drops its surface. An edge against a **wall** draws an
    **upward** skirt (not a downward drop); a real drop/void keeps its downward
    skirt. Appearance `downSkirtHeight` / `upwardSkirtHeight` set those draw heights
-   (`0` hides). `/mobwalk dump` one-shots
+   (`0` hides), each clamped to the span's `maxExtent` (wall top above for up;
+   abutting lower reached surface for stepped downs; open drops use the full
+   configured length). `/mobwalk dump` one-shots
    the flood pipeline to `latest.log` and posts a short chat summary.
 4. **Headroom:** with Player/Ravager selected, a floor under a low ceiling (gap
   `< H`) is **not** painted (its lost headroom shows as an upward skirt marking the
