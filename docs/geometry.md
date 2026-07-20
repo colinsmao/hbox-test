@@ -10,11 +10,11 @@ space**, never a pixel raster (a raster rewrite was prototyped and rejected — 
 ## Representation: rect/double space
 
 A standable surface is a
-`StandableRect(double minX, minZ, maxX, maxZ, topY, visualTopY)` in absolute world
-coordinates (the owning `BlockPos` folded in). `topY` is the **collision** top that
+`StandableRect(double minX, minZ, maxX, maxZ, collisionTopY, visualTopY)` in absolute world
+coordinates (the owning `BlockPos` folded in). `collisionTopY` is the **collision** top that
 all math below is keyed on; `visualTopY` is a **draw-only** raise for blocks that
 render taller than they collide (see [Visible-face top vs collision
-top](#visible-face-top-vs-collision-top)) and equals `topY` for
+top](#visible-face-top-vs-collision-top)) and equals `collisionTopY` for
 everything else — nothing in the geometry layer reads it. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
 epsilon-tolerant (`EPS = 1e-6`). Quantizing is skipped on purpose: width dilation
@@ -27,7 +27,7 @@ over rectangles**, no rounding and no new primitive.
 **Merge class — the equality tuple.** Two coplanar rects union (rule 3 below) only
 when they agree on every component of their **merge class**: the per-rect attributes
 the renderer must draw distinctly and therefore may not blend across. Today the tuple
-is **`(topY, visualTopY)`** — `topY` because different collision levels are genuinely
+is **`(collisionTopY, visualTopY)`** — `collisionTopY` because different collision levels are genuinely
 different surfaces, `visualTopY` because a raised patch and a flush neighbour draw at
 different heights. The tuple is deliberately **extensible**: the next planned
 component is a **stand-on hazard class** (soul sand, magma), which lets benign terrain
@@ -64,14 +64,14 @@ defined by four rules:
    headroom from the floor **below** it (the removal zone extends downward by `H`, it
    is not "extend occluders upward"). A partial overhang yields a **partial** surface
    via the same guillotine subtract. Non-burying overlaps (an air gap larger than `H`
-   between two tops) stay **distinct levels** — never collapsed to `max topY` — so
+   between two tops) stay **distinct levels** — never collapsed to `max collisionTopY` — so
    stacked surfaces (overhangs, spiral staircases) are preserved.
 2. **Entity-width dilation** (see [below](#entity-width-dilation)): every footprint
    is grown by the profile half-width `W/2` before the spans-above test, so gaps and
    walls eat into the standable area by the entity's size.
 3. **Merge.** Coplanar (`|dTopY| < EPS`) rects that share a **merge class** are
    unioned into maximal rectangles (`RectMath.mergeCoplanar`: group by the merge class — the
-   extensible equality tuple, **currently `(topY, visualTopY)`**, see [Merge
+   extensible equality tuple, **currently `(collisionTopY, visualTopY)`**, see [Merge
    class](#representation-rectdouble-space) — re-cut each group to a non-overlapping
    `union`, then greedy strip-merge equal-span abutting rects along X then Z to a
    fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
@@ -234,7 +234,7 @@ ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at t
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
 **Ledge gather Y band — occluders from below.** `gatherLedges` re-runs `exposeBox`
-on world boxes whose tops lie in `(landY, topY)`. Candidate tops are only in that
+on world boxes whose tops lie in `(landY, collisionTopY)`. Candidate tops are only in that
 open interval, but the occluder index starts at `floor(landY) - 1` so collision
 that *lives in the block row below* `landY` and rises into the band (vanilla
 walls/fences at height 1.5) still participates in burial. Those occluders-from-below
@@ -250,13 +250,13 @@ further below.
 
 ## Visible-face top vs collision top
 
-Everything above derives from `getCollisionShape`, so `StandableRect.topY` is the
+Everything above derives from `getCollisionShape`, so `StandableRect.collisionTopY` is the
 collision `yMax`. A handful of blocks **render taller than they collide** — soul
 sand collides at `14/16` (`0.875`) but outlines as a full cube, mud at ~`0.9` — so a
 marker drawn at the collision top sits **buried inside the visible block**. The fix
 is a **draw-only** second height, `StandableRect.visualTopY`, carried alongside the
 collision top; the renderer can draw on the face you actually see while **all
-walkability math stays on the collision `topY`** (reach, occlusion, holes are
+walkability math stays on `collisionTopY`** (reach, occlusion, holes are
 unchanged — a mob really does stand at `0.875`, we just don't want the paint hidden).
 
 - **Source data (paid once per state, no heuristic).** `WorldBox` carries the source
@@ -280,11 +280,11 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   they never raise. Both tops are computed at the node-producing scan site
   (`LazyFlood.ensureRows`).
 - **The raise rule (`exposeBox`).**
-  `visualTopY = (|topY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > topY) ?
-  blockOutlineTop : topY`. Gating on *"this sub-box is the block's topmost collision
+  `visualTopY = (|collisionTopY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > collisionTopY) ?
+  blockOutlineTop : collisionTopY`. Gating on *"this sub-box is the block's topmost collision
   surface"* is what leaves **stair treads, bottom slabs, and fences** untouched (a
   stair's lower tread is not the block's top; a fence's outline is *shorter* than its
-  `1.5` collision top, so `blockOutlineTop > topY` is false). Only full-render-but-
+  `1.5` collision top, so `blockOutlineTop > collisionTopY` is false). Only full-render-but-
   short-collision tops lift.
 - **Through merge.** `visualTopY` is a component of the [merge
   class](#representation-rectdouble-space), so a raised patch and a flush coplanar
@@ -292,8 +292,8 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   keeps its own height. Up and down `SkirtSpan`s and `HoleSpan` each carry a
   `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
 - **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
-  the merged rects keyed on a chosen height: **collision `topY`** (`dropEdges`, the
-  hole-classifier substrate — an equal-`topY` abutting neighbour is a merge seam, not a
+  the merged rects keyed on a chosen height: **`collisionTopY`** (`dropEdges`, the
+  hole-classifier substrate — an equal-`collisionTopY` abutting neighbour is a merge seam, not a
   drop) or **`visualTopY`** (the rendered down-skirts). On the visual pass, an abutting
   neighbour with **equal or higher** `visualTopY` covers the edge: equal is a flush
   continuation, higher is a taller face the lower side must not hang a reverse
@@ -301,7 +301,7 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   intervals get `maxExtent = rimKey − neighbourKey` so the curtain stops at that
   surface (open drops stay unlimited). Adjacent leftover pieces with the same
   `maxExtent` coalesce into one span. A visible step between two rects at the same
-  collision `topY` but different `visualTopY` (a path lip on a soul-sand cube top)
+  `collisionTopY` but different `visualTopY` (a path lip on a soul-sand cube top)
   therefore gets a down skirt **only from the raised/high side**, clamped to the
   lower face; soul sand's own remnant abutting that lip at the same `visualTopY` gets
   none. `select` computes `dropEdges` once and, only when some rect is raised
@@ -313,13 +313,13 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
 - **Neighbour-overlap raise (a merge-class split).** A dilated rect owned by block A
   can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
   reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine
-  A surface at A's collision `topY`, but where it overlaps B's footprint the paint
+  A surface at A's `collisionTopY`, but where it overlaps B's footprint the paint
   would sit **inside B's taller mesh**. The raise lifts `visualTopY` to B's outline top
   **only on that intersection**, splitting the one rect into two pieces:
-  `(topY_A, B.outlineTop)` over B and `(topY_A, topY_A)` elsewhere. Because
+  `(collisionTopY_A, B.outlineTop)` over B and `(collisionTopY_A, collisionTopY_A)` elsewhere. Because
   `visualTopY` is a merge-class component, the two pieces are automatically different
   classes — the split is literally "reassign the overlap subregion to another equality
-  class." Collision `topY` (hence all walkability) is untouched, and B's own exposed
+  class." `collisionTopY` (hence all walkability) is untouched, and B's own exposed
   remnant keeps its own raise, so the covered face reads at one height.
 
 ### Known limitation — horizontal inset (not fixed)

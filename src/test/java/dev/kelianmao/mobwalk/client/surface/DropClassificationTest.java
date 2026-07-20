@@ -91,7 +91,7 @@ final class DropClassificationTest {
 
   @Test
   void ledgeAtEdgeLevelIsIgnored() {
-    // A "ledge" at topY is not intermediate.
+    // A "ledge" at collisionTopY is not intermediate.
     StandableRect floor = new StandableRect(1, 0, 2, 1, 59.0);
     StandableRect notLedge = new StandableRect(1, 0, 2, 1, T);
     DropClassification c = classify(List.of(floor), List.of(notLedge));

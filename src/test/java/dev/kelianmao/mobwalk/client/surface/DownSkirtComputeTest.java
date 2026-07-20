@@ -101,7 +101,7 @@ final class DownSkirtComputeTest {
   void visualStepBetweenSameCollisionTopRaisesSkirt() {
     // The neighbour-raise split: a path lip drawn on a soul-sand cube top
     // (visualTopY 65.0) abuts the flush path proper (visualTopY 64.9375); both share
-    // collision topY 64.9375. The collision pass sees a seam, the visual pass a step
+    // collisionTopY 64.9375. The collision pass sees a seam, the visual pass a step
     // that only the raised (higher visual) side skirts — the flush side faces a
     // taller neighbour and must not hang a reverse down-skirt into it.
     StandableRect flush = new StandableRect(0, 0, 1, 1, 64.9375, 64.9375);

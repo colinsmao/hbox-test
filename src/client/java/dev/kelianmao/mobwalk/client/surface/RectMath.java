@@ -63,7 +63,7 @@ public final class RectMath {
           continue;
         }
         StandableRect other = rects.get(j);
-        if (Math.abs(other.topY() - cur.topY()) <= reach + EPS && footprintAdjacent(cur, other)) {
+        if (Math.abs(other.collisionTopY() - cur.collisionTopY()) <= reach + EPS && footprintAdjacent(cur, other)) {
           visited[j] = true;
           depth[j] = depth[i] + 1;
           queue.addLast(j);
@@ -76,7 +76,7 @@ public final class RectMath {
   // Copy of a rect carrying a debug flood-depth tag (see StandableRect.depth).
   private static StandableRect withDepth(StandableRect r, int depth) {
     return new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-      r.topY(), r.visualTopY(), depth);
+      r.collisionTopY(), r.visualTopY(), depth);
   }
 
   // For each merged rect, the min flood-depth over the raw (pre-merge) reached
@@ -91,7 +91,7 @@ public final class RectMath {
       int best = -1;
       for (int k = 0; k < rawNodes.size(); k++) {
         StandableRect r = rawNodes.get(k);
-        if (Math.abs(r.topY() - m.topY()) > EPS) {
+        if (Math.abs(r.collisionTopY() - m.collisionTopY()) > EPS) {
           continue;
         }
         if (Math.min(r.maxX(), m.maxX()) - Math.max(r.minX(), m.minX()) <= EPS
@@ -112,7 +112,7 @@ public final class RectMath {
   // lands in exactly one merged rect.
   private static boolean coversAnySeed(StandableRect rect, List<StandableRect> seeds) {
     for (StandableRect seed : seeds) {
-      if (Math.abs(rect.topY() - seed.topY()) <= EPS
+      if (Math.abs(rect.collisionTopY() - seed.collisionTopY()) <= EPS
           && Math.min(rect.maxX(), seed.maxX()) - Math.max(rect.minX(), seed.minX()) > EPS
           && Math.min(rect.maxZ(), seed.maxZ()) - Math.max(rect.minZ(), seed.minZ()) > EPS) {
         return true;
@@ -143,7 +143,7 @@ public final class RectMath {
         && (Math.abs(a.maxZ() - b.minZ()) < EPS || Math.abs(b.maxZ() - a.minZ()) < EPS);
   }
 
-  // Merge coplanar rects into maximal rects. Group by collision topY AND
+  // Merge coplanar rects into maximal rects. Group by collisionTopY AND
   // visualTopY (within EPS), then within each group re-cut to a NON-OVERLAPPING
   // union (union, below) — dilated neighbor tops grow into each other, and
   // overlapping translucent quads double-blend into darker seams — then greedily
@@ -158,17 +158,17 @@ public final class RectMath {
     }
     List<StandableRect> sorted = new ArrayList<>(input);
     sorted.sort(Comparator
-      .comparingDouble(StandableRect::topY)
+      .comparingDouble(StandableRect::collisionTopY)
       .thenComparingDouble(StandableRect::visualTopY));
 
     List<StandableRect> out = new ArrayList<>();
     int i = 0;
     while (i < sorted.size()) {
-      double topY = sorted.get(i).topY();
+      double collisionTopY = sorted.get(i).collisionTopY();
       double visualTopY = sorted.get(i).visualTopY();
       int j = i + 1;
       while (j < sorted.size()
-          && sorted.get(j).topY() - topY <= EPS
+          && sorted.get(j).collisionTopY() - collisionTopY <= EPS
           && Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
         j++;
       }
@@ -186,7 +186,7 @@ public final class RectMath {
       } while (rects.size() < before);
 
       for (Rect r : rects) {
-        out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), topY, visualTopY));
+        out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), collisionTopY, visualTopY));
       }
       i = j;
     }
@@ -200,7 +200,7 @@ public final class RectMath {
   // where dilated surfaces grow into each other). Result: the frontier ring
   // keeps its real depth and is never collapsed into the inner blob, so the
   // renderer's depth-based perimeter suppression and grey-blend work correctly.
-  // Groups by collision topY and visualTopY (same as mergeCoplanar).
+  // Groups by collisionTopY and visualTopY (same as mergeCoplanar).
   // Package-private for unit tests.
   static List<StandableRect> mergeCoplanarSplitFrontier(
       List<StandableRect> nodes, int[] nodeDepths, int limit) {
@@ -214,7 +214,7 @@ public final class RectMath {
       idx[i] = i;
     }
     Arrays.sort(idx, Comparator
-      .comparingDouble((Integer a) -> nodes.get(a).topY())
+      .comparingDouble((Integer a) -> nodes.get(a).collisionTopY())
       .thenComparingDouble(a -> nodes.get(a).visualTopY()));
     for (int i = 0; i < idx.length; i++) {
       sorted.set(i, nodes.get(idx[i]));
@@ -224,11 +224,11 @@ public final class RectMath {
     List<StandableRect> out = new ArrayList<>();
     int i = 0;
     while (i < sorted.size()) {
-      double topY = sorted.get(i).topY();
+      double collisionTopY = sorted.get(i).collisionTopY();
       double visualTopY = sorted.get(i).visualTopY();
       int j = i + 1;
       while (j < sorted.size()
-          && sorted.get(j).topY() - topY <= EPS
+          && sorted.get(j).collisionTopY() - collisionTopY <= EPS
           && Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
         j++;
       }
@@ -272,11 +272,11 @@ public final class RectMath {
           }
         }
         out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-          topY, visualTopY, best));
+          collisionTopY, visualTopY, best));
       }
       for (Rect r : frontierMerged) {
         out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-          topY, visualTopY, limit));
+          collisionTopY, visualTopY, limit));
       }
       i = j;
     }

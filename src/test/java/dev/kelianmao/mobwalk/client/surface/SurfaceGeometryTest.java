@@ -107,7 +107,7 @@ final class SurfaceGeometryTest {
     List<StandableRect> reached = RectMath.flood(
       List.of(carpet, ground), List.of(carpet), 1.0);
     assertEquals(1, reached.size());
-    assertEquals(66.0625, reached.get(0).topY(), EPS);
+    assertEquals(66.0625, reached.get(0).collisionTopY(), EPS);
   }
 
   @Test

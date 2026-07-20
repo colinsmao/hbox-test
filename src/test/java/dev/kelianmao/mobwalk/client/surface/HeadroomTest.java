@@ -143,7 +143,7 @@ final class HeadroomTest {
     List<StandableRect> exposed = exposeDilated(body, halfW, height, cap);
     assertTrue(area(exposed) > EPS, "body ring must survive when wall is absent");
     for (StandableRect r : exposed) {
-      assertEquals(57.0 + 7.0 / 16.0, r.topY(), EPS);
+      assertEquals(57.0 + 7.0 / 16.0, r.collisionTopY(), EPS);
     }
   }
 

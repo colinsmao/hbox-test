@@ -16,8 +16,8 @@ import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
  * Milestone 6 Step 2a: the draw-only {@code visualTopY} raise in {@code exposeBox}.
  * A box that IS its block's topmost collision surface and whose block renders taller
  * than it collides (soul sand, mud) exposes the visible/outline top; everything else
- * keeps {@code visualTopY == topY}. The walkability math is unaffected (all keyed on
- * the collision {@code topY}); these assert only the carried visible top.
+ * keeps {@code visualTopY == collisionTopY}. The walkability math is unaffected (all keyed on
+ * {@code collisionTopY}); these assert only the carried visible top.
  */
 final class VisualTopTest {
   private static final double EPS = 1.0e-9;
@@ -42,7 +42,7 @@ final class VisualTopTest {
   void soulSandRaisesToVisibleTop() {
     // Collides at 0.875, renders as a full cube: draw on the visible face (1.0).
     StandableRect r = expose(0.0, 0.875, 0.875, 1.0);
-    assertEquals(0.875, r.topY(), EPS);
+    assertEquals(0.875, r.collisionTopY(), EPS);
     assertEquals(1.0, r.visualTopY(), EPS);
   }
 
@@ -75,13 +75,13 @@ final class VisualTopTest {
       new StandableRect(0, 0, 1, 1, 0.875, 1.0),
       new StandableRect(1, 0, 2, 1, 0.875, 1.0)));
     assertEquals(1, merged.size());
-    assertEquals(0.875, merged.get(0).topY(), EPS);
+    assertEquals(0.875, merged.get(0).collisionTopY(), EPS);
     assertEquals(1.0, merged.get(0).visualTopY(), EPS);
   }
 
   @Test
   void mergeDoesNotContaminateDifferentVisualTops() {
-    // Same collision topY (e.g. dirt path 15/16 + honey 15/16→1.0): each keeps
+    // Same collisionTopY (e.g. dirt path 15/16 + honey 15/16→1.0): each keeps
     // its own visualTopY — the raised neighbour must not lift the flush path.
     List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
       new StandableRect(0, 0, 1, 1, 0.9375, 0.9375),
@@ -91,9 +91,9 @@ final class VisualTopTest {
       .filter(r -> Math.abs(r.visualTopY() - 0.9375) < EPS).findFirst().orElseThrow();
     StandableRect honey = merged.stream()
       .filter(r -> Math.abs(r.visualTopY() - 1.0) < EPS).findFirst().orElseThrow();
-    assertEquals(0.9375, path.topY(), EPS);
+    assertEquals(0.9375, path.collisionTopY(), EPS);
     assertEquals(0.9375, path.visualTopY(), EPS);
-    assertEquals(0.9375, honey.topY(), EPS);
+    assertEquals(0.9375, honey.collisionTopY(), EPS);
     assertEquals(1.0, honey.visualTopY(), EPS);
   }
 
@@ -121,21 +121,21 @@ final class VisualTopTest {
   @Test
   void pathDilatedOverSoulSandRaisesOverlapOnly() {
     // Path 15/16 flush next to soul sand 14/16→1.0; Player halfW=0.3 dilates the
-    // path into the soul-sand column. Overlap keeps collision topY (path) but
+    // path into the soul-sand column. Overlap keeps collisionTopY (path) but
     // raises visualTopY to the soul-sand outline; path-only remnant stays flush.
     List<StandableRect> out = exposePathBeside(0.875, 0.875, 1.0, 0.3);
     StandableRect raised = out.stream()
       .filter(r -> Math.abs(r.visualTopY() - 1.0) < EPS).findFirst().orElseThrow();
     StandableRect flush = out.stream()
       .filter(r -> Math.abs(r.visualTopY() - 0.9375) < EPS).findFirst().orElseThrow();
-    assertEquals(0.9375, raised.topY(), EPS);
+    assertEquals(0.9375, raised.collisionTopY(), EPS);
     assertEquals(1.0, raised.visualTopY(), EPS);
     // Overlap is the path dilation into the soul-sand undilated column [1,2]x[0,1].
     assertEquals(1.0, raised.minX(), EPS);
     assertEquals(1.3, raised.maxX(), EPS);
     assertEquals(0.0, raised.minZ(), EPS);
     assertEquals(1.0, raised.maxZ(), EPS);
-    assertEquals(0.9375, flush.topY(), EPS);
+    assertEquals(0.9375, flush.collisionTopY(), EPS);
     assertEquals(0.9375, flush.visualTopY(), EPS);
   }
 
@@ -145,7 +145,7 @@ final class VisualTopTest {
     // even though outline (1.0) is above the path top.
     List<StandableRect> out = exposePathBeside(1.0, 1.0, 1.0, 0.3);
     assertEquals(1, out.size());
-    assertEquals(0.9375, out.get(0).topY(), EPS);
+    assertEquals(0.9375, out.get(0).collisionTopY(), EPS);
     assertEquals(0.9375, out.get(0).visualTopY(), EPS);
   }
 
@@ -155,7 +155,7 @@ final class VisualTopTest {
     // the soul-sand undilated core → single flush rect (existing Point behaviour).
     List<StandableRect> out = exposePathBeside(0.875, 0.875, 1.0, 0.0);
     assertEquals(1, out.size());
-    assertEquals(0.9375, out.get(0).topY(), EPS);
+    assertEquals(0.9375, out.get(0).collisionTopY(), EPS);
     assertEquals(0.9375, out.get(0).visualTopY(), EPS);
     assertEquals(0.0, out.get(0).minX(), EPS);
     assertEquals(1.0, out.get(0).maxX(), EPS);

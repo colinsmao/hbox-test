@@ -42,7 +42,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *     spans-above/buried test is the occlusion: it both cuts a lower top back by
  *     {@code W/2} near a taller box and supplies that taller box's own (dilated)
  *     top as the surface to stand on. Non-burying overlaps (an air gap between two
- *     tops) stay as <b>distinct levels</b> (not {@code max topY}), so multi-level
+ *     tops) stay as <b>distinct levels</b> (not {@code max collisionTopY}), so multi-level
  *     is preserved. {@code W = 0} (Point) makes dilation a no-op — neighbor
  *     footprints only abut (zero overlap), so it reproduces the per-block result.
  * <li><b>Merge</b> coplanar ({@code |dTopY| < EPS}) rects into maximal rectangles.
@@ -173,7 +173,7 @@ public final class SurfaceSelection {
    * read (for render-taller-than-collide blocks; see {@code visibleTop} /
    * {@code exposeBox}) is done. Off, every block's outline top collapses to its
    * collision top, so nothing raises and the neighbour split never fires
-   * ({@code visualTopY == topY} on every rect). It is a per-block cost paid only
+   * ({@code visualTopY == collisionTopY} on every rect). It is a per-block cost paid only
    * when the Appearance render toggle wants it, so flipping the toggle re-runs
    * {@code select} (see {@code CollisionSurfaceOverlay}).
    */
@@ -232,9 +232,9 @@ public final class SurfaceSelection {
     MobWalk.LOGGER.info("[flood-debug] {}={}", label, rects.size());
     for (StandableRect r : rects) {
       MobWalk.LOGGER.info(
-        "[flood-debug]   {} [{},{}]x[{},{}] topY={} visualTopY={} depth={}",
+        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} depth={}",
         label, r.minX(), r.maxX(), r.minZ(), r.maxZ(),
-        r.topY(), r.visualTopY(), r.depth());
+        r.collisionTopY(), r.visualTopY(), r.depth());
     }
   }
 
@@ -294,17 +294,17 @@ public final class SurfaceSelection {
    */
   static void exposeBox(WorldBox target, Map<ColKey, List<WorldBox>> index, double halfW,
       double height, List<StandableRect> out) {
-    double topY = target.yMax();
+    double collisionTopY = target.yMax();
     // Draw-only raise (Milestone 6): if this box IS the source block's topmost
     // collision surface and the block renders taller than it collides (soul sand,
     // mud), expose the visible/outline top so the marker is drawn on the face you
     // see rather than buried. Gating on "topmost collision surface" leaves stair
     // treads / bottom slabs / fence tops untouched; everything else keeps
-    // visualTopY == topY. Nothing but rendering reads visualTopY.
-    double visualTopY = (Math.abs(topY - target.blockCollisionTop()) <= EPS
-        && target.blockOutlineTop() > topY + EPS)
+    // visualTopY == collisionTopY. Nothing but rendering reads visualTopY.
+    double visualTopY = (Math.abs(collisionTopY - target.blockCollisionTop()) <= EPS
+        && target.blockOutlineTop() > collisionTopY + EPS)
       ? target.blockOutlineTop()
-      : topY;
+      : collisionTopY;
     RectMath.Rect base = new RectMath.Rect(
       target.minX() - halfW, target.minZ() - halfW,
       target.maxX() + halfW, target.maxZ() + halfW);
@@ -313,7 +313,7 @@ public final class SurfaceSelection {
     // Neighbours that render taller than they collide (soul sand, mud, …) and
     // taller than this top: a dilated footprint that sits over their undilated
     // column would paint buried under their full-cube mesh, so those cores raise
-    // visualTopY on the overlap only (collision topY stays). Collected in the
+    // visualTopY on the overlap only (collisionTopY stays). Collected in the
     // same column window as occluders — they are often not occluders (their
     // collision top is below T, e.g. path 15/16 over soul sand 14/16).
     List<RectMath.Rect> raiseCores = new ArrayList<>();
@@ -335,15 +335,15 @@ public final class SurfaceSelection {
           // (T, T+H) (a headroom ceiling). The buried term is the H == 0 base
           // case (Point) — without it a box sitting directly on the surface
           // would NOT occlude and every embedded/stacked top would leak.
-          boolean buried = other.yMin() <= topY + EPS;
-          boolean headroomCeiling = other.yMin() < topY + height - EPS;
-          if (other.yMax() > topY + EPS && (buried || headroomCeiling)) {
+          boolean buried = other.yMin() <= collisionTopY + EPS;
+          boolean headroomCeiling = other.yMin() < collisionTopY + height - EPS;
+          if (other.yMax() > collisionTopY + EPS && (buried || headroomCeiling)) {
             occluders.add(new RectMath.Rect(
               other.minX() - halfW, other.minZ() - halfW,
               other.maxX() + halfW, other.maxZ() + halfW));
           }
           if (other.blockOutlineTop() > other.blockCollisionTop() + EPS
-              && other.blockOutlineTop() > topY + EPS) {
+              && other.blockOutlineTop() > collisionTopY + EPS) {
             raiseCores.add(new RectMath.Rect(
               other.minX(), other.minZ(), other.maxX(), other.maxZ()));
             raiseOutlines.add(other.blockOutlineTop());
@@ -353,20 +353,20 @@ public final class SurfaceSelection {
     }
 
     for (RectMath.Rect exposed : RectMath.subtractRects(base, occluders)) {
-      emitWithNeighborVisualRaise(exposed, topY, visualTopY, raiseCores, raiseOutlines, out);
+      emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, raiseCores, raiseOutlines, out);
     }
   }
 
   // Split an exposed standable rect so the parts that sit over a raised-outline
   // neighbour's undilated footprint draw at that neighbour's outline top (paint on
-  // the cube), while the rest keep {@code visualTopY}. Collision {@code topY} is
+  // the cube), while the rest keep {@code visualTopY}. {@code collisionTopY} is
   // unchanged on every piece. When several neighbours cover a region, the highest
   // outline wins (claimed high→low so lower cores do not re-cover).
-  private static void emitWithNeighborVisualRaise(RectMath.Rect exposed, double topY, double visualTopY,
+  private static void emitWithNeighborVisualRaise(RectMath.Rect exposed, double collisionTopY, double visualTopY,
       List<RectMath.Rect> raiseCores, List<Double> raiseOutlines, List<StandableRect> out) {
     if (raiseCores.isEmpty()) {
       out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(),
-        topY, visualTopY));
+        collisionTopY, visualTopY));
       return;
     }
     List<Integer> hit = new ArrayList<>();
@@ -380,12 +380,12 @@ public final class SurfaceSelection {
     }
     if (hit.isEmpty()) {
       out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(),
-        topY, visualTopY));
+        collisionTopY, visualTopY));
       return;
     }
     for (RectMath.Rect remnant : RectMath.subtractRects(exposed, coresHere)) {
       out.add(new StandableRect(remnant.minX(), remnant.minZ(), remnant.maxX(), remnant.maxZ(),
-        topY, visualTopY));
+        collisionTopY, visualTopY));
     }
     hit.sort((a, b) -> Double.compare(raiseOutlines.get(b), raiseOutlines.get(a)));
     List<RectMath.Rect> claimed = new ArrayList<>();
@@ -397,7 +397,7 @@ public final class SurfaceSelection {
       double outline = raiseOutlines.get(i);
       for (RectMath.Rect piece : RectMath.subtractRects(inter, claimed)) {
         out.add(new StandableRect(piece.minX(), piece.minZ(), piece.maxX(), piece.maxZ(),
-          topY, outline));
+          collisionTopY, outline));
       }
       claimed.add(inter);
     }
@@ -467,8 +467,8 @@ public final class SurfaceSelection {
   // surface edge (occluderSpansForRect), and that abutment gate — not the predicate —
   // rejects the boundary/own-floor cases, while keeping Point's at-floor walls
   // (yMin == T) marked.
-  static boolean wallOccluder(WorldBox b, double topY, double height) {
-    return b.yMax() > topY + EPS && b.yMin() <= topY + height + EPS;
+  static boolean wallOccluder(WorldBox b, double collisionTopY, double height) {
+    return b.yMax() > collisionTopY + EPS && b.yMin() <= collisionTopY + height + EPS;
   }
 
   // Append the upward (occluder) skirt spans for one surface rect: for every
@@ -479,13 +479,13 @@ public final class SurfaceSelection {
   // not the real block face. Pure: no world access (candidates are pre-gathered).
   static void occluderSpansForRect(StandableRect r, List<WorldBox> candidates,
       double halfW, double height, List<SkirtSpan> out) {
-    double topY = r.topY();
+    double collisionTopY = r.collisionTopY();
     double visualTopY = r.visualTopY();
     // The occluder skirt inherits its surface's flood-depth so the two share a
     // color band in the debug depth-coloring (see StandableRect.depth).
     int depth = r.depth();
     for (WorldBox b : candidates) {
-      if (!wallOccluder(b, topY, height)) {
+      if (!wallOccluder(b, collisionTopY, height)) {
         continue;
       }
       double oMinX = b.minX() - halfW;
@@ -498,11 +498,11 @@ public final class SurfaceSelection {
       double zHi = Math.min(oMaxZ, r.maxZ());
       if (zHi - zLo > EPS) {
         if (Math.abs(oMinX - r.maxX()) < EPS) {
-          out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, topY, visualTopY,
+          out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, collisionTopY, visualTopY,
             SkirtSpan.Direction.UP, top - visualTopY, depth));
         }
         if (Math.abs(oMaxX - r.minX()) < EPS) {
-          out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, topY, visualTopY,
+          out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, collisionTopY, visualTopY,
             SkirtSpan.Direction.UP, top - visualTopY, depth));
         }
       }
@@ -510,11 +510,11 @@ public final class SurfaceSelection {
       double xHi = Math.min(oMaxX, r.maxX());
       if (xHi - xLo > EPS) {
         if (Math.abs(oMinZ - r.maxZ()) < EPS) {
-          out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, topY, visualTopY,
+          out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, collisionTopY, visualTopY,
             SkirtSpan.Direction.UP, top - visualTopY, depth));
         }
         if (Math.abs(oMaxZ - r.minZ()) < EPS) {
-          out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, topY, visualTopY,
+          out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, collisionTopY, visualTopY,
             SkirtSpan.Direction.UP, top - visualTopY, depth));
         }
       }
@@ -541,7 +541,7 @@ public final class SurfaceSelection {
       SkirtSpan head = group.get(0);
       double lo = head.lo();
       double hi = head.hi();
-      // Absolute wall stop (former topY); coalesce takes the max.
+      // Absolute wall stop (former collisionTopY); coalesce takes the max.
       double stop = head.visualBaseY() + head.maxExtent();
       // baseY is fixed per group (grouped on it); the visible base can differ
       // when a raised block abuts a flush one, so take the max like stop.
@@ -590,50 +590,50 @@ public final class SurfaceSelection {
    * reached floor, returns HOLE or BENIGN.
    *
    * <ol>
-   * <li>Find the topmost reached surface strictly below {@code topY} that
+   * <li>Find the topmost reached surface strictly below {@code collisionTopY} that
    *     overlaps the footprint. If none &rarr; HOLE (void / unreached ground).
    * <li>If a reached floor exists at {@code landY}: check whether any surface in
    *     {@code ledges} (dilated standable surfaces with top in {@code (landY,
-   *     topY)}) overlaps the footprint. If yes &rarr; HOLE (entity lands on the
-   *     ledge and is trapped). If no &rarr; BENIGN (fall distance = topY &minus;
+   *     collisionTopY)}) overlaps the footprint. If yes &rarr; HOLE (entity lands on the
+   *     ledge and is trapped). If no &rarr; BENIGN (fall distance = collisionTopY &minus;
    *     landY).
    * </ol>
    */
-  static DropClassification classifyDrop(RectMath.Rect fallFootprint, double topY,
+  static DropClassification classifyDrop(RectMath.Rect fallFootprint, double collisionTopY,
       List<StandableRect> reached, List<StandableRect> ledges) {
     StandableRect landing = null;
     for (StandableRect r : reached) {
-      if (r.topY() >= topY - EPS) {
+      if (r.collisionTopY() >= collisionTopY - EPS) {
         continue;
       }
       if (Math.min(r.maxX(), fallFootprint.maxX()) - Math.max(r.minX(), fallFootprint.minX()) <= EPS
           || Math.min(r.maxZ(), fallFootprint.maxZ()) - Math.max(r.minZ(), fallFootprint.minZ()) <= EPS) {
         continue;
       }
-      if (landing == null || r.topY() > landing.topY()) {
+      if (landing == null || r.collisionTopY() > landing.collisionTopY()) {
         landing = r;
       }
     }
     if (landing == null) {
       return new DropClassification(DropClass.HOLE, 0.0);
     }
-    double landY = landing.topY();
+    double landY = landing.collisionTopY();
     for (StandableRect ledge : ledges) {
-      if (ledge.topY() <= landY + EPS || ledge.topY() >= topY - EPS) {
+      if (ledge.collisionTopY() <= landY + EPS || ledge.collisionTopY() >= collisionTopY - EPS) {
         continue;
       }
       if (Math.min(ledge.maxX(), fallFootprint.maxX()) - Math.max(ledge.minX(), fallFootprint.minX()) <= EPS
           || Math.min(ledge.maxZ(), fallFootprint.maxZ()) - Math.max(ledge.minZ(), fallFootprint.minZ()) <= EPS) {
         continue;
       }
-      return new DropClassification(DropClass.HOLE, topY - ledge.topY());
+      return new DropClassification(DropClass.HOLE, collisionTopY - ledge.collisionTopY());
     }
-    return new DropClassification(DropClass.BENIGN, topY - landY);
+    return new DropClassification(DropClass.BENIGN, collisionTopY - landY);
   }
 
   // The rendered down-skirts: the visualTopY-keyed pass when any rect draws above its
   // collision top, else the already-computed collision drop edges (identical then, so
-  // one pass suffices). The render toggle off keeps every visualTopY == topY, so the
+  // one pass suffices). The render toggle off keeps every visualTopY == collisionTopY, so the
   // gate makes the common case take the shared pass for free — one soul sand in view
   // is what forks it (see docs/geometry.md; a localized diff is the escalation if it
   // ever profiles hot).
@@ -650,7 +650,7 @@ public final class SurfaceSelection {
   // pass. False in the common case (no render-taller-than-collide block, or toggle off).
   private static boolean hasRaisedRect(List<StandableRect> rects) {
     for (StandableRect r : rects) {
-      if (Math.abs(r.visualTopY() - r.topY()) > EPS) {
+      if (Math.abs(r.visualTopY() - r.collisionTopY()) > EPS) {
         return true;
       }
     }
@@ -665,10 +665,10 @@ public final class SurfaceSelection {
   // render-side scan (openSpans/upIntervalsOnEdge, O(n^2) every frame) with one
   // compute-side pass; the result must be pixel-identical. Package-private for unit
   // tests (synthetic rects, no world).
-  // visual=false keys the seam/occluder-coverage tests on the collision topY — the
+  // visual=false keys the seam/occluder-coverage tests on collisionTopY — the
   // genuine collision drop edges, which are the hole-classifier substrate. visual=true
   // keys them on visualTopY (the render height), so a visible step between two rects at
-  // the same collision topY but different visualTopY (a path lip drawn on a soul-sand
+  // the same collisionTopY but different visualTopY (a path lip drawn on a soul-sand
   // cube top) gets its skirt, while abutting rects at the same visualTopY do not. Two
   // passes over one merged set: skirts are a rendering pass, holes a geometry pass (see
   // docs/geometry.md "Visible-face top vs collision top").
@@ -703,9 +703,9 @@ public final class SurfaceSelection {
     double hi = alongX ? r.maxX() : r.maxZ();
     double line = alongX ? (maxSide ? r.maxZ() : r.minZ()) : (maxSide ? r.maxX() : r.minX());
     // The height two rects/occluders must share to count as a continuation (seam)
-    // rather than a step: collision topY for the drop pass, visualTopY for the skirt
+    // rather than a step: collisionTopY for the drop pass, visualTopY for the skirt
     // pass. Only this key differs between the passes; the geometry is identical.
-    double rKey = visual ? r.visualTopY() : r.topY();
+    double rKey = visual ? r.visualTopY() : r.collisionTopY();
 
     List<double[]> covered = new ArrayList<>();
     // Abutting lower neighbours: [overlapLo, overlapHi, neighbourKey]. Used to clamp
@@ -730,12 +730,12 @@ public final class SurfaceSelection {
       if (!abuts || chi - clo <= EPS) {
         continue;
       }
-      // Collision pass: equal topY is a merge seam. Visual pass: equal visualTopY
+      // Collision pass: equal collisionTopY is a merge seam. Visual pass: equal visualTopY
       // is a flush continuation, and a *higher* visual neighbour is a taller face
       // the lower side must not hang a down-skirt into (the high side still skirts;
       // the low side already has / will get an up-skirt when collision rises).
       // A *lower* neighbour is a land stop for the high side's leftover drop.
-      double nbKey = visual ? nb.visualTopY() : nb.topY();
+      double nbKey = visual ? nb.visualTopY() : nb.collisionTopY();
       if (visual) {
         if (nbKey < rKey - EPS) {
           lands.add(new double[] {clo, chi, nbKey});
@@ -828,7 +828,7 @@ public final class SurfaceSelection {
         continue;
       }
       if (!Double.isNaN(runLo)) {
-        out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.topY(), r.visualTopY(),
+        out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
           SkirtSpan.Direction.DOWN, runExtent, r.depth()));
       }
       runLo = a;
@@ -836,7 +836,7 @@ public final class SurfaceSelection {
       runExtent = maxExtent;
     }
     if (!Double.isNaN(runLo)) {
-      out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.topY(), r.visualTopY(),
+      out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
         SkirtSpan.Direction.DOWN, runExtent, r.depth()));
     }
   }
@@ -854,7 +854,7 @@ public final class SurfaceSelection {
 
   // Classify each drop span and return the hole sub-spans (through-walls beam
   // candidates). For each drop span: (1) check if a reached surface exists below
-  // under the fall footprint, (2) if yes, scan the world between topY and landY for
+  // under the fall footprint, (2) if yes, scan the world between collisionTopY and landY for
   // intermediate standable surfaces (ledges) via exposeBox — if any overlap the
   // footprint, the entity gets trapped on the ledge -> HOLE. Because one edge can
   // span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
@@ -888,7 +888,7 @@ public final class SurfaceSelection {
   // Package-private for unit tests (synthetic reached rects / ledges, no world).
   static void holeSubSpans(SkirtSpan sp, RectMath.Rect band,
       List<StandableRect> reached, List<StandableRect> ledges, List<HoleSpan> out) {
-    double topY = sp.baseY();
+    double collisionTopY = sp.baseY();
     double[] cuts = spanBreakpoints(sp, band, reached);
     double holeLo = Double.NaN;
     double holeHi = 0.0;
@@ -900,7 +900,7 @@ public final class SurfaceSelection {
         continue;
       }
       RectMath.Rect subFp = subBand(sp, band, a, b);
-      DropClassification c = classifyDrop(subFp, topY, reached, ledges);
+      DropClassification c = classifyDrop(subFp, collisionTopY, reached, ledges);
       if (c.kind() != DropClass.HOLE) {
         continue;
       }
@@ -912,14 +912,14 @@ public final class SurfaceSelection {
         holeHi = b;
         holeFall = Math.max(holeFall, c.fallDistance());
       } else {
-        out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall, sp.visualBaseY()));
+        out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, collisionTopY, holeFall, sp.visualBaseY()));
         holeLo = a;
         holeHi = b;
         holeFall = c.fallDistance();
       }
     }
     if (!Double.isNaN(holeLo)) {
-      out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, topY, holeFall, sp.visualBaseY()));
+      out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, collisionTopY, holeFall, sp.visualBaseY()));
     }
   }
 
@@ -989,36 +989,36 @@ public final class SurfaceSelection {
   }
 
 
-  // Scan the world for standable surfaces (via exposeBox) between landY and topY that
+  // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY that
   // overlap the fall footprint — intermediate ledges that would trap the entity. For
-  // each block column overlapping fp, scan rows in (landY, topY), gather collision
+  // each block column overlapping fp, scan rows in (landY, collisionTopY), gather collision
   // boxes, build a local occluder index, and call exposeBox on each candidate whose
-  // top is strictly between landY and topY. Appends exposed StandableRects to out.
+  // top is strictly between landY and collisionTopY. Appends exposed StandableRects to out.
   // Only called when a reached floor exists below (landY is known).
   private static void gatherLedges(Level level, BlockPos.MutableBlockPos cursor,
-      RectMath.Rect fp, double topY, List<StandableRect> reached, double halfW, double height,
+      RectMath.Rect fp, double collisionTopY, List<StandableRect> reached, double halfW, double height,
       List<StandableRect> out) {
-    // Find landY: the topmost reached surface below topY overlapping the footprint.
+    // Find landY: the topmost reached surface below collisionTopY overlapping the footprint.
     double landY = Double.NEGATIVE_INFINITY;
     for (StandableRect r : reached) {
-      if (r.topY() >= topY - EPS) {
+      if (r.collisionTopY() >= collisionTopY - EPS) {
         continue;
       }
       if (Math.min(r.maxX(), fp.maxX()) - Math.max(r.minX(), fp.minX()) <= EPS
           || Math.min(r.maxZ(), fp.maxZ()) - Math.max(r.minZ(), fp.minZ()) <= EPS) {
         continue;
       }
-      if (r.topY() > landY) {
-        landY = r.topY();
+      if (r.collisionTopY() > landY) {
+        landY = r.collisionTopY();
       }
     }
     if (landY == Double.NEGATIVE_INFINITY) {
       return;
     }
     // Scan block columns overlapping the footprint. Candidates are boxes whose
-    // top lies in (landY, topY). The occluder index must also include collision
+    // top lies in (landY, collisionTopY). The occluder index must also include collision
     // from the block row below landY — shapes that live in a lower block but
-    // rise into (landY, topY) (walls/fences at height 1.5). Those
+    // rise into (landY, collisionTopY) (walls/fences at height 1.5). Those
     // occluders-from-below keep exposeBox burial complete for rising shapes.
     // Motivating case: lantern on a wall — the wall box is in floor(landY)-1
     // and must bury the lantern body.
@@ -1032,7 +1032,7 @@ public final class SurfaceSelection {
     int zLo = (int) Math.floor(fp.minZ());
     int zHi = (int) Math.ceil(fp.maxZ()) - 1;
     int yLo = (int) Math.floor(landY) - 1;
-    int yHi = (int) Math.ceil(topY);
+    int yHi = (int) Math.ceil(collisionTopY);
     Map<ColKey, List<WorldBox>> index = new HashMap<>();
     List<WorldBox> candidates = new ArrayList<>();
     for (int x = xLo - (int) Math.ceil(halfW); x <= xHi + (int) Math.ceil(halfW) + 1; x++) {
@@ -1050,7 +1050,7 @@ public final class SurfaceSelection {
               y + box.minY, y + box.maxY);
             index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>()).add(wb);
             double top = wb.yMax();
-            if (top > landY + EPS && top < topY - EPS) {
+            if (top > landY + EPS && top < collisionTopY - EPS) {
               candidates.add(wb);
             }
           }
@@ -1063,7 +1063,7 @@ public final class SurfaceSelection {
       exposed.clear();
       exposeBox(cand, index, halfW, height, exposed);
       for (StandableRect s : exposed) {
-        if (s.topY() <= landY + EPS || s.topY() >= topY - EPS) {
+        if (s.collisionTopY() <= landY + EPS || s.collisionTopY() >= collisionTopY - EPS) {
           continue;
         }
         if (Math.min(s.maxX(), fp.maxX()) - Math.max(s.minX(), fp.minX()) > EPS
@@ -1092,13 +1092,13 @@ public final class SurfaceSelection {
     List<WorldBox> candidates = new ArrayList<>();
     BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
     for (StandableRect r : rects) {
-      double topY = r.topY();
+      double collisionTopY = r.collisionTopY();
       int xLo = (int) Math.floor(r.minX() - halfW) - 1;
       int xHi = (int) Math.ceil(r.maxX() + halfW);
       int zLo = (int) Math.floor(r.minZ() - halfW) - 1;
       int zHi = (int) Math.ceil(r.maxZ() + halfW);
-      int yLo = Math.max((int) Math.floor(topY) - 1, level.getMinY());
-      int yHi = Math.min((int) Math.floor(topY + height) + 1, level.getMaxY());
+      int yLo = Math.max((int) Math.floor(collisionTopY) - 1, level.getMinY());
+      int yHi = Math.min((int) Math.floor(collisionTopY + height) + 1, level.getMaxY());
       candidates.clear();
       for (int x = xLo; x <= xHi; x++) {
         for (int z = zLo; z <= zHi; z++) {
@@ -1245,7 +1245,7 @@ public final class SurfaceSelection {
         if (d >= radius) {
           continue;
         }
-        double h = s.rect().topY();
+        double h = s.rect().collisionTopY();
         for (int cx = s.cx() - neighbour; cx <= s.cx() + neighbour; cx++) {
           for (int cz = s.cz() - neighbour; cz <= s.cz() + neighbour; cz++) {
             // Only tops within a single step of h can connect, so scan

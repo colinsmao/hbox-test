@@ -272,7 +272,7 @@ final class TerrainEdgeContractTest {
     for (StandableRect r : merged) {
       surfaces.add(new SurfaceSpec(
         new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ()),
-        r.topY(), r.visualTopY()));
+        r.collisionTopY(), r.visualTopY()));
     }
     return new Observed(surfaces, internal);
   }
@@ -299,7 +299,7 @@ final class TerrainEdgeContractTest {
       }
       SurfaceSpec candidate = new SurfaceSpec(
         new Rect(nb.minX(), nb.minZ(), nb.maxX(), nb.maxZ()),
-        nb.topY(), nb.visualTopY());
+        nb.collisionTopY(), nb.visualTopY());
       if (best == null || candidate.visualTop() > best.visualTop() + EPS) {
         best = candidate;
       }

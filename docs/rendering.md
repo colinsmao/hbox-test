@@ -274,7 +274,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   and **written into each rect's `visualTopY` / span `visualBaseY`**. `emit` then
   *always* draws the top fill, borders, and the up/down/hole skirts at that render
   height — which equals the collision top when the setting is off (the raise isn't
-  computed then). The height-gradient **color stays keyed on the collision `topY`**, so
+  computed then). The height-gradient **color stays keyed on `collisionTopY`**, so
   the palette doesn't shift when toggling. Because the flag gates the compute, a
   value-change callback (`Configs.initCallbacks`) **re-floods** from the last seed via
   `reselectWithMobProfile` (cheap: toggling is rare). This is the one Appearance option

@@ -22,7 +22,7 @@ package dev.kelianmao.mobwalk.client.surface;
  * @param lo           start of the hole sub-span on its varying axis.
  * @param hi           end of the hole sub-span on its varying axis.
  * @param baseY        the cliff-edge top {@code T} the beam rises from.
- * @param fallDistance {@code T - landing.topY} for a trap landing, or {@code 0} for the
+ * @param fallDistance {@code T - landing.collisionTopY} for a trap landing, or {@code 0} for the
  *                     void (no landing at all).
  * @param visualBaseY  the source rect's visible-face top (draw-only): where the beam
  *                     rises from when the renderer draws on the visible face; equals
