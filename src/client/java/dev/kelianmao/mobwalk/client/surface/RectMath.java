@@ -22,6 +22,28 @@ public final class RectMath {
   record Rect(double minX, double minZ, double maxX, double maxZ) {
   }
 
+  // One ordered surface class plus its raw rectangles. Layers are processed
+  // highest-first by {@link #priorityPartition}. Package-private for tests.
+  record PriorityLayer<C>(C priorityClass, List<Rect> rects) {
+  }
+
+  // One non-overlapping output rectangle owned by a winning priority class.
+  // Package-private for tests.
+  record ClassifiedRect<C>(Rect rect, C priorityClass) {
+  }
+
+  // Radius certainty tier for merge ownership. INNER orders before FRONTIER in
+  // the composite priority product (see docs/geometry.md "Merge contract").
+  private enum RadiusTier {
+    INNER,
+    FRONTIER
+  }
+
+  // Composite ownership class: radius tier outer, surface class (today
+  // visualTopY) inner. Equality for strip-merge grouping uses EPS on visual.
+  private record OwnershipClass(RadiusTier tier, double visualTopY) {
+  }
+
   // Grouping key for the merge: two doubles quantized to 1/1024 of a block
   // (finer than any collision-box edge, incl. dilated 0.3 / 0.975 later) so
   // equal spans hash together despite float noise.
@@ -63,20 +85,14 @@ public final class RectMath {
     return mergeCoplanarSplitFrontier(input, new int[input.size()], input.size() + 1);
   }
 
-  // Production merge used by the lazy flood path. Splits raw nodes into inner
-  // (depth < limit) and frontier (depth >= limit), unions each independently,
-  // then subtracts the inner area from the frontier so the two tile cleanly
-  // with no overlap (inner has priority in the overlap zone where dilated
-  // surfaces grow into each other). Result: the frontier ring keeps its real
-  // depth and is never collapsed into the inner blob, so the renderer's
-  // depth-based perimeter suppression and grey-blend work correctly.
-  // Groups by collisionTopY and visualTopY (within EPS); overlapping
-  // translucent quads would double-blend into darker seams without the union
-  // re-cut. Grouping on visualTopY keeps raised paint (honey/cactus at
-  // 15/16→1.0) from contaminating flush coplanar neighbours (dirt path at
-  // 15/16→15/16). Greedy strip-merge is not a minimal partition, but any miss
-  // only costs an extra interior skirt, never reachability.
-  // Package-private for unit tests.
+  // Production merge used by the lazy flood path. Groups by collisionTopY (the
+  // partition key — see docs/geometry.md "Merge contract"). Within each collision
+  // band: form composite ownership layers (INNER surface classes highest-first,
+  // then FRONTIER surface classes highest-first — today surface class is
+  // visualTopY), run one priority partition, strip-merge equal ownership classes,
+  // then tag INNER depth by min covering node and FRONTIER depth by limit.
+  // Greedy strip-merge is not a minimal partition, but a miss only costs an
+  // extra interior skirt, never reachability. Package-private for unit tests.
   static List<StandableRect> mergeCoplanarSplitFrontier(
       List<StandableRect> nodes, int[] nodeDepths, int limit) {
     if (nodes.isEmpty()) {
@@ -89,8 +105,7 @@ public final class RectMath {
       idx[i] = i;
     }
     Arrays.sort(idx, Comparator
-      .comparingDouble((Integer a) -> nodes.get(a).collisionTopY())
-      .thenComparingDouble(a -> nodes.get(a).visualTopY()));
+      .comparingDouble((Integer a) -> nodes.get(a).collisionTopY()));
     for (int i = 0; i < idx.length; i++) {
       sorted.set(i, nodes.get(idx[i]));
       sortedDepths[i] = nodeDepths[idx[i]];
@@ -100,66 +115,164 @@ public final class RectMath {
     int i = 0;
     while (i < sorted.size()) {
       double collisionTopY = sorted.get(i).collisionTopY();
-      double visualTopY = sorted.get(i).visualTopY();
       int j = i + 1;
       while (j < sorted.size()
-          && sorted.get(j).collisionTopY() - collisionTopY <= EPS
-          && Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
+          && sorted.get(j).collisionTopY() - collisionTopY <= EPS) {
         j++;
       }
 
-      List<Rect> innerRaw = new ArrayList<>();
-      List<Rect> frontierRaw = new ArrayList<>();
+      List<StandableRect> innerNodes = new ArrayList<>();
+      List<StandableRect> frontierNodes = new ArrayList<>();
+      List<Integer> innerDepths = new ArrayList<>();
       for (int k = i; k < j; k++) {
-        StandableRect r = sorted.get(k);
-        Rect rect = new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ());
         if (sortedDepths[k] >= limit) {
-          frontierRaw.add(rect);
+          frontierNodes.add(sorted.get(k));
         } else {
-          innerRaw.add(rect);
+          innerNodes.add(sorted.get(k));
+          innerDepths.add(sortedDepths[k]);
         }
       }
 
-      // Union + strip-merge inner nodes.
-      List<Rect> innerMerged = stripMerge(union(innerRaw));
+      List<PriorityLayer<OwnershipClass>> layers = new ArrayList<>();
+      layers.addAll(ownershipLayers(RadiusTier.INNER, innerNodes));
+      layers.addAll(ownershipLayers(RadiusTier.FRONTIER, frontierNodes));
+      List<ClassifiedRect<OwnershipClass>> coalesced =
+        stripMergeEqualOwnership(priorityPartition(layers));
 
-      // Subtract the merged inner area from each frontier node, then union
-      // + strip-merge the remnants. The subtraction removes the dilation
-      // overlap so inner and frontier tile cleanly (inner has priority).
-      List<Rect> frontierRemnants = new ArrayList<>();
-      for (Rect fr : frontierRaw) {
-        frontierRemnants.addAll(subtractRects(fr, innerMerged));
-      }
-      List<Rect> frontierMerged = stripMerge(union(frontierRemnants));
-
-      // Tag depths: inner rects get min covering depth, frontier rects
-      // get limit (they only overlap frontier raw nodes after subtraction).
-      for (Rect r : innerMerged) {
-        int best = -1;
-        for (int k = i; k < j; k++) {
-          StandableRect node = sorted.get(k);
-          if (Math.min(node.maxX(), r.maxX()) - Math.max(node.minX(), r.minX()) <= EPS
-              || Math.min(node.maxZ(), r.maxZ()) - Math.max(node.minZ(), r.minZ()) <= EPS) {
+      for (ClassifiedRect<OwnershipClass> cell : coalesced) {
+        OwnershipClass ownership = cell.priorityClass();
+        int depth;
+        if (ownership.tier() == RadiusTier.INNER) {
+          depth = minCoveringDepth(cell.rect(), innerNodes, innerDepths);
+          if (depth < 0) {
             continue;
           }
-          if (best < 0 || sortedDepths[k] < best) {
-            best = sortedDepths[k];
-          }
+        } else {
+          depth = limit;
         }
-        out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-          collisionTopY, visualTopY, best));
-      }
-      for (Rect r : frontierMerged) {
-        out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(),
-          collisionTopY, visualTopY, limit));
+        out.add(new StandableRect(
+          cell.rect().minX(), cell.rect().minZ(),
+          cell.rect().maxX(), cell.rect().maxZ(),
+          collisionTopY, ownership.visualTopY(), depth));
       }
       i = j;
     }
     return out;
   }
 
+  // Class-agnostic priority partition: layers arrive highest-first. Each class
+  // unions and strip-merges its own geometry, then receives only the area not
+  // already claimed by a higher class. Package-private for unit tests.
+  static <C> List<ClassifiedRect<C>> priorityPartition(List<PriorityLayer<C>> layers) {
+    List<Rect> claimed = new ArrayList<>();
+    List<ClassifiedRect<C>> out = new ArrayList<>();
+    for (PriorityLayer<C> layer : layers) {
+      if (layer.rects().isEmpty()) {
+        continue;
+      }
+      List<Rect> merged = stripMerge(union(layer.rects()));
+      List<Rect> exclusive = new ArrayList<>();
+      for (Rect r : merged) {
+        exclusive.addAll(subtractRects(r, claimed));
+      }
+      for (Rect r : exclusive) {
+        out.add(new ClassifiedRect<>(r, layer.priorityClass()));
+      }
+      if (!exclusive.isEmpty()) {
+        claimed = union(concat(claimed, exclusive));
+      }
+    }
+    return out;
+  }
+
+  // Build ownership layers for one radius tier, highest visualTopY first.
+  private static List<PriorityLayer<OwnershipClass>> ownershipLayers(
+      RadiusTier tier, List<StandableRect> nodes) {
+    if (nodes.isEmpty()) {
+      return List.of();
+    }
+    List<StandableRect> sorted = new ArrayList<>(nodes);
+    sorted.sort(Comparator.comparingDouble(StandableRect::visualTopY).reversed());
+    List<PriorityLayer<OwnershipClass>> layers = new ArrayList<>();
+    int i = 0;
+    while (i < sorted.size()) {
+      double visualTopY = sorted.get(i).visualTopY();
+      int j = i + 1;
+      while (j < sorted.size()
+          && Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
+        j++;
+      }
+      List<Rect> rects = new ArrayList<>(j - i);
+      for (int k = i; k < j; k++) {
+        StandableRect n = sorted.get(k);
+        rects.add(new Rect(n.minX(), n.minZ(), n.maxX(), n.maxZ()));
+      }
+      layers.add(new PriorityLayer<>(new OwnershipClass(tier, visualTopY), rects));
+      i = j;
+    }
+    return layers;
+  }
+
+  private static int minCoveringDepth(
+      Rect cell, List<StandableRect> nodes, List<Integer> depths) {
+    int best = -1;
+    for (int k = 0; k < nodes.size(); k++) {
+      StandableRect n = nodes.get(k);
+      if (Math.min(n.maxX(), cell.maxX()) - Math.max(n.minX(), cell.minX()) <= EPS
+          || Math.min(n.maxZ(), cell.maxZ()) - Math.max(n.minZ(), cell.minZ()) <= EPS) {
+        continue;
+      }
+      int d = depths.get(k);
+      if (best < 0 || d < best) {
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  // Coalesce abutting cells that share an ownership class (same radius tier and
+  // visualTopY within EPS). Re-merges shatterings left by priority subtract.
+  private static List<ClassifiedRect<OwnershipClass>> stripMergeEqualOwnership(
+      List<ClassifiedRect<OwnershipClass>> cells) {
+    if (cells.isEmpty()) {
+      return List.of();
+    }
+    List<ClassifiedRect<OwnershipClass>> sorted = new ArrayList<>(cells);
+    sorted.sort(Comparator
+      .comparing((ClassifiedRect<OwnershipClass> c) -> c.priorityClass().tier())
+      .thenComparingDouble(c -> c.priorityClass().visualTopY()));
+    List<ClassifiedRect<OwnershipClass>> out = new ArrayList<>();
+    int i = 0;
+    while (i < sorted.size()) {
+      OwnershipClass ownership = sorted.get(i).priorityClass();
+      int j = i + 1;
+      while (j < sorted.size()
+          && sorted.get(j).priorityClass().tier() == ownership.tier()
+          && Math.abs(sorted.get(j).priorityClass().visualTopY()
+            - ownership.visualTopY()) <= EPS) {
+        j++;
+      }
+      List<Rect> rects = new ArrayList<>(j - i);
+      for (int k = i; k < j; k++) {
+        rects.add(sorted.get(k).rect());
+      }
+      for (Rect r : stripMerge(rects)) {
+        out.add(new ClassifiedRect<>(r, ownership));
+      }
+      i = j;
+    }
+    return out;
+  }
+
+  private static List<Rect> concat(List<Rect> a, List<Rect> b) {
+    List<Rect> both = new ArrayList<>(a.size() + b.size());
+    both.addAll(a);
+    both.addAll(b);
+    return both;
+  }
+
   // The X-then-Z greedy strip merge loop used by mergeCoplanarSplitFrontier
-  // (runs once per inner/frontier bucket).
+  // (runs once per ownership / priority class).
   private static List<Rect> stripMerge(List<Rect> rects) {
     int before;
     do {

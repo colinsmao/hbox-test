@@ -1239,10 +1239,9 @@ public final class SurfaceSelection {
         }
       }
       preMergeReached = List.copyOf(reached);
-      // Frontier-split merge: union inner and frontier separately, subtract
-      // inner from frontier (inner has priority in the dilation overlap),
-      // so the frontier ring keeps its real depth and is never collapsed
-      // into the inner blob.
+      // Composite-priority merge: INNER surface classes then FRONTIER surface
+      // classes in one priority partition (inner owns dilation overlap), so
+      // the frontier ring stays a separate depth band.
       int[] rawDepths = new int[reachedDepths.size()];
       for (int i = 0; i < rawDepths.length; i++) {
         rawDepths[i] = reachedDepths.get(i);

@@ -287,16 +287,17 @@ the published snapshots into `SurfaceEmitter.emit`.
   ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
   `depth` relative to `depthLimit` (= `Configs.floodRadius()`):
   `depth <= limit−2` → no grey; `depth == limit−1` → half grey; `depth >= limit` → full
-  grey. This is possible because the **frontier-split merge**
+  grey. This is possible because the **composite-priority merge**
   (`mergeCoplanarSplitFrontier`) keeps the frontier ring (depth == limit) as separate
-  rects from the inner blob: raw nodes are partitioned into inner (depth < limit) and
-  frontier (depth >= limit), each is unioned/strip-merged independently, and the inner
-  area is subtracted from the frontier nodes so the two tile cleanly (inner has priority
-  in the dilation overlap zone). Without the split, a plain coplanar merge would collapse
-  the whole same-height area into one rect at `min` depth (0), defeating the depth-based
-  grey and perimeter suppression. Down-skirt spans and hole beams at the frontier
-  (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
-  real geometry.
+  rects from the inner blob: ownership is the lexicographic product
+  `(radiusTier, surfaceClass)` with `INNER` before `FRONTIER`, so one priority
+  partition claims overlap for inner geometry first and leaves frontier-only remnants
+  at the depth limit (exact depth is aggregate metadata — see
+  [`geometry.md`](geometry.md)). Without the radius tier in the ownership class, a
+  plain coplanar merge would collapse the whole same-height area into one rect at
+  `min` depth (0), defeating the depth-based grey and perimeter suppression.
+  Down-skirt spans and hole beams at the frontier (`sp.depth() >= limit`) are
+  suppressed compute-side — they are cutoff artifacts, not real geometry.
 - **Hole beams.** A drop edge the classifier labels a **hole** (a mob
   leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **vertical
   beam** from the cliff-edge top `T`. Appearance `showBeamsThroughWalls` (default on)
@@ -353,8 +354,9 @@ the published snapshots into `SurfaceEmitter.emit`.
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
 - `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,
   `union` re-cut + strip-merge, depth-aware
-  **`mergeCoplanarSplitFrontier`** (union inner and frontier separately, subtract
-  inner from frontier so they tile cleanly), `footprintAdjacent`,
+  **`mergeCoplanarSplitFrontier`** (one composite `(radiusTier, surfaceClass)`
+  priority partition per collision band; INNER owns frontier overlap),
+  `footprintAdjacent`,
   `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
   uses `mergeCoplanarSplitFrontier`).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface

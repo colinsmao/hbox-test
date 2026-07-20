@@ -50,11 +50,10 @@ default shape of every task.
    every logical change alters what gets calculated and therefore what is drawn.
    Treat logical steps as visual steps by default; when in doubt, it needs an in-game
    checklist.
-5. **Do not expand scope during execution.** Implement only the approved plan step.
-   If execution surfaces extra work (coalesce/union cleanup, related fixes, drive-by
-   refactors, "while we're here"), stop and surface that delta as a plan update for
-   discussion/approval before coding it. Execution follows the plan; scope changes
-   go through the plan first.
+5. **Do not expand scope during execution (does not affect planning stage).**
+   Implement only the approved plan step. If execution surfaces extra work
+   (cleanup, related fixes, possible optimizations), stop and surface that delta as
+   a plan update for discussion/approval, do not just code it.
 
 **The procedure, every step:**
 
@@ -132,6 +131,10 @@ PowerShell gotchas that bite repeatedly (use the wrapper, not bash habits):
 Prefer the specialized file tools over shell for reading/searching/editing — that
 sidesteps most quoting issues; reserve the shell for real commands (`git`, `gh`,
 `./gradlew`).
+
+## Subagents
+
+- **Never use fast subagents (e.g. `composer-2.5-fast`).**
 
 ## Key constraints (all work)
 
