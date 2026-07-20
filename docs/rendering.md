@@ -293,8 +293,8 @@ the published snapshots into `SurfaceEmitter.emit`.
   rects from the inner blob: raw nodes are partitioned into inner (depth < limit) and
   frontier (depth >= limit), each is unioned/strip-merged independently, and the inner
   area is subtracted from the frontier nodes so the two tile cleanly (inner has priority
-  in the dilation overlap zone). Without the split, `mergeCoplanar` would collapse the
-  whole same-height area into one rect at `min` depth (0), defeating the depth-based
+  in the dilation overlap zone). Without the split, a plain coplanar merge would collapse
+  the whole same-height area into one rect at `min` depth (0), defeating the depth-based
   grey and perimeter suppression. Down-skirt spans and hole beams at the frontier
   (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
   real geometry.
@@ -353,7 +353,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   `/mobwalk dump` client command (`ClientCommandRegistrationCallback` →
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
 - `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,
-  `union` re-cut + `mergeCoplanar` strip-merge, depth-aware
+  `union` re-cut + strip-merge, depth-aware
   **`mergeCoplanarSplitFrontier`** (union inner and frontier separately, subtract
   inner from frontier so they tile cleanly), `footprintAdjacent`, static `flood`,
   `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood

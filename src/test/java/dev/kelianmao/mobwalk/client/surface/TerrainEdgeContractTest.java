@@ -225,7 +225,7 @@ final class TerrainEdgeContractTest {
     for (WorldBox box : boxes) {
       SurfaceSelection.exposeBox(box, index, halfW, height, raw);
     }
-    List<StandableRect> merged = RectMath.mergeCoplanar(raw);
+    List<StandableRect> merged = RectMath.mergeAll(raw);
 
     List<SkirtSpan> occluders = new ArrayList<>();
     for (StandableRect r : merged) {

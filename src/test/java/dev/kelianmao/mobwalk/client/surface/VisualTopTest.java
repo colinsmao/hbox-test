@@ -71,7 +71,7 @@ final class VisualTopTest {
   @Test
   void mergeKeepsMatchingVisualTopsTogether() {
     // Two abutting soul-sand-like patches (same collision + visible) merge.
-    List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
+    List<StandableRect> merged = RectMath.mergeAll(List.of(
       new StandableRect(0, 0, 1, 1, 0.875, 1.0),
       new StandableRect(1, 0, 2, 1, 0.875, 1.0)));
     assertEquals(1, merged.size());
@@ -83,7 +83,7 @@ final class VisualTopTest {
   void mergeDoesNotContaminateDifferentVisualTops() {
     // Same collisionTopY (e.g. dirt path 15/16 + honey 15/16→1.0): each keeps
     // its own visualTopY — the raised neighbour must not lift the flush path.
-    List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
+    List<StandableRect> merged = RectMath.mergeAll(List.of(
       new StandableRect(0, 0, 1, 1, 0.9375, 0.9375),
       new StandableRect(1, 0, 2, 1, 0.9375, 1.0)));
     assertEquals(2, merged.size());

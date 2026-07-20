@@ -12,7 +12,7 @@ import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
 
 /**
  * Sanity tests over the pure rect ops in {@link RectMath}
- * ({@code subtractRects} / {@code union} / {@code mergeCoplanar} /
+ * ({@code subtractRects} / {@code union} / {@code mergeAll} /
  * {@code footprintAdjacent}). They build synthetic rects only — no world, no game
  * loop — and pin current behavior so later stages can refactor with a net.
  */
@@ -59,8 +59,8 @@ final class SurfaceGeometryTest {
   }
 
   @Test
-  void mergeCoplanarCollapsesAbuttingStrip() {
-    List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
+  void mergeAllCollapsesAbuttingStrip() {
+    List<StandableRect> merged = RectMath.mergeAll(List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(1, 0, 2, 1, 64.0)));
     assertEquals(1, merged.size());
@@ -70,8 +70,8 @@ final class SurfaceGeometryTest {
   }
 
   @Test
-  void mergeCoplanarKeepsDistinctHeights() {
-    List<StandableRect> merged = RectMath.mergeCoplanar(List.of(
+  void mergeAllKeepsDistinctHeights() {
+    List<StandableRect> merged = RectMath.mergeAll(List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(1, 0, 2, 1, 65.0)));
     assertEquals(2, merged.size());
@@ -190,8 +190,8 @@ final class SurfaceGeometryTest {
   @Test
   void splitFrontierKeepsFrontierSeparateFromInner() {
     // Three abutting same-height nodes at depths {0, 1, 2} with limit=2.
-    // Without frontier split, mergeCoplanar would collapse them into one rect
-    // with depth 0. With frontier split, the depth-2 node stays separate.
+    // Without the frontier split, a plain coplanar merge would collapse them
+    // into one rect with depth 0. With frontier split, the depth-2 node stays separate.
     List<StandableRect> nodes = List.of(
       new StandableRect(0, 0, 1, 1, 64.0),
       new StandableRect(1, 0, 2, 1, 64.0),

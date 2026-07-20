@@ -32,12 +32,15 @@ different surfaces, `visualTopY` because a raised patch and a flush neighbour dr
 different heights. The tuple is deliberately **extensible**: the next planned
 component is a **stand-on hazard class** (soul sand, magma), which lets benign terrain
 still merge into one rect while fencing a hazard region onto its own rects. Adding a
-component is a one-field change to the record plus one comparator in `RectMath.mergeCoplanar` /
+component is a one-field change to the record plus one comparator in
 `RectMath.mergeCoplanarSplitFrontier`; while a component is uniform (e.g. hazards off ⇒ every
 rect `NONE`) the grouping collapses to the smaller-tuple behaviour at zero cost.
-`depth` is outside the tuple — it is aggregated by min over the covered nodes, not
-matched on. This is the durable idea behind every "group by …" description below:
-those descriptions name the *current* components of one growing equality tuple.
+A future generalization of the frontier split — priority-ordered coplanar layers that
+union each layer then subtract higher-priority area from lower — could host the
+hazard class as such a priority layer. `depth` is outside the tuple — it is aggregated
+by min over the covered nodes, not matched on. This is the durable idea behind every
+"group by …" description below: those descriptions name the *current* components of
+one growing equality tuple.
 
 ## What the selection is (the computed result)
 
@@ -70,13 +73,15 @@ defined by four rules:
    is grown by the profile half-width `W/2` before the spans-above test, so gaps and
    walls eat into the standable area by the entity's size.
 3. **Merge.** Coplanar (`|dTopY| < EPS`) rects that share a **merge class** are
-   unioned into maximal rectangles (`RectMath.mergeCoplanar`: group by the merge class — the
-   extensible equality tuple, **currently `(collisionTopY, visualTopY)`**, see [Merge
-   class](#representation-rectdouble-space) — re-cut each group to a non-overlapping
-   `union`, then greedy strip-merge equal-span abutting rects along X then Z to a
-   fixpoint). A flat floor collapses from a grid of unit cells to one rect → clean
-   skirts, fewer quads. Greedy is not a minimal partition, but a missed merge only
-   costs an extra interior skirt, **never reachability**.
+   unioned into maximal rectangles (`RectMath.mergeCoplanarSplitFrontier`: group by the
+   merge class — the extensible equality tuple, **currently `(collisionTopY, visualTopY)`**,
+   see [Merge class](#representation-rectdouble-space) — partition into inner and
+   frontier by flood depth, re-cut each group to a non-overlapping `union`, then
+   greedy strip-merge equal-span abutting rects along X then Z to a fixpoint, with
+   inner area subtracted from frontier so they tile cleanly). A flat floor collapses
+   from a grid of unit cells to one rect → clean skirts, fewer quads. Greedy is not a
+   minimal partition, but a missed merge only costs an extra interior skirt,
+   **never reachability**.
 4. **Flood / reachability.** Starting from the clicked seed block's surface(s), a
    surface is reached iff it connects to an already-reached surface by **one
    geometric adjacency rule**: the footprints share an edge with positive overlap

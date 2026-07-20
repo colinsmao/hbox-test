@@ -143,64 +143,27 @@ public final class RectMath {
         && (Math.abs(a.maxZ() - b.minZ()) < EPS || Math.abs(b.maxZ() - a.minZ()) < EPS);
   }
 
-  // Merge coplanar rects into maximal rects. Group by collisionTopY AND
-  // visualTopY (within EPS), then within each group re-cut to a NON-OVERLAPPING
-  // union (union, below) — dilated neighbor tops grow into each other, and
-  // overlapping translucent quads double-blend into darker seams — then greedily
-  // merge abutting equal-span strips along X then Z (repeated until stable),
-  // collapsing the grid back to whole rectangles. Grouping on visualTopY keeps
-  // raised paint (honey/cactus at 15/16→1.0) from contaminating flush coplanar
-  // neighbours (dirt path at 15/16→15/16). Greedy is not a minimal partition, but
-  // any miss only costs an extra interior skirt, never reachability.
-  static List<StandableRect> mergeCoplanar(List<StandableRect> input) {
-    if (input.size() < 2) {
-      return input;
-    }
-    List<StandableRect> sorted = new ArrayList<>(input);
-    sorted.sort(Comparator
-      .comparingDouble(StandableRect::collisionTopY)
-      .thenComparingDouble(StandableRect::visualTopY));
-
-    List<StandableRect> out = new ArrayList<>();
-    int i = 0;
-    while (i < sorted.size()) {
-      double collisionTopY = sorted.get(i).collisionTopY();
-      double visualTopY = sorted.get(i).visualTopY();
-      int j = i + 1;
-      while (j < sorted.size()
-          && sorted.get(j).collisionTopY() - collisionTopY <= EPS
-          && Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
-        j++;
-      }
-
-      List<Rect> rects = new ArrayList<>();
-      for (StandableRect r : sorted.subList(i, j)) {
-        rects.add(new Rect(r.minX(), r.minZ(), r.maxX(), r.maxZ()));
-      }
-      rects = union(rects);
-      int before;
-      do {
-        before = rects.size();
-        rects = mergeAlong(rects, true);
-        rects = mergeAlong(rects, false);
-      } while (rects.size() < before);
-
-      for (Rect r : rects) {
-        out.add(new StandableRect(r.minX(), r.minZ(), r.maxX(), r.maxZ(), collisionTopY, visualTopY));
-      }
-      i = j;
-    }
-    return out;
+  // Test helper: coplanar merge with every node treated as inner (all-zero
+  // depths, limit above 0). Same union + strip-merge as the production path's
+  // inner bucket; package-private for unit tests that need merge without a
+  // frontier split.
+  static List<StandableRect> mergeAll(List<StandableRect> input) {
+    return mergeCoplanarSplitFrontier(input, new int[input.size()], input.size() + 1);
   }
 
-  // Depth-aware variant of mergeCoplanar used by the lazy flood path. Splits
-  // raw nodes into inner (depth < limit) and frontier (depth >= limit), unions
-  // each independently, then subtracts the inner area from the frontier so the
-  // two tile cleanly with no overlap (inner has priority in the overlap zone
-  // where dilated surfaces grow into each other). Result: the frontier ring
-  // keeps its real depth and is never collapsed into the inner blob, so the
-  // renderer's depth-based perimeter suppression and grey-blend work correctly.
-  // Groups by collisionTopY and visualTopY (same as mergeCoplanar).
+  // Production merge used by the lazy flood path. Splits raw nodes into inner
+  // (depth < limit) and frontier (depth >= limit), unions each independently,
+  // then subtracts the inner area from the frontier so the two tile cleanly
+  // with no overlap (inner has priority in the overlap zone where dilated
+  // surfaces grow into each other). Result: the frontier ring keeps its real
+  // depth and is never collapsed into the inner blob, so the renderer's
+  // depth-based perimeter suppression and grey-blend work correctly.
+  // Groups by collisionTopY and visualTopY (within EPS); overlapping
+  // translucent quads would double-blend into darker seams without the union
+  // re-cut. Grouping on visualTopY keeps raised paint (honey/cactus at
+  // 15/16→1.0) from contaminating flush coplanar neighbours (dirt path at
+  // 15/16→15/16). Greedy strip-merge is not a minimal partition, but any miss
+  // only costs an extra interior skirt, never reachability.
   // Package-private for unit tests.
   static List<StandableRect> mergeCoplanarSplitFrontier(
       List<StandableRect> nodes, int[] nodeDepths, int limit) {
@@ -283,8 +246,8 @@ public final class RectMath {
     return out;
   }
 
-  // The X-then-Z greedy strip merge loop used by both mergeCoplanar and
-  // mergeCoplanarSplitFrontier (the split path runs it per bucket).
+  // The X-then-Z greedy strip merge loop used by mergeCoplanarSplitFrontier
+  // (runs once per inner/frontier bucket).
   private static List<Rect> stripMerge(List<Rect> rects) {
     int before;
     do {
