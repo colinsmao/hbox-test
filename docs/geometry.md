@@ -294,12 +294,14 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
 - **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
   the merged rects keyed on a chosen height: **collision `topY`** (`dropEdges`, the
   hole-classifier substrate — an equal-`topY` abutting neighbour is a merge seam, not a
-  drop) or **`visualTopY`** (the rendered down-skirts — an equal-`visualTopY` neighbour
-  is a flush continuation). They differ only where a raise happened, so a visible step
-  between two rects at the same collision `topY` but different `visualTopY` (a path lip
-  on a soul-sand cube top) gets its skirt, while soul sand's own remnant abutting that
-  lip at the same `visualTopY` gets none. `select` computes `dropEdges` once and, only
-  when some rect is raised (`hasRaisedRect`; never when the toggle gates the raise off),
+  drop) or **`visualTopY`** (the rendered down-skirts). On the visual pass, an abutting
+  neighbour with **equal or higher** `visualTopY` covers the edge: equal is a flush
+  continuation, higher is a taller face the lower side must not hang a reverse
+  down-skirt into. A visible step between two rects at the same collision `topY` but
+  different `visualTopY` (a path lip on a soul-sand cube top) therefore gets a down
+  skirt **only from the raised/high side**; soul sand's own remnant abutting that lip
+  at the same `visualTopY` gets none. `select` computes `dropEdges` once and, only when
+  some rect is raised (`hasRaisedRect`; never when the toggle gates the raise off),
   runs the second `visualTopY` pass — otherwise the single pass feeds both holes and
   skirts. Both heights on a span are **load-bearing**: collision `baseY` for the
   hole/geometry pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs

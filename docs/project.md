@@ -186,7 +186,7 @@ in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
    row of beams. Tops are colored violet (low) → orange (high), never red. Skirts and
    beams at the very outermost radius edge are not drawn.
 6. **Surface height (Appearance `drawOnVisibleFace`, default on):** on a **soul
-   sand / mud** block (renders full-height but collides at 15/16), the standable top
+   sand / mud** block (renders full-height but collides at 14/16), the standable top
    draws on the **visible top face** by default; turning the Appearance option off
    drops it to the true collision height (buried inside the block) and re-floods;
    turning it on restores the visible face. A dilated path lip reaching over a soul-sand

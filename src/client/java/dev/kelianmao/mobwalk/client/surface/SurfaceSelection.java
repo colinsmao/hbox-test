@@ -701,7 +701,19 @@ public final class SurfaceSelection {
 
     List<double[]> covered = new ArrayList<>();
     for (StandableRect nb : rects) {
-      if (nb == r || Math.abs((visual ? nb.visualTopY() : nb.topY()) - rKey) > EPS) {
+      if (nb == r) {
+        continue;
+      }
+      // Collision pass: equal topY is a merge seam. Visual pass: equal visualTopY
+      // is a flush continuation, and a *higher* visual neighbour is a taller face
+      // the lower side must not hang a down-skirt into (the high side still skirts;
+      // the low side already has / will get an up-skirt when collision rises).
+      double nbKey = visual ? nb.visualTopY() : nb.topY();
+      if (visual) {
+        if (nbKey < rKey - EPS) {
+          continue;
+        }
+      } else if (Math.abs(nbKey - rKey) > EPS) {
         continue;
       }
       boolean abuts;
