@@ -29,13 +29,16 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  *
  * <p>The wand is a <b>trigger</b>: right-clicking floods the selection from
  * the block under the crosshair (resolved downward to the first non-empty
- * collision shape) outward across walkable, footprint-adjacent surfaces (height
- * steps within the profile's reach) up to a BFS depth limit (adjustable via
- * shift+scroll), into a persistent {@link SurfaceSelection}, replacing any
- * previous selection; right-clicking nothing clears it. The surfaces are
- * occlusion-aware (computed in {@link SurfaceSelection#select}): only tops not
- * covered by something directly above are selected, so e.g. a stair yields its
- * exposed L. By default tops (and their skirts/beams) draw on each block's
+ * collision shape) — that block's raw dilated collision footprints are the
+ * non-emitted click origin — outward across walkable, footprint-adjacent
+ * surfaces (height steps within the profile's reach) up to a BFS depth limit
+ * (adjustable via shift+scroll), into a persistent {@link SurfaceSelection},
+ * replacing any previous selection; right-clicking nothing clears it. The
+ * surfaces are occlusion-aware (computed in {@link SurfaceSelection#select}):
+ * only tops not covered by something directly above are painted, so e.g. a
+ * stair yields its exposed L and a fully occluded short top (Ravager on soul
+ * sand) still originates a flood of neighbouring standable floor. By default
+ * tops (and their skirts/beams) draw on each block's
  * <b>visible face</b> ({@code visualTopY}); Appearance {@code drawOnVisibleFace}
  * switches to the collision height, which re-floods since the visible top is
  * gathered compute-side (gated on the flag; see {@code SurfaceSelection.visibleTop}).
@@ -182,8 +185,9 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   @Override
   public void onUseItem(Player player) {
     // Right-click with the wand floods the selection from the targeted block
-    // (resolved downward to its standable surface) across connected neighbors,
-    // replacing the previous selection; right-clicking nothing clears it.
+    // (resolved downward; that block's raw dilated footprints are the click
+    // origin) across connected neighbors, replacing the previous selection;
+    // right-clicking nothing clears it.
     //
     // The wand may be in either hand. Pick the acting hand main-first, falling
     // back to the off hand ONLY when the main hand is empty (or also a wand):

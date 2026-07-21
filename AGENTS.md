@@ -68,8 +68,7 @@ default shape of every task.
 Every step's checklist also ends with the build gate (below) and inherits these
 **cross-cutting checks** (necessary, not sufficient): `runClient` launches with no
 log errors; no errors on world load/unload or window resize; the mod does nothing
-on a dedicated server. The current full feature checklist lives in
-[`docs/project.md`](docs/project.md).
+on a dedicated server.
 
 **Enforcement hooks (`.cursor/hooks.json`).** Project [Cursor hooks](https://cursor.com/docs/hooks)
 back these rules mechanically, so they aren't honor-system only — do not treat them

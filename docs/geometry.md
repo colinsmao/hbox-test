@@ -110,19 +110,26 @@ defined by four rules:
    from a grid of unit cells to one rect → clean skirts, fewer quads. Greedy is not a
    minimal partition, but a missed merge only costs an extra interior skirt,
    **never reachability**.
-4. **Flood / reachability.** Starting from the clicked seed block's surface(s), a
-   surface is reached iff it connects to an already-reached surface by **one
-   geometric adjacency rule**: the footprints share an edge with positive overlap
-   (or overlap with positive area), `footprintAdjacent`, **and** `|dTopY| <= reach`
-   (the profile's single step threshold). This subsumes the old same-block /
-   own-column / neighbour-column special cases: a glass pane on a block connects to
-   that block's exposed ring because their footprints abut at the hole edges — no
-   special case.
+4. **Flood / reachability.** The click defines a **non-emitted origin**: the raw
+   pre-occlusion dilated footprints of the clicked block's collision boxes. An
+   exposed top is in the initial wave when it is footprint-adjacent to that origin
+   within `reach` — depth **0** when its source is the clicked block, depth **1**
+   otherwise. From there a surface is reached iff it connects to an already-reached
+   surface by **one geometric adjacency rule**: the footprints share an edge with
+   positive overlap (or overlap with positive area), `footprintAdjacent`, **and**
+   `|dTopY| <= reach` (the profile's single step threshold). This subsumes the old
+   same-block / own-column / neighbour-column special cases: a glass pane on a block
+   connects to that block's exposed ring because their footprints abut at the hole
+   edges — no special case. Only exposed tops are painted; a fully occluded click
+   cell (e.g. Ravager on soul sand beside full blocks) stays unpainted while its
+   origin still enters the surrounding standable graph at depth 1.
 
-**Radius is a BFS depth limit** (max hop-count from the seed), not a spatial X/Z
+**Radius is a BFS depth limit** (max hop-count from the click origin), not a spatial X/Z
 window: horizontal reach is unbounded; termination comes from the hop-count cap plus
 a Y band of about `oy ± radius`. Connectivity gating is unchanged (a drop `> reach`
-or a disconnected patch is never reached).
+or a disconnected patch is never reached). A fully occluded click spends one hop
+entering the exposed graph, so its frontier sits one layer closer than a click on
+an exposed surface at the same radius.
 
 A **Point** profile (`W = 0`) reproduces the original zero-width point-walker
 exactly (dilation is a no-op, tops only abut).
@@ -182,13 +189,15 @@ milestones).
   `exposeBox` runs (not just the box's own buried shell); `H = 0` collapses it back
   to `floor(yMax)±1`. `exposeBox` is memoized per box (and `H` is fixed per
   `select`, so the memo key is unchanged). A `BitSet` per column records
-  scanned rows so each `(column,row)` is queried at most once. The flood **seeds
-  from the clicked block's tops** (source block Y = seed Y); other tops in that
-  column join only through normal BFS hops (`|dTopY| <= reach` + footprint
-  adjacency). The flood front moves `<= reach` per hop, so by induction everything
-  reachable is found near an already-reached height. This drops the per-column
-  vertical factor from `O(radius)` to `O(heights the flood actually traverses
-  there)`, so open ground goes `~radius³ → ~radius²`.
+  scanned rows so each `(column,row)` is queried at most once. The flood boots from
+  **non-emitted origin probes** — each clicked-block box's raw dilated footprint at
+  its `collisionTopY` — then assigns initial depths via `assignOriginWave` (depth 0
+  on the seed block's exposed tops, depth 1 on other tops adjacent to a probe within
+  `reach`). Later hops use the same `|dTopY| <= reach` + footprint adjacency on
+  exposed tops only. The flood front moves `<= reach` per hop, so by induction
+  everything reachable is found near an already-reached height. This drops the
+  per-column vertical factor from `O(radius)` to `O(heights the flood actually
+  traverses there)`, so open ground goes `~radius³ → ~radius²`.
 - **`occluderColumns` (the occluder shell).** For `exposeBox` to trim a box's
   dilated top correctly it needs every box that can span above that top. A box in
   column `(cx,*)` spans `[cx, cx+1]`, dilated to `[cx-W/2, cx+1+W/2]`, which overlaps

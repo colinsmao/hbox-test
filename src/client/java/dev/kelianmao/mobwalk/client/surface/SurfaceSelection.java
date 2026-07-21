@@ -51,14 +51,16 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *     overlapping translucent quads double-blend into darker seams — then a greedy
  *     strip merge along X then Z collapses the grid back, so a flat floor becomes
  *     one rect instead of many cells (clean skirts, fewer quads).
- * <li><b>Flood</b> the merged-rect graph from the seed rect(s) by <b>geometric
+ * <li><b>Flood</b> from the click origin (raw dilated footprints of the clicked
+ *     block, non-emitted) into the exposed-top graph by <b>geometric
  *     adjacency</b>: two rects are connected iff their footprints share an edge
  *     with positive overlap ({@link RectMath#footprintAdjacent}) and their heights are
- *     within the active {@link EntityProfile}'s {@code reach}. This one
- *     test subsumes the old same-block / own-column / 4-neighbor-column cases: a
- *     glass pane on a block connects to that block's exposed ring because their
- *     footprints abut at the hole edges, no special case needed. A dilated perch
- *     over the void floods directly because adjacency is geometric (no column).
+ *     within the active {@link EntityProfile}'s {@code reach}. Seed-block exposed
+ *     tops start at depth 0; other tops adjacent to the origin start at depth 1.
+ *     This one test subsumes the old same-block / own-column / 4-neighbor-column
+ *     cases: a glass pane on a block connects to that block's exposed ring because
+ *     their footprints abut at the hole edges, no special case needed. A dilated
+ *     perch over the void floods directly because adjacency is geometric (no column).
  * </ol>
  *
  * <p>For a gap of width {@code g} flanked by support, each side grows {@code W/2},
@@ -66,7 +68,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * hole — "can't fall into a hole smaller than yourself". (This stage shows only
  * the <em>geometry</em>; explicit hole detection is a later milestone.)
  *
- * <p><b>Radius is a BFS depth limit</b> (max hop-count from the seed), not a
+ * <p><b>Radius is a BFS depth limit</b> (max hop-count from the click origin), not a
  * spatial X/Z window: horizontal reach is unbounded; termination comes from the
  * hop-count cap plus a Y band of about {@code oy ± radius}. Connectivity gating is
  * unchanged (a drop {@code > reach} or a disconnected patch is never reached).
@@ -100,6 +102,29 @@ public final class SurfaceSelection {
   // node. The cell bounds the column-local neighbour search; equality is by value
   // (StandableRect is a record) so the visited set dedupes naturally.
   private record CellSurface(StandableRect rect, int cx, int cz) {
+  }
+
+  /**
+   * Non-emitted click origin: the raw pre-occlusion dilated footprint of one
+   * clicked-block collision box at its {@code collisionTopY}. Probes enter the
+   * first BFS wave via adjacency only; they are never painted.
+   */
+  record OriginProbe(double minX, double minZ, double maxX, double maxZ,
+      double collisionTopY) {
+  }
+
+  /**
+   * An exposed top considered for the origin wave, carrying whether its source
+   * box is the clicked seed block (depth 0) or a neighbour (depth 1).
+   */
+  record OriginCandidate(StandableRect rect, int cx, int cz, boolean fromSeedBlock) {
+  }
+
+  /**
+   * One node of the flood's initial wave: an exposed top with its shortest-path
+   * depth from the click origin (0 = seed-block top, 1 = first hop).
+   */
+  record SeedWaveEntry(StandableRect rect, int cx, int cz, int depth) {
   }
 
   // Column index key (block X/Z) for the per-column box lookup used to bound the
@@ -159,8 +184,11 @@ public final class SurfaceSelection {
 
   /**
    * Replace the selection with the merged standable surfaces reachable from the
-   * surfaces of {@code start}, within BFS hop-count {@code radius} of the seed,
-   * for the entity's width/reach, across footprint-adjacent height-gated steps.
+   * click origin at {@code start}, within BFS hop-count {@code radius} of that
+   * origin, for the entity's width/reach, across footprint-adjacent height-gated
+   * steps. The origin is the clicked block's raw dilated collision footprints
+   * (non-emitted); only exposed tops enter the painted set (depth 0 on the seed
+   * block's own exposed tops, depth 1 on other tops adjacent to the origin).
    *
    * <p>Runs the output-sensitive {@link LazyFlood} (on-demand column/row
    * exposure), then computes occluders, down-skirts, and holes.
@@ -274,6 +302,66 @@ public final class SurfaceSelection {
   /** Immutable snapshot of the hole spans (through-walls beam markers) for the reached set. */
   public List<HoleSpan> allHoles() {
     return holes;
+  }
+
+  /**
+   * Initial BFS wave from non-emitted {@link OriginProbe}s: keep candidates that
+   * are footprint-adjacent to a probe within {@code reach} of that probe's
+   * height; assign depth 0 when {@code fromSeedBlock}, else 1; keep the minimum
+   * depth on duplicates; drop depths above {@code depthLimit}. Returns depth-0
+   * entries before depth-1 so a FIFO queue preserves shortest-path order.
+   * Package-private for unit tests (synthetic probes/candidates, no world).
+   */
+  static List<SeedWaveEntry> assignOriginWave(List<OriginProbe> probes,
+      List<OriginCandidate> candidates, double reach, int depthLimit) {
+    if (probes.isEmpty() || candidates.isEmpty() || depthLimit < 0) {
+      return List.of();
+    }
+    Map<CellSurface, Integer> best = new HashMap<>();
+    for (OriginCandidate c : candidates) {
+      StandableRect r = c.rect();
+      boolean adjacent = false;
+      for (OriginProbe p : probes) {
+        if (Math.abs(r.collisionTopY() - p.collisionTopY()) > reach + EPS) {
+          continue;
+        }
+        if (probeFootprintAdjacent(p, r)) {
+          adjacent = true;
+          break;
+        }
+      }
+      if (!adjacent) {
+        continue;
+      }
+      int depth = c.fromSeedBlock() ? 0 : 1;
+      if (depth > depthLimit) {
+        continue;
+      }
+      CellSurface key = new CellSurface(r, c.cx(), c.cz());
+      best.merge(key, depth, RectMath::minDepth);
+    }
+    List<SeedWaveEntry> depth0 = new ArrayList<>();
+    List<SeedWaveEntry> depth1 = new ArrayList<>();
+    for (Map.Entry<CellSurface, Integer> e : best.entrySet()) {
+      CellSurface s = e.getKey();
+      SeedWaveEntry entry = new SeedWaveEntry(s.rect(), s.cx(), s.cz(), e.getValue());
+      if (e.getValue() == 0) {
+        depth0.add(entry);
+      } else {
+        depth1.add(entry);
+      }
+    }
+    List<SeedWaveEntry> out = new ArrayList<>(depth0.size() + depth1.size());
+    out.addAll(depth0);
+    out.addAll(depth1);
+    return out;
+  }
+
+  // footprintAdjacent for a raw dilated probe vs an exposed standable top.
+  private static boolean probeFootprintAdjacent(OriginProbe p, StandableRect r) {
+    return RectMath.footprintAdjacent(
+      new StandableRect(p.minX(), p.minZ(), p.maxX(), p.maxZ(), p.collisionTopY()),
+      r);
   }
 
   /**
@@ -1115,8 +1203,9 @@ public final class SurfaceSelection {
    * reach} step, plus each box's occluder shell at the rows around its own top),
    * never the full {@code [yLo,yHi]} band. {@link #ensureRows} tracks scanned
    * rows per column (a {@link BitSet}) so each {@code (column,row)} is queried at
-   * most once. Only the origin column exposes its full band (to seed every
-   * standable top there). This drops the per-column vertical factor from
+   * most once. The flood boots from the clicked block's raw dilated collision
+   * footprints (non-emitted origin probes); only exposed tops enter the reached
+   * set. This drops the per-column vertical factor from
    * {@code O(radius)} to {@code O(heights the flood actually traverses there)},
    * so open ground goes from {@code ~radius^3} toward {@code ~radius^2}. It is
    * orthogonal to (and composes with) the horizontal {@code occluderColumns}
@@ -1196,21 +1285,37 @@ public final class SurfaceSelection {
     }
 
     List<StandableRect> run() {
-      // Seeds: standable tops of the clicked block. Other tops in the origin
-      // column join via normal BFS hops.
-      List<CellSurface> seeds = collectSeedBlock();
-      if (seeds.isEmpty()) {
+      // Click origin: raw pre-occlusion dilated footprints of the clicked block
+      // (never painted). First expansion enters the exposed-top graph at depth 0
+      // (seed-block tops) or depth 1 (other abutting tops).
+      List<OriginProbe> probes = buildClickProbes();
+      if (probes.isEmpty()) {
+        preMergeReached = List.of();
+        return List.of();
+      }
+      List<OriginCandidate> candidates = new ArrayList<>();
+      for (OriginProbe probe : probes) {
+        double h = probe.collisionTopY();
+        for (int cx = ox - neighbour; cx <= ox + neighbour; cx++) {
+          for (int cz = oz - neighbour; cz <= oz + neighbour; cz++) {
+            collectCandidates(cx, cz, h - reach, h + reach, candidates);
+          }
+        }
+      }
+      List<SeedWaveEntry> initial = assignOriginWave(probes, candidates, reach, depthLimit);
+      if (initial.isEmpty()) {
         preMergeReached = List.of();
         return List.of();
       }
       // hopCount doubles as the visited set: a key is present iff visited, and its
-      // value is the BFS hop-count from the seed (0 = seed). FIFO queue + set on
-      // enqueue makes this the shortest surface-graph distance.
+      // value is the BFS hop-count from the click origin (0 = seed-block top).
+      // FIFO + depth-0-before-depth-1 enqueue makes this the shortest distance.
       Map<CellSurface, Integer> hopCount = new HashMap<>();
       Deque<CellSurface> queue = new ArrayDeque<>();
-      for (CellSurface seed : seeds) {
-        if (hopCount.putIfAbsent(seed, 0) == null) {
-          queue.addLast(seed);
+      for (SeedWaveEntry entry : initial) {
+        CellSurface s = new CellSurface(entry.rect(), entry.cx(), entry.cz());
+        if (hopCount.putIfAbsent(s, entry.depth()) == null) {
+          queue.addLast(s);
         }
       }
       // The reached raw (pre-merge) nodes and their depths, in lock-step; the
@@ -1254,27 +1359,53 @@ public final class SurfaceSelection {
       return RectMath.mergeCoplanarSplitFrontier(reached, rawDepths, depthLimit);
     }
 
-    // Standable tops of the clicked seed block (source block Y == oy). Keyed on
-    // block Y so every top of that block is seeded, including fence tops above
-    // oy+1.
-    private List<CellSurface> collectSeedBlock() {
+    // Raw pre-occlusion dilated footprints of collision boxes owned by the
+    // clicked block (source block Y == oy). Non-emitted flood origin.
+    private List<OriginProbe> buildClickProbes() {
       ensureRows(ox, oz, oy, oy);
       List<WorldBox> column = index.get(new ColKey(ox, oz));
       if (column == null) {
         return List.of();
       }
-      List<CellSurface> surfaces = new ArrayList<>();
+      List<OriginProbe> probes = new ArrayList<>();
       int count = column.size();
       for (int i = 0; i < count; i++) {
         WorldBox box = column.get(i);
         if (box.by() != oy) {
           continue;
         }
+        probes.add(new OriginProbe(
+          box.minX() - halfW, box.minZ() - halfW,
+          box.maxX() + halfW, box.maxZ() + halfW,
+          box.yMax()));
+      }
+      return probes;
+    }
+
+    // Exposed tops of cell (cx,cz) in [topLo,topHi] with seed-block provenance,
+    // appended to {@code out} (duplicates across overlapping probe windows are
+    // fine — assignOriginWave keeps min depth).
+    private void collectCandidates(int cx, int cz, double topLo, double topHi,
+        List<OriginCandidate> out) {
+      ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
+      List<WorldBox> column = index.get(new ColKey(cx, cz));
+      if (column == null) {
+        return;
+      }
+      int count = column.size();
+      for (int i = 0; i < count; i++) {
+        WorldBox box = column.get(i);
+        if (Math.abs(box.by() - oy) > depthLimit) {
+          continue;
+        }
+        if (box.yMax() < topLo - EPS || box.yMax() > topHi + EPS) {
+          continue;
+        }
+        boolean fromSeed = box.bx() == ox && box.by() == oy && box.bz() == oz;
         for (StandableRect r : tops(box)) {
-          surfaces.add(new CellSurface(r, ox, oz));
+          out.add(new OriginCandidate(r, cx, cz, fromSeed));
         }
       }
-      return surfaces;
     }
 
     // Node surfaces of cell (cx,cz) whose top lies in [topLo,topHi] and whose
