@@ -198,7 +198,7 @@ public final class SurfaceSelection {
     downSkirts = raisedVisual
       ? computeDownSkirts(result, occluders, true)
       : dropEdges;
-    holes = computeHoles(level, result, dropEdges, profile, radius);
+    holes = computeHoles(level, result, dropEdges, profile);
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop);
       debugDumpOnce = false;
@@ -241,9 +241,9 @@ public final class SurfaceSelection {
     MobWalk.LOGGER.info("[flood-debug] {}={}", label, rects.size());
     for (StandableRect r : rects) {
       MobWalk.LOGGER.info(
-        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} depth={}",
+        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} depth={} frontier={}",
         label, r.minX(), r.maxX(), r.minZ(), r.maxZ(),
-        r.collisionTopY(), r.visualTopY(), r.depth());
+        r.collisionTopY(), r.visualTopY(), r.depth(), r.frontier());
     }
   }
 
@@ -490,9 +490,10 @@ public final class SurfaceSelection {
       double halfW, double height, List<SkirtSpan> out) {
     double collisionTopY = r.collisionTopY();
     double visualTopY = r.visualTopY();
-    // The occluder skirt inherits its surface's flood-depth so the two share a
-    // color band in the debug depth-coloring (see StandableRect.depth).
+    // The occluder skirt inherits its surface's flood-depth and frontier flag so
+    // draw shares the surface's color / cutoff band (see StandableRect).
     int depth = r.depth();
+    boolean frontier = r.frontier();
     for (WorldBox b : candidates) {
       if (!wallOccluder(b, collisionTopY, height)) {
         continue;
@@ -508,11 +509,11 @@ public final class SurfaceSelection {
       if (zHi - zLo > EPS) {
         if (Math.abs(oMinX - r.maxX()) < EPS) {
           out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
         if (Math.abs(oMaxX - r.minX()) < EPS) {
           out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
       }
       double xLo = Math.max(oMinX, r.minX());
@@ -520,11 +521,11 @@ public final class SurfaceSelection {
       if (xHi - xLo > EPS) {
         if (Math.abs(oMinZ - r.maxZ()) < EPS) {
           out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
         if (Math.abs(oMaxZ - r.minZ()) < EPS) {
           out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
       }
     }
@@ -557,8 +558,10 @@ public final class SurfaceSelection {
       double visualBase = head.visualBaseY();
       // Coalesced spans can come from different surfaces (same edge line/height,
       // different depth); take the min so the merged marker reads as the nearest
-      // surface's band (mirrors the max-stop handling above).
+      // surface's band (mirrors the max-stop handling above). Frontier only when
+      // every piece is frontier — an inner piece keeps the span drawable.
       int spanDepth = head.depth();
+      boolean spanFrontier = head.frontier();
       for (int i = 1; i < group.size(); i++) {
         SkirtSpan s = group.get(i);
         if (s.lo() <= hi + EPS) {
@@ -566,20 +569,22 @@ public final class SurfaceSelection {
           stop = Math.max(stop, s.visualBaseY() + s.maxExtent());
           visualBase = Math.max(visualBase, s.visualBaseY());
           spanDepth = RectMath.minDepth(spanDepth, s.depth());
+          spanFrontier = spanFrontier && s.frontier();
         } else {
           out.add(new SkirtSpan(head.alongX(), head.maxSide(),
             head.line(), lo, hi, head.baseY(), visualBase,
-            SkirtSpan.Direction.UP, stop - visualBase, spanDepth));
+            SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier));
           lo = s.lo();
           hi = s.hi();
           stop = s.visualBaseY() + s.maxExtent();
           visualBase = s.visualBaseY();
           spanDepth = s.depth();
+          spanFrontier = s.frontier();
         }
       }
       out.add(new SkirtSpan(head.alongX(), head.maxSide(),
         head.line(), lo, hi, head.baseY(), visualBase,
-        SkirtSpan.Direction.UP, stop - visualBase, spanDepth));
+        SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier));
     }
     return out;
   }
@@ -805,7 +810,7 @@ public final class SurfaceSelection {
       }
       if (!Double.isNaN(runLo)) {
         out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-          SkirtSpan.Direction.DOWN, runExtent, r.depth()));
+          SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier()));
       }
       runLo = a;
       runHi = b;
@@ -813,7 +818,7 @@ public final class SurfaceSelection {
     }
     if (!Double.isNaN(runLo)) {
       out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-        SkirtSpan.Direction.DOWN, runExtent, r.depth()));
+        SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier()));
     }
   }
 
@@ -836,7 +841,7 @@ public final class SurfaceSelection {
   // span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
   // homogeneous sub-spans. Runs once per select (not per frame).
   private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
-      List<SkirtSpan> drops, EntityProfile profile, int depthLimit) {
+      List<SkirtSpan> drops, EntityProfile profile) {
     if (drops.isEmpty()) {
       return List.of();
     }
@@ -846,7 +851,7 @@ public final class SurfaceSelection {
     List<StandableRect> ledges = new ArrayList<>();
     BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
     for (SkirtSpan sp : drops) {
-      if (sp.depth() >= depthLimit) {
+      if (sp.frontier()) {
         continue;
       }
       RectMath.Rect band = fallFootprint(sp);

@@ -66,9 +66,9 @@ invariants stay unchanged.
 
 **Aggregate metadata.** Exact `depth` is traversal metadata rather than an ownership
 axis. An inner winner's depth aggregates by minimum over every covering inner node,
-independent of surface class; a frontier winner uses the depth limit. This preserves
-the radius ring as a separate rendering band while surface-class priority determines
-how the same collision surface is drawn.
+independent of surface class; a frontier winner uses the depth limit and sets
+`frontier = true` on the published rect. How draw uses those fields lives in
+[`rendering.md`](rendering.md).
 
 ## What the selection is (the computed result)
 

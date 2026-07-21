@@ -27,9 +27,10 @@ public final class SurfaceEmitter {
 
   // Vertical skirts dropped from each surface edge so the selection reads as a
   // 3D mesh. Draw height comes from Appearance downSkirtHeight (0 skips draw).
-  // Skirts are shaded darker than the top for legibility.
-  private static final float SKIRT_SHADE = 0.55f;
-  private static final float SKIRT_ALPHA = 0.6f;
+  // Vanilla direction-dependent face brightness (same factors as block shade):
+  // N/S (±Z) 0.8, E/W (±X) 0.6. Tops stay undimmed (Y+ = 1.0).
+  private static final float SHADE_NORTH_SOUTH = 0.8f;
+  private static final float SHADE_EAST_WEST = 0.6f;
   // Tiny uniform outward push of the (square) skirt edges — NOT a dilation: just
   // enough to lift the skirt off the coplanar terrain side face so it doesn't
   // z-fight. Kept tiny so the gap from the top edge stays invisible and skirts
@@ -37,12 +38,9 @@ public final class SurfaceEmitter {
   private static final double SKIRT_OFFSET = 0.002;
 
   // Upward skirts: drawn where a surface edge borders a wall/ceiling (compute-side
-  // SkirtSpan UP), solid at the surface top and fading to transparent at the marker
-  // top. A lighter shade than the (darker) downward drop skirts so the two read
-  // distinctly. Draw height from Appearance upwardSkirtHeight (0 skips draw),
-  // clamped to span.maxExtent (wall top above the surface).
-  private static final float UP_SKIRT_SHADE = 0.85f;
-  private static final float UP_SKIRT_ALPHA = 0.7f;
+  // SkirtSpan UP). Draw height from Appearance upwardSkirtHeight (0 skips draw),
+  // clamped to span.maxExtent (wall top above the surface). Peak alpha is the
+  // same Appearance walkableColor alpha used for tops.
 
   // Hole beam: a vertical marker rising from the cliff-edge top of a hole span.
   // Routed to the depth-off BEAM layer or depth-tested SKIRT layer by Appearance
@@ -60,13 +58,19 @@ public final class SurfaceEmitter {
       BufferBuilder skirtBuffer, BufferBuilder beamBuffer,
       List<StandableRect> rects, List<SkirtSpan> occluders,
       List<SkirtSpan> downSkirts, List<HoleSpan> holes,
-      int depthLimit, boolean crouching) {
+      boolean crouching) {
     if (rects.isEmpty()) {
       return;
     }
 
+    boolean showCutoff = Configs.showCutoffRing();
+    boolean shadeByDepth = Configs.shadeByDepth();
+    Color4f walkable = Configs.walkableColor();
+    float fillAlpha = walkable.a;
+    float[] walkableRgb = {walkable.r, walkable.g, walkable.b};
+
     for (StandableRect rect : rects) {
-      if (suppressCutoffRing(rect.depth(), depthLimit)) {
+      if (!showCutoff && rect.frontier()) {
         continue;
       }
       float minX = (float) rect.minX();
@@ -75,11 +79,12 @@ public final class SurfaceEmitter {
       float maxZ = (float) rect.maxZ();
       float y = (float) rect.visualTopY() + (float) Y_OFFSET;
 
-      float[] rgb = Palette.colorAtDepth(rect.depth(), depthLimit);
+      float[] rgb = rect.frontier()
+        ? Palette.GREY_RGB
+        : shadeByDepth ? Palette.depthColor(rect.depth()) : walkableRgb;
       float r = rgb[0];
       float g = rgb[1];
       float b = rgb[2];
-      float fillAlpha = Configs.walkableColor().a;
 
       BufferBuilder topBuffer = crouching ? fillBuffer : skirtBuffer;
       quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, fillAlpha);
@@ -95,8 +100,8 @@ public final class SurfaceEmitter {
 
     }
 
-    emitSkirts(skirtBuffer, positionMatrix, downSkirts, depthLimit);
-    emitSkirts(skirtBuffer, positionMatrix, occluders, depthLimit);
+    emitSkirts(skirtBuffer, positionMatrix, downSkirts, shadeByDepth, walkableRgb, fillAlpha);
+    emitSkirts(skirtBuffer, positionMatrix, occluders, shadeByDepth, walkableRgb, fillAlpha);
 
     BufferBuilder holeBuffer = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
     emitHoles(holeBuffer, positionMatrix, holes);
@@ -118,9 +123,8 @@ public final class SurfaceEmitter {
     float g = beam.g;
     float b = beam.b;
     float a = beam.a;
-    // HoleSpan doesn't carry a flood-depth, so holes at the cutoff edge can't
-    // be depth-suppressed — that's acceptable: depth-limit artifacts are rare
-    // at cliff edges (the flood stops mid-surface, not at a drop).
+    // Hole spans are only published for non-frontier drops (computeHoles skips
+    // frontier skirts), so no cutoff suppress is needed here.
     for (HoleSpan h : spans) {
       // Rise from the rim's render height (visualBaseY).
       float base = (float) h.visualBaseY();
@@ -146,97 +150,87 @@ public final class SurfaceEmitter {
   }
 
   // Draw published skirts (UP and DOWN) into the depth-tested layer. Length is
-  // min(Appearance height for the direction, span.maxExtent). Two independent
-  // skips: frontier spans (depth >= depthLimit) are never drawn; when
-  // showCutoffRing is off, the cutoff-ring band is also skipped.
+  // min(Appearance height for the direction, span.maxExtent). Fade is over the
+  // Appearance height: a shorter clamp samples the same curve (tip keeps residual
+  // alpha). Frontier spans are never drawn (cutoff artifacts).
   private static void emitSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-      List<SkirtSpan> spans, int depthLimit) {
+      List<SkirtSpan> spans, boolean shadeByDepth, float[] walkableRgb, float fillAlpha) {
     if (spans.isEmpty()) {
       return;
     }
+    float downHeight = (float) Configs.downSkirtHeight();
+    float upHeight = (float) Configs.upwardSkirtHeight();
     float o = (float) SKIRT_OFFSET;
     for (SkirtSpan sp : spans) {
-      if (sp.depth() >= depthLimit) {
+      if (sp.frontier()) {
         continue;
       }
-      if (suppressCutoffRing(sp.depth(), depthLimit)) {
+      boolean down = sp.isDown();
+      float configHeight = down ? downHeight : upHeight;
+      if (configHeight <= 0.0f) {
         continue;
       }
-      if (sp.isDown()) {
-        float downHeight = (float) Configs.downSkirtHeight();
-        if (downHeight <= 0.0f) {
-          continue;
-        }
-        float extent = (float) Math.min(downHeight, sp.maxExtent());
-        if (!(extent > 0.0f)) {
-          continue;
-        }
-        float[] rgb = Palette.colorAtDepth(sp.depth(), depthLimit);
-        float sr = rgb[0] * SKIRT_SHADE;
-        float sg = rgb[1] * SKIRT_SHADE;
-        float sb = rgb[2] * SKIRT_SHADE;
-        float yTop = (float) sp.visualBaseY() + (float) Y_OFFSET;
-        float yBot = yTop - extent;
-        // Exterior push to prevent z-fighting.
-        float push = sp.maxSide() ? o : -o;
-        if (sp.alongX()) {
-          float z = (float) sp.line() + push;
-          fadedSkirt(skirtBuffer, positionMatrix,
-            (float) sp.lo() - o, z, (float) sp.hi() + o, z, yTop, yBot, sr, sg, sb);
-        } else {
-          float x = (float) sp.line() + push;
-          fadedSkirt(skirtBuffer, positionMatrix,
-            x, (float) sp.lo() - o, x, (float) sp.hi() + o, yTop, yBot, sr, sg, sb);
-        }
-      } else {
-        float upHeight = (float) Configs.upwardSkirtHeight();
-        if (upHeight <= 0.0f) {
-          continue;
-        }
-        float available = (float) sp.maxExtent();
-        if (available <= 0.0f) {
-          continue;
-        }
-        float markerHeight = Math.min(upHeight, available);
-        float base = (float) sp.visualBaseY();
-        float yTopMarker = base + markerHeight;
-        float[] rgb = Palette.colorAtDepth(sp.depth(), depthLimit);
-        float r = rgb[0] * UP_SKIRT_SHADE;
-        float g = rgb[1] * UP_SKIRT_SHADE;
-        float b = rgb[2] * UP_SKIRT_SHADE;
-        // Interior nudge to prevent z-fighting.
-        float shift = sp.maxSide() ? -o : o;
-        float line = (float) sp.line() + shift;
-        float xa;
-        float za;
-        float xb;
-        float zb;
-        if (sp.alongX()) {
-          xa = (float) sp.lo();
-          xb = (float) sp.hi();
-          za = line;
-          zb = line;
-        } else {
-          za = (float) sp.lo();
-          zb = (float) sp.hi();
-          xa = line;
-          xb = line;
-        }
-        vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTopMarker, base,
-          r, g, b, 0.0f, UP_SKIRT_ALPHA);
+      float extent = (float) Math.min(configHeight, sp.maxExtent());
+      if (!(extent > 0.0f)) {
+        continue;
       }
-    }
-  }
+      // Fade is parameterized by Appearance height; a maxExtent clamp shortens
+      // the quad but samples the same curve (clipped tip keeps residual alpha).
+      float tipAlpha = fillAlpha * (1.0f - extent / configHeight);
 
-  // When showCutoffRing is off, skip drawing depths in the cutoff-ring band.
-  private static boolean suppressCutoffRing(int depth, int depthLimit) {
-    return !Configs.showCutoffRing() && Palette.inCutoffRing(depth, depthLimit);
+      float[] rgb = shadeByDepth ? Palette.depthColor(sp.depth()) : walkableRgb;
+      // alongX edge → face normal ±Z (N/S); else ±X (E/W).
+      float shade = sp.alongX() ? SHADE_NORTH_SOUTH : SHADE_EAST_WEST;
+      float r = rgb[0] * shade;
+      float g = rgb[1] * shade;
+      float b = rgb[2] * shade;
+
+      float baseY = (float) sp.visualBaseY();
+      float yTop;
+      float yBot;
+      float aTop;
+      float aBot;
+      float linePush;
+      if (down) {
+        yTop = baseY + (float) Y_OFFSET;
+        yBot = yTop - extent;
+        aTop = fillAlpha;
+        aBot = tipAlpha;
+        // Exterior push to prevent z-fighting with terrain side faces.
+        linePush = sp.maxSide() ? o : -o;
+      } else {
+        yBot = baseY;
+        yTop = baseY + extent;
+        aTop = tipAlpha;
+        aBot = fillAlpha;
+        // Interior nudge to prevent z-fighting with the wall.
+        linePush = sp.maxSide() ? -o : o;
+      }
+
+      float line = (float) sp.line() + linePush;
+      float xa;
+      float za;
+      float xb;
+      float zb;
+      if (sp.alongX()) {
+        xa = (float) sp.lo() - o;
+        xb = (float) sp.hi() + o;
+        za = line;
+        zb = line;
+      } else {
+        za = (float) sp.lo() - o;
+        zb = (float) sp.hi() + o;
+        xa = line;
+        xb = line;
+      }
+      vQuad(skirtBuffer, positionMatrix, xa, za, xb, zb, yTop, yBot,
+        r, g, b, aTop, aBot);
+    }
   }
 
   // One flat axis-aligned quad over [x0,x1] x [z0,z1] at height y, emitted with
   // both windings (a zero-thickness quad would otherwise be culled from one
-  // side). Grey blending (depth-based) is applied per-rect before calling this,
-  // so the quad is uniform color.
+  // side). Color is applied per-rect before calling this, so the quad is uniform.
   private static void quad(BufferBuilder buffer, Matrix4fc matrix,
       float x0, float x1, float z0, float z1, float y,
       float r, float g, float b, float a) {
@@ -249,18 +243,6 @@ public final class SurfaceEmitter {
     buffer.addVertex(matrix, x1, y, z1).setColor(r, g, b, a);
     buffer.addVertex(matrix, x0, y, z1).setColor(r, g, b, a);
     buffer.addVertex(matrix, x0, y, z0).setColor(r, g, b, a);
-  }
-
-  // A vertical skirt that is solid over its top half and fades to transparent
-  // over its bottom half, so a drop deeper than the skirt doesn't read as a hard
-  // floating wall. Two stacked double-winding segments between the horizontal
-  // endpoints (xa,za)-(xb,zb).
-  private static void fadedSkirt(BufferBuilder buffer, Matrix4fc matrix,
-      float xa, float za, float xb, float zb, float yTop, float yBot,
-      float r, float g, float b) {
-    float yMid = (yTop + yBot) * 0.5f;
-    vQuad(buffer, matrix, xa, za, xb, zb, yTop, yMid, r, g, b, SKIRT_ALPHA, SKIRT_ALPHA);
-    vQuad(buffer, matrix, xa, za, xb, zb, yMid, yBot, r, g, b, SKIRT_ALPHA, 0.0f);
   }
 
   // One vertical quad spanning [yBot, yTop] between horizontal endpoints
@@ -282,13 +264,12 @@ public final class SurfaceEmitter {
   }
 
   /**
-   * Draw-color derivation for tops and skirts: Appearance {@code walkableColor}
-   * (or Debug {@code shadeByDepth} hue), then cutoff-ring greying toward grey at
-   * the outermost two BFS depth rings.
+   * Draw-color derivation for tops and skirts. Callers hoist Appearance /
+   * Debug options and pass them in; frontier greying uses {@link #GREY_RGB}.
    */
   static final class Palette {
-    // Debug depth coloring (gated by Configs.shadeByDepth): tops and their skirts
-    // are colored by flood BFS distance from the seed (0 = seed), NOT by height. The
+    // Debug depth coloring (gated by shadeByDepth): tops and their skirts are
+    // colored by flood BFS distance from the seed (0 = seed), NOT by height. The
     // hue advances a small fixed step per depth ring and WRAPS, so it is a smooth
     // gradient locally (neighbouring rings are near-identical colors — you can read
     // which rects are neighbours) yet still resolves large radii, and a continuity
@@ -301,47 +282,10 @@ public final class SurfaceEmitter {
     private static final float DEPTH_HUE_STEP = 1.0f / DEPTH_CYCLE;
     private static final float SATURATION = 0.9f;
     private static final float VALUE = 1.0f;
-    // Unknown flood depth and cutoff-ring greying target share the same mid-grey.
-    private static final float[] GREY_RGB = {0.5f, 0.5f, 0.5f};
+    // Unknown flood depth and frontier greying target share the same mid-grey.
+    static final float[] GREY_RGB = {0.5f, 0.5f, 0.5f};
 
     private Palette() {
-    }
-
-    /**
-     * Final draw RGB for a surface/skirt at the given flood depth, including
-     * cutoff-ring greying. Base color is Appearance walkable
-     * color, or the cyclic depth-hue band when {@code shadeByDepth}.
-     */
-    static float[] colorAtDepth(int depth, int limit) {
-      float[] rgb;
-      if (Configs.shadeByDepth()) {
-        rgb = depthColor(depth);
-      } else {
-        Color4f c = Configs.walkableColor();
-        rgb = new float[] {c.r, c.g, c.b};
-      }
-      return greyBlend(rgb, depth, limit);
-    }
-
-    // True for depths in the cutoff-ring band (partial/full grey when shown):
-    // depth == limit-1 → half grey; depth >= limit → full grey.
-    static boolean inCutoffRing(int depth, int limit) {
-      return depth >= 0 && depth > limit - 2;
-    }
-
-    // Blend a base color toward GREY_RGB by how close the rect's BFS depth is to
-    // the flood limit (the depth-based replacement of the old spatial ring greying).
-    // depth <= limit-2: no grey; depth == limit-1: half grey; depth >= limit: full.
-    private static float[] greyBlend(float[] rgb, int depth, int limit) {
-      if (!inCutoffRing(depth, limit)) {
-        return rgb;
-      }
-      float t = Math.max(0.0f, Math.min(1.0f, (depth - (limit - 2)) * 0.5f));
-      return new float[] {
-        rgb[0] + (GREY_RGB[0] - rgb[0]) * t,
-        rgb[1] + (GREY_RGB[1] - rgb[1]) * t,
-        rgb[2] + (GREY_RGB[2] - rgb[2]) * t,
-      };
     }
 
     // Map a flood BFS depth (distance from the seed) to RGB: the hue advances a small
@@ -349,7 +293,7 @@ public final class SurfaceEmitter {
     // rings (readable as neighbours) but completes a full cycle every ~DEPTH_CYCLE
     // rings so large floods stay legible; a discontinuity breaks the local gradient.
     // Depth -1 ("no flood depth") is drawn grey. See the DEPTH_* constants.
-    private static float[] depthColor(int depth) {
+    static float[] depthColor(int depth) {
       if (depth < 0) {
         return GREY_RGB;
       }

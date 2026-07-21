@@ -117,11 +117,13 @@ final class MergeContractTest {
       "inner tier should own overlap before frontier surface priority is considered");
     assertEquals(1, overlap.depth(),
       "inner winner should keep aggregate inner depth");
+    assertTrue(!overlap.frontier(), "inner winner should not be frontier");
     StandableRect frontierOnly = soleOwner(out, 2.5, 0.5);
     assertEquals(1.25, frontierOnly.visualTopY(), EPS,
       "frontier-only area should keep its winning surface class");
     assertEquals(limit, frontierOnly.depth(),
       "frontier-only area should keep the cutoff depth");
+    assertTrue(frontierOnly.frontier(), "frontier-only area should be flagged frontier");
   }
 
   @Test
@@ -144,16 +146,19 @@ final class MergeContractTest {
       "higher visual class should own overlap within the inner tier");
     assertEquals(0, innerOverlap.depth(),
       "inner depth should be the minimum over all covering inner nodes");
+    assertTrue(!innerOverlap.frontier());
     StandableRect frontierOverlap = soleOwner(out, 4.5, 0.5);
     assertEquals(1.25, frontierOverlap.visualTopY(), EPS,
       "higher visual class should own overlap within the frontier tier");
     assertEquals(limit, frontierOverlap.depth(),
       "frontier depth should canonicalize to the cutoff limit");
+    assertTrue(frontierOverlap.frontier());
     StandableRect frontierLowOnly = soleOwner(out, 5.5, 0.5);
     assertEquals(1.0, frontierLowOnly.visualTopY(), EPS,
       "frontier low-only area should retain its surface class");
     assertEquals(limit, frontierLowOnly.depth(),
       "all frontier output should use the cutoff limit");
+    assertTrue(frontierLowOnly.frontier());
   }
 
   private static StandableRect soleOwner(

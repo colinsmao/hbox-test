@@ -91,13 +91,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // See SurfaceSelection.computeHoles.
   private volatile List<HoleSpan> holeSnapshot = List.of();
 
-  // Depth-based greying: surfaces near the flood's BFS-depth cutoff (the last 2
-  // depth rings) blend toward grey to signal "increase the depth limit"; a
-  // selection bounded by a real drop stops short of the limit so it stays colored,
-  // making a depth cutoff visually distinct from a true boundary. Published with
-  // the snapshot; read per-rect in emit (render thread).
-  private volatile int depthLimit;
-
   @Override
   public String id() {
     return "collision_surface";
@@ -144,7 +137,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     occluderSnapshot = cache.allOccluders();
     downSkirtSnapshot = cache.allDownSkirts();
     holeSnapshot = cache.allHoles();
-    depthLimit = Configs.floodRadius();
   }
 
   // Walk down from the targeted block until a non-empty collision shape is
@@ -309,6 +301,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
       BufferBuilder beamBuffer) {
     SurfaceEmitter.emit(positionMatrix, fillBuffer, skirtBuffer, beamBuffer,
-      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, depthLimit, crouching);
+      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, crouching);
   }
 }

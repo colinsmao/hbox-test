@@ -141,19 +141,20 @@ public final class RectMath {
 
       for (ClassifiedRect<OwnershipClass> cell : coalesced) {
         OwnershipClass ownership = cell.priorityClass();
+        boolean frontier = ownership.tier() == RadiusTier.FRONTIER;
         int depth;
-        if (ownership.tier() == RadiusTier.INNER) {
+        if (frontier) {
+          depth = limit;
+        } else {
           depth = minCoveringDepth(cell.rect(), innerNodes, innerDepths);
           if (depth < 0) {
             continue;
           }
-        } else {
-          depth = limit;
         }
         out.add(new StandableRect(
           cell.rect().minX(), cell.rect().minZ(),
           cell.rect().maxX(), cell.rect().maxZ(),
-          collisionTopY, ownership.visualTopY(), depth));
+          collisionTopY, ownership.visualTopY(), depth, frontier));
       }
       i = j;
     }

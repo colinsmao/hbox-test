@@ -247,7 +247,7 @@ public final class Configs implements IConfigHandler {
 
   public static final class Appearance {
     public static final ConfigColor WALKABLE_COLOR =
-      new ConfigColor("walkableColor", "#8066CC66").apply(APPEARANCE_KEY);
+      new ConfigColor("walkableColor", "#B055AA55").apply(APPEARANCE_KEY);
     public static final ConfigBoolean DRAW_ON_VISIBLE_FACE =
       new ConfigBoolean("drawOnVisibleFace", true).apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
