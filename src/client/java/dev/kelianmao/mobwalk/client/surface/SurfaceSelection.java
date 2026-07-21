@@ -133,6 +133,101 @@ public final class SurfaceSelection {
   record ColKey(int x, int z) {
   }
 
+  // World-read port of the shared WorldSurfaceIndex: the collision boxes of the
+  // block at (x,y,z) in absolute WorldBox coords (empty if none). Production wraps
+  // the Level read (the flood's producer also fills the visible/outline top);
+  // tests inject a synthetic world so the lazy scan window that builds the occluder
+  // index (not just exposeBox) is exercised directly.
+  @FunctionalInterface
+  interface ColumnBoxes {
+    List<WorldBox> at(int x, int y, int z);
+  }
+
+  // Shared lazy world-surface index: the per-column collision boxes found so far,
+  // which block rows have been queried, and the memoized per-box exposure (tops).
+  // Both the flood (LazyFlood) and the ledge gather (gatherLedgesFrom) sit on this,
+  // so the occluder shell has ONE definition — occluderColumns in XZ, rows
+  // floor(yMax)-1 .. floor(yMax+height)+1 in Y (the headroom extension) — and cannot
+  // drift between the two callers. Reads the world only through ColumnBoxes.
+  static final class WorldSurfaceIndex {
+    private final ColumnBoxes source;
+    private final double halfW;
+    private final double height;
+    private final int yLo;
+    private final int yHi;
+    private final Map<ColKey, List<WorldBox>> index = new HashMap<>();
+    private final Map<ColKey, BitSet> scanned = new HashMap<>();
+    private final Map<WorldBox, List<StandableRect>> boxSurfaces = new HashMap<>();
+
+    WorldSurfaceIndex(ColumnBoxes source, double halfW, double height, int yLo, int yHi) {
+      this.source = source;
+      this.halfW = halfW;
+      this.height = height;
+      this.yLo = yLo;
+      this.yHi = yHi;
+    }
+
+    // The boxes of column (cx,cz) discovered so far, or null if never scanned.
+    // Callers snapshot size() before calling tops (which may append occluder rows
+    // to this same live list).
+    List<WorldBox> column(int cx, int cz) {
+      return index.get(new ColKey(cx, cz));
+    }
+
+    // Query (and memoize) the collision boxes in column (cx,cz) for every block
+    // row in [a,b] not yet scanned, clamped to the band [yLo,yHi]. Idempotent:
+    // each (column,row) is queried at most once, so no duplicate boxes.
+    void ensureRows(int cx, int cz, int a, int b) {
+      a = Math.max(a, yLo);
+      b = Math.min(b, yHi);
+      if (a > b) {
+        return;
+      }
+      ColKey key = new ColKey(cx, cz);
+      BitSet bits = scanned.get(key);
+      if (bits == null) {
+        bits = new BitSet(yHi - yLo + 1);
+        scanned.put(key, bits);
+        index.put(key, new ArrayList<>());
+      }
+      List<WorldBox> column = index.get(key);
+      for (int y = a; y <= b; y++) {
+        int bit = y - yLo;
+        if (bits.get(bit)) {
+          continue;
+        }
+        bits.set(bit);
+        column.addAll(source.at(cx, y, cz));
+      }
+    }
+
+    // Dilated, occluder-trimmed tops of a single box (memoized). Exposes the box's
+    // occluder shell — the columns exposeBox scans, over the rows that can hold a
+    // box intruding into the standing column (T, T+height] above this top — before
+    // computing, so the headroom occlusion test sees a complete shell. The upper
+    // shell row is extended by floor(yMax+height)+1 (vs the box's own top) so
+    // headroom occluders ABOVE the top are scanned, not just the buried ones;
+    // height == 0 collapses it to row±1 (today's spans-above shell).
+    List<StandableRect> tops(WorldBox box) {
+      List<StandableRect> cached = boxSurfaces.get(box);
+      if (cached != null) {
+        return cached;
+      }
+      int[] win = occluderColumns(box, halfW);
+      int row = (int) Math.floor(box.yMax());
+      int rowHi = (int) Math.floor(box.yMax() + height) + 1;
+      for (int cx = win[0]; cx <= win[1]; cx++) {
+        for (int cz = win[2]; cz <= win[3]; cz++) {
+          ensureRows(cx, cz, row - 1, rowHi);
+        }
+      }
+      List<StandableRect> out = new ArrayList<>();
+      exposeBox(box, index, halfW, height, out);
+      boxSurfaces.put(box, out);
+      return out;
+    }
+  }
+
   // Tolerance for the double coordinate compares (box edges are multiples of 1/16).
   private static final double EPS = RectMath.EPS;
 
@@ -937,14 +1032,13 @@ public final class SurfaceSelection {
     double height = profile.height();
     List<HoleSpan> out = new ArrayList<>();
     List<StandableRect> ledges = new ArrayList<>();
-    BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
     for (SkirtSpan sp : drops) {
       if (sp.frontier()) {
         continue;
       }
       RectMath.Rect band = fallFootprint(sp);
       ledges.clear();
-      gatherLedges(level, cursor, band, sp.baseY(), rects, halfW, height, ledges);
+      gatherLedges(level, band, sp.baseY(), rects, halfW, height, ledges);
       holeSubSpans(sp, band, rects, ledges, out);
     }
     return out;
@@ -1058,15 +1152,51 @@ public final class SurfaceSelection {
   }
 
 
+  // Level-backed ColumnBoxes producer: the collision boxes of block (x,y,z) as
+  // absolute WorldBoxes carrying the block's collision/outline tops (the outline
+  // read is paid only when computeVisualTop is on). Shared by the flood and the
+  // ledge gather so there is one world-read implementation behind WorldSurfaceIndex.
+  private static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop) {
+    BlockPos.MutableBlockPos scan = new BlockPos.MutableBlockPos();
+    return (x, y, z) -> {
+      scan.set(x, y, z);
+      BlockState state = level.getBlockState(scan);
+      VoxelShape shape = state.getCollisionShape(level, scan, CollisionContext.empty());
+      if (shape.isEmpty()) {
+        return List.of();
+      }
+      double blockCollisionTop = y + shape.max(Direction.Axis.Y);
+      double blockOutlineTop = visibleTop(level, scan, state, blockCollisionTop, computeVisualTop);
+      List<WorldBox> boxes = new ArrayList<>();
+      for (AABB box : shape.toAabbs()) {
+        boxes.add(new WorldBox(x, y, z,
+          x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
+          y + box.minY, y + box.maxY,
+          blockCollisionTop, blockOutlineTop));
+      }
+      return boxes;
+    };
+  }
+
   // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY that
-  // overlap the fall footprint — intermediate ledges that would trap the entity. For
-  // each block column overlapping fp, scan rows in (landY, collisionTopY), gather collision
-  // boxes, build a local occluder index, and call exposeBox on each candidate whose
-  // top is strictly between landY and collisionTopY. Appends exposed StandableRects to out.
-  // Only called when a reached floor exists below (landY is known).
-  private static void gatherLedges(Level level, BlockPos.MutableBlockPos cursor,
-      RectMath.Rect fp, double collisionTopY, List<StandableRect> reached, double halfW, double height,
-      List<StandableRect> out) {
+  // overlap the fall footprint — intermediate ledges that would trap the entity. Only
+  // called when a reached floor exists below (landY is known). The occluder shell is
+  // supplied by WorldSurfaceIndex.tops (the same primitive the flood uses), so the
+  // ledge gather cannot re-expose a fragment the flood buried.
+  private static void gatherLedges(Level level, RectMath.Rect fp, double collisionTopY,
+      List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
+    gatherLedgesFrom(levelColumnBoxes(level, false), fp, collisionTopY, reached, halfW, height, out);
+  }
+
+  // Pure kernel of gatherLedges: reads the world only through the ColumnBoxes port,
+  // driving a WorldSurfaceIndex. Finds candidate boxes whose top lies in
+  // (landY, collisionTopY) over the footprint's columns, then exposes each via
+  // index.tops(candidate) — the SAME occluder-shell primitive the flood uses. So a
+  // fragment the flood buried (a headroom ceiling above the rim, a wide-entity
+  // occluder a column or two out) can never be re-exposed here, and no window is
+  // re-derived to drift. Package-private for tests (synthetic world via the port).
+  static void gatherLedgesFrom(ColumnBoxes source, RectMath.Rect fp, double collisionTopY,
+      List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
     // Find landY: the topmost reached surface below collisionTopY overlapping the footprint.
     double landY = Double.NEGATIVE_INFINITY;
     for (StandableRect r : reached) {
@@ -1084,54 +1214,42 @@ public final class SurfaceSelection {
     if (landY == Double.NEGATIVE_INFINITY) {
       return;
     }
-    // Scan block columns overlapping the footprint. Candidates are boxes whose
-    // top lies in (landY, collisionTopY). The occluder index must also include collision
-    // from the block row below landY — shapes that live in a lower block but
-    // rise into (landY, collisionTopY) (walls/fences at height 1.5). Those
-    // occluders-from-below keep exposeBox burial complete for rising shapes.
-    // Motivating case: lantern on a wall — the wall box is in floor(landY)-1
-    // and must bury the lantern body.
-    //
-    // Assumption (recorded): one block row below landY is enough because
-    // vanilla collision that matters here extends at most ~1.5 upward from its
-    // block Y. A taller single-block collision (or a multi-block pillar whose
-    // lowest piece sits further below) would need a deeper yLo; revisit then.
+    // Band covers candidate finding (down to floor(landY)-1 for shapes rising from the
+    // row below) and every candidate's headroom shell (up to floor(collisionTopY+height)+1,
+    // since candidate tops are < collisionTopY). tops() ensures its own shell within it.
+    int bandLo = (int) Math.floor(landY) - 1;
+    int bandHi = (int) Math.floor(collisionTopY + height) + 1;
+    WorldSurfaceIndex surfaces = new WorldSurfaceIndex(source, halfW, height, bandLo, bandHi);
+    // Candidate boxes: tops strictly in (landY, collisionTopY) over the footprint's
+    // columns. Dilation reaches at most one column beyond the footprint, so expand
+    // the candidate scan by ceil(halfW); the occluder shell is tops()'s concern.
     int xLo = (int) Math.floor(fp.minX());
     int xHi = (int) Math.ceil(fp.maxX()) - 1;
     int zLo = (int) Math.floor(fp.minZ());
     int zHi = (int) Math.ceil(fp.maxZ()) - 1;
-    int yLo = (int) Math.floor(landY) - 1;
-    int yHi = (int) Math.ceil(collisionTopY);
-    Map<ColKey, List<WorldBox>> index = new HashMap<>();
+    int reachCols = (int) Math.ceil(halfW);
+    int scanLo = (int) Math.floor(landY) - 1;
+    int scanHi = (int) Math.ceil(collisionTopY);
     List<WorldBox> candidates = new ArrayList<>();
-    for (int x = xLo - (int) Math.ceil(halfW); x <= xHi + (int) Math.ceil(halfW) + 1; x++) {
-      for (int z = zLo - (int) Math.ceil(halfW); z <= zHi + (int) Math.ceil(halfW) + 1; z++) {
-        for (int y = yLo; y <= yHi; y++) {
-          cursor.set(x, y, z);
-          VoxelShape shape = level.getBlockState(cursor)
-            .getCollisionShape(level, cursor, CollisionContext.empty());
-          if (shape.isEmpty()) {
-            continue;
-          }
-          for (AABB box : shape.toAabbs()) {
-            WorldBox wb = new WorldBox(x, y, z,
-              x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
-              y + box.minY, y + box.maxY);
-            index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>()).add(wb);
-            double top = wb.yMax();
-            if (top > landY + EPS && top < collisionTopY - EPS) {
-              candidates.add(wb);
-            }
+    for (int x = xLo - reachCols; x <= xHi + reachCols + 1; x++) {
+      for (int z = zLo - reachCols; z <= zHi + reachCols + 1; z++) {
+        surfaces.ensureRows(x, z, scanLo, scanHi);
+        List<WorldBox> column = surfaces.column(x, z);
+        if (column == null) {
+          continue;
+        }
+        for (WorldBox wb : column) {
+          double top = wb.yMax();
+          if (top > landY + EPS && top < collisionTopY - EPS) {
+            candidates.add(wb);
           }
         }
       }
     }
-    // exposeBox each candidate and collect fragments overlapping the footprint.
-    List<StandableRect> exposed = new ArrayList<>();
+    // Expose each candidate against the flood's occluder shell; keep fragments in
+    // (landY, collisionTopY) overlapping the footprint.
     for (WorldBox cand : candidates) {
-      exposed.clear();
-      exposeBox(cand, index, halfW, height, exposed);
-      for (StandableRect s : exposed) {
+      for (StandableRect s : surfaces.tops(cand)) {
         if (s.collisionTopY() <= landY + EPS || s.collisionTopY() >= collisionTopY - EPS) {
           continue;
         }
@@ -1234,50 +1352,37 @@ public final class SurfaceSelection {
    * unchanged — {@code RectMath.footprintAdjacent} already treats overlap as connected).
    */
   private static final class LazyFlood {
-    private final Level level;
     private final int ox;
     private final int oy;
     private final int oz;
     private final int depthLimit;
     private final double halfW;
-    private final double height;
     private final double reach;
     // Chebyshev neighbour-search radius in cells = floor(W)+1 (see class doc).
     private final int neighbour;
-    // Whether to pay the visible/outline-top read (Appearance render toggle; see
-    // visibleTop). Off, nothing raises and the neighbour split never fires.
-    private final boolean computeVisualTop;
-    private final int yLo;
-    private final int yHi;
-    // Per-column collision boxes found so far (the occluder index), and which
-    // block rows of each column have already been queried (bit i == row yLo+i).
-    // Lazy in Y: a column is scanned only over the narrow row windows the flood
-    // actually needs near its current height, never the full [yLo,yHi] band.
-    private final Map<ColKey, List<WorldBox>> index = new HashMap<>();
-    private final Map<ColKey, BitSet> scanned = new HashMap<>();
-    // exposeBox memoized per source box (its occluder shell is fixed once the
-    // rows around its top are exposed), so a box's top is computed exactly once
-    // even though a cell is revisited from many neighbours / at many heights.
-    private final Map<WorldBox, List<StandableRect>> boxSurfaces = new HashMap<>();
-    private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+    // The shared lazy world-surface index (per-column boxes + scanned rows + memoized
+    // per-box tops). Lazy in Y: a column is scanned only over the narrow row windows
+    // the flood needs near its current height. The ledge gather uses the same type so
+    // the occluder shell is defined once (see WorldSurfaceIndex).
+    private final WorldSurfaceIndex surfaces;
     // Pre-merge BFS reached set (for /mobwalk dump); empty until run() finishes.
     private List<StandableRect> preMergeReached = List.of();
 
     LazyFlood(Level level, BlockPos start, int depthLimit, EntityProfile profile,
         boolean computeVisualTop) {
-      this.level = level;
       BlockPos origin = start.immutable();
       this.ox = origin.getX();
       this.oy = origin.getY();
       this.oz = origin.getZ();
       this.depthLimit = depthLimit;
       this.halfW = profile.width() / 2.0;
-      this.height = profile.height();
+      double height = profile.height();
       this.reach = profile.reach();
       this.neighbour = (int) Math.floor(profile.width()) + 1;
-      this.computeVisualTop = computeVisualTop;
-      this.yLo = Math.max(oy - depthLimit - 1, level.getMinY());
-      this.yHi = Math.min(oy + depthLimit + 1, level.getMaxY());
+      int bandLo = Math.max(oy - depthLimit - 1, level.getMinY());
+      int bandHi = Math.min(oy + depthLimit + 1, level.getMaxY());
+      this.surfaces = new WorldSurfaceIndex(
+        levelColumnBoxes(level, computeVisualTop), halfW, height, bandLo, bandHi);
     }
 
     List<StandableRect> preMergeReached() {
@@ -1362,8 +1467,8 @@ public final class SurfaceSelection {
     // Raw pre-occlusion dilated footprints of collision boxes owned by the
     // clicked block (source block Y == oy). Non-emitted flood origin.
     private List<OriginProbe> buildClickProbes() {
-      ensureRows(ox, oz, oy, oy);
-      List<WorldBox> column = index.get(new ColKey(ox, oz));
+      surfaces.ensureRows(ox, oz, oy, oy);
+      List<WorldBox> column = surfaces.column(ox, oz);
       if (column == null) {
         return List.of();
       }
@@ -1387,8 +1492,8 @@ public final class SurfaceSelection {
     // fine — assignOriginWave keeps min depth).
     private void collectCandidates(int cx, int cz, double topLo, double topHi,
         List<OriginCandidate> out) {
-      ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
-      List<WorldBox> column = index.get(new ColKey(cx, cz));
+      surfaces.ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
+      List<WorldBox> column = surfaces.column(cx, cz);
       if (column == null) {
         return;
       }
@@ -1402,7 +1507,7 @@ public final class SurfaceSelection {
           continue;
         }
         boolean fromSeed = box.bx() == ox && box.by() == oy && box.bz() == oz;
-        for (StandableRect r : tops(box)) {
+        for (StandableRect r : surfaces.tops(box)) {
           out.add(new OriginCandidate(r, cx, cz, fromSeed));
         }
       }
@@ -1413,12 +1518,12 @@ public final class SurfaceSelection {
     // such tops (plus each box's occluder shell), so vertical work tracks the
     // flood front, not the band. exposeBox is memoized per box.
     private List<CellSurface> collect(int cx, int cz, double topLo, double topHi) {
-      ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
-      List<WorldBox> column = index.get(new ColKey(cx, cz));
+      surfaces.ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
+      List<WorldBox> column = surfaces.column(cx, cz);
       if (column == null) {
         return List.of();
       }
-      List<CellSurface> surfaces = new ArrayList<>();
+      List<CellSurface> result = new ArrayList<>();
       // Index over an explicit count: tops() may append to this same column
       // (occluder rows in the box's own cell), and we must not revisit those.
       int count = column.size();
@@ -1431,77 +1536,12 @@ public final class SurfaceSelection {
         if (box.yMax() < topLo - EPS || box.yMax() > topHi + EPS) {
           continue;
         }
-        for (StandableRect r : tops(box)) {
-          surfaces.add(new CellSurface(r, cx, cz));
+        for (StandableRect r : surfaces.tops(box)) {
+          result.add(new CellSurface(r, cx, cz));
         }
       }
-      return surfaces;
+      return result;
     }
 
-    // Dilated, occluder-trimmed tops of a single box (memoized). Exposes the
-    // box's occluder shell — the columns exposeBox scans, over the rows that can
-    // hold a box intruding into the standing column (T, T+height] above this top —
-    // before computing, so the headroom occlusion test sees a complete shell.
-    // The upper shell row is extended by floor(yMax+height)+1 (vs the box's own
-    // top) so headroom occluders ABOVE the top are scanned, not just the buried
-    // ones; height == 0 collapses it to row±1 (today's spans-above shell).
-    private List<StandableRect> tops(WorldBox box) {
-      List<StandableRect> cached = boxSurfaces.get(box);
-      if (cached != null) {
-        return cached;
-      }
-      int[] win = occluderColumns(box, halfW);
-      int row = (int) Math.floor(box.yMax());
-      int rowHi = (int) Math.floor(box.yMax() + height) + 1;
-      for (int cx = win[0]; cx <= win[1]; cx++) {
-        for (int cz = win[2]; cz <= win[3]; cz++) {
-          ensureRows(cx, cz, row - 1, rowHi);
-        }
-      }
-      List<StandableRect> out = new ArrayList<>();
-      exposeBox(box, index, halfW, height, out);
-      boxSurfaces.put(box, out);
-      return out;
-    }
-
-    // Query (and memoize) the collision boxes in column (cx,cz) for every block
-    // row in [a,b] not yet scanned, clamped to the band [yLo,yHi]. Idempotent:
-    // each (column,row) is queried at most once, so no duplicate boxes.
-    private void ensureRows(int cx, int cz, int a, int b) {
-      a = Math.max(a, yLo);
-      b = Math.min(b, yHi);
-      if (a > b) {
-        return;
-      }
-      ColKey key = new ColKey(cx, cz);
-      BitSet bits = scanned.get(key);
-      if (bits == null) {
-        bits = new BitSet(yHi - yLo + 1);
-        scanned.put(key, bits);
-        index.put(key, new ArrayList<>());
-      }
-      List<WorldBox> column = index.get(key);
-      for (int y = a; y <= b; y++) {
-        int bit = y - yLo;
-        if (bits.get(bit)) {
-          continue;
-        }
-        bits.set(bit);
-        cursor.set(cx, y, cz);
-        BlockState state = level.getBlockState(cursor);
-        VoxelShape shape = state.getCollisionShape(level, cursor, CollisionContext.empty());
-        if (shape.isEmpty()) {
-          continue;
-        }
-        double blockCollisionTop = y + shape.max(Direction.Axis.Y);
-        double blockOutlineTop = visibleTop(level, cursor, state, blockCollisionTop, computeVisualTop);
-        for (AABB box : shape.toAabbs()) {
-          column.add(new WorldBox(cx, y, cz,
-            cx + box.minX, cz + box.minZ, cx + box.maxX, cz + box.maxZ,
-            y + box.minY, y + box.maxY,
-            blockCollisionTop, blockOutlineTop));
-        }
-      }
-    }
   }
 }

@@ -204,7 +204,8 @@ milestones).
   the target's dilated footprint iff `floor(min - W) <= cx <= ceil(max + W) - 1` per
   axis. This is the exact (full-block-conservative) window — for Point (`W=0`) it
   collapses to the box's own column. It is shared by `exposeBox` and
-  `LazyFlood.ensureRows`, keeping the index and the scan in lock-step. Tightening
+  `WorldSurfaceIndex.ensureRows` (the flood and the ledge gather both sit on that one
+  index), keeping the index and the scan in lock-step. Tightening
   it is **result-preserving**: the dropped columns abut with zero overlap and
   trimmed nothing.
 
@@ -251,11 +252,30 @@ merge seams nor wall/ceiling up-skirts). One pure predicate,
    distance `T − landY`.
 
 Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
-world read: `gatherLedges` scans collision boxes in the `(landY, T)` band over the
-footprint's columns and runs each through the **same `exposeBox`** the flood uses (dilate
-by `W/2`, cut by occluders) — so only flood-standable fragments count as ledges, and a
-wide hitbox is handled the same way the flood handles it. The ledge test reuses the
-flood's own standability.
+world read: `gatherLedges` finds candidate boxes with tops in `(landY, T)` over the
+footprint's columns and exposes each through **`WorldSurfaceIndex.tops`, the same
+per-box primitive the flood uses** (dilate by `W/2`, cut by the box's occluder shell) —
+so only flood-standable fragments count as ledges, and a wide hitbox is handled the same
+way the flood handles it. The ledge test reuses the flood's own standability.
+
+**Exposure-agreement contract.** The invariant step 2 relies on: **a candidate ledge is
+exposed by `gatherLedges` iff the flood would expose it.** It holds **by construction**:
+both callers sit on one `WorldSurfaceIndex` (the shared lazy box index + memoized
+`tops()`), so the occluder shell has a single definition and cannot drift between them.
+`exposeBox` subtracts only occluders present in the index, and `tops()` populates that
+index over the exact shell a candidate top `L` needs, per axis:
+
+- **Y:** rows `floor(L) - 1` up through `floor(L + height) + 1`. The upper bound is the
+  **headroom** extension: a ceiling in the standing column `(L, L + H]` buries `L`, and
+  these ceilings sit **above** the rim, so a rim-height cap (`ceil(collisionTopY)`) would
+  drop them and re-expose a ledge the flood buried. A shape rising from the block row
+  below reaches `L` from within `floor(L) - 1` (see occluders-from-below, below).
+- **XZ:** the `occluderColumns` window (expanded by the full width `2 · halfW`), so a
+  wide entity's occluders one or two columns out still participate.
+
+Because gather calls `tops()` rather than re-deriving this shell, the window that once
+drifted (capping Y at the rim, XZ at `ceil(halfW)`) and re-exposed buried ledges as false
+`HOLE`s is gone.
 
 Near the radius the selection is incomplete, but a drop there is still classified
 normally — a genuine deep drop reads HOLE. The **outermost edge**
@@ -274,18 +294,17 @@ the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep
 ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
-**Ledge gather Y band — occluders from below.** `gatherLedges` re-runs `exposeBox`
-on world boxes whose tops lie in `(landY, collisionTopY)`. Candidate tops are only in that
-open interval, but the occluder index starts at `floor(landY) - 1` so collision
-that *lives in the block row below* `landY` and rises into the band (vanilla
-walls/fences at height 1.5) still participates in burial. Those occluders-from-below
-keep burial complete for rising shapes. Motivating case: a lantern on
-a wall — under Ravager dilation the lantern body (wider than its cap) left a
-`7/16` ring with `fall = 0.0625` until the wall box below was in the index.
+**Ledge gather occluders from below.** `gatherLedges` exposes each candidate box (top in
+`(landY, collisionTopY)`) via `WorldSurfaceIndex.tops`, whose occluder shell starts one
+row below the candidate top (`floor(L) - 1`), so collision that *lives in the block row
+below* `L` and rises into the standing column (vanilla walls/fences at height 1.5) still
+participates in burial. Those occluders-from-below keep burial complete for rising shapes.
+Motivating case: a lantern on a wall — under Ravager dilation the lantern body (wider than
+its cap) left a `7/16` ring with `fall = 0.0625` until the wall box below was in the shell.
 
-**Assumption:** one block row below `landY` is enough — the occluding shapes that
-matter extend at most ~1.5 upward from their block Y, so they sit in
-`floor(landY) - 1` when `landY` is a full-block top. Deeper scan if a single
+**Assumption:** one block row below the candidate top is enough — the occluding shapes
+that matter extend at most ~1.5 upward from their block Y, so they sit in
+`floor(L) - 1` when `L` is a full-block top. Deeper scan if a single
 block's collision grows past that, or if a multi-block pillar's lowest piece sits
 further below.
 
@@ -317,9 +336,11 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   joins `floodRadius` / profile changes, which already re-flood). The memo treats the
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
-  Occluder-only / ledge scans leave the auxiliary-constructor default (`= yMax`), so
-  they never raise. Both tops are computed at the node-producing scan site
-  (`LazyFlood.ensureRows`).
+  Occluder and ledge scans never raise: the occluder scan leaves the
+  auxiliary-constructor default (`= yMax`), and the ledge scan reads through
+  `levelColumnBoxes(level, false)` so both tops collapse to the collision top. The
+  flood's own scan producer (`levelColumnBoxes(level, computeVisualTop)`, feeding
+  `WorldSurfaceIndex`) computes both tops at the node-producing site.
 - **The raise rule (`exposeBox`).**
   `visualTopY = (|collisionTopY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > collisionTopY) ?
   blockOutlineTop : collisionTopY`. Gating on *"this sub-box is the block's topmost collision
