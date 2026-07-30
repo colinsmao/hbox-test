@@ -782,29 +782,28 @@ public final class SurfaceSelection {
   }
 
   /**
-   * Classify one drop sub-span. Pure: given the fall footprint, the flood's
-   * reached set, and any intermediate standable ledges between the edge and the
-   * reached floor, returns HOLE or BENIGN.
+   * Classify one drop sub-span. Pure: given the {@link FallColumn} the entity falls
+   * down, the flood's reached set, and any intermediate standable ledges between the
+   * edge and the reached floor, returns HOLE or BENIGN.
    *
    * <ol>
    * <li>Find the topmost reached surface strictly below {@code collisionTopY} that
-   *     overlaps the footprint. If none &rarr; HOLE (void / unreached ground).
+   *     crosses the fall column. If none &rarr; HOLE (void / unreached ground).
    * <li>If a reached floor exists at {@code landY}: check whether any surface in
    *     {@code ledges} (dilated standable surfaces with top in {@code (landY,
-   *     collisionTopY)}) overlaps the footprint. If yes &rarr; HOLE (entity lands on the
+   *     collisionTopY)}) crosses the column. If yes &rarr; HOLE (entity lands on the
    *     ledge and is trapped). If no &rarr; BENIGN (fall distance = collisionTopY &minus;
    *     landY).
    * </ol>
    */
-  static DropClassification classifyDrop(RectMath.Rect fallFootprint, double collisionTopY,
+  static DropClassification classifyDrop(FallColumn fall, double collisionTopY,
       List<StandableRect> reached, List<StandableRect> ledges) {
     StandableRect landing = null;
     for (StandableRect r : reached) {
       if (r.collisionTopY() >= collisionTopY - EPS) {
         continue;
       }
-      if (Math.min(r.maxX(), fallFootprint.maxX()) - Math.max(r.minX(), fallFootprint.minX()) <= EPS
-          || Math.min(r.maxZ(), fallFootprint.maxZ()) - Math.max(r.minZ(), fallFootprint.minZ()) <= EPS) {
+      if (!fall.crosses(r)) {
         continue;
       }
       if (landing == null || r.collisionTopY() > landing.collisionTopY()) {
@@ -819,8 +818,7 @@ public final class SurfaceSelection {
       if (ledge.collisionTopY() <= landY + EPS || ledge.collisionTopY() >= collisionTopY - EPS) {
         continue;
       }
-      if (Math.min(ledge.maxX(), fallFootprint.maxX()) - Math.max(ledge.minX(), fallFootprint.minX()) <= EPS
-          || Math.min(ledge.maxZ(), fallFootprint.maxZ()) - Math.max(ledge.minZ(), fallFootprint.minZ()) <= EPS) {
+      if (!fall.crosses(ledge)) {
         continue;
       }
       return new DropClassification(DropClass.HOLE, collisionTopY - ledge.collisionTopY());
@@ -1012,15 +1010,11 @@ public final class SurfaceSelection {
     return Math.abs(a - b) <= EPS;
   }
 
-  // How far beyond the rim (in blocks) the fall footprint probes for a landing.
-  // One block off the cliff edge is where a mob leaving the edge drops.
-  private static final double FALL_PROBE = 1.0;
-
   // Classify each drop span and return the hole sub-spans (through-walls beam
   // candidates). For each drop span: (1) check if a reached surface exists below
-  // under the fall footprint, (2) if yes, scan the world between collisionTopY and landY for
-  // intermediate standable surfaces (ledges) via exposeBox — if any overlap the
-  // footprint, the entity gets trapped on the ledge -> HOLE. Because one edge can
+  // across the fall column, (2) if yes, scan the world between collisionTopY and landY for
+  // intermediate standable surfaces (ledges) via exposeBox — if any cross the
+  // column, the entity gets trapped on the ledge -> HOLE. Because one edge can
   // span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
   // homogeneous sub-spans. Runs once per select (not per frame).
   private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
@@ -1036,10 +1030,10 @@ public final class SurfaceSelection {
       if (sp.frontier()) {
         continue;
       }
-      RectMath.Rect band = fallFootprint(sp);
+      FallColumn fall = FallColumn.of(sp);
       ledges.clear();
-      gatherLedges(level, band, sp.baseY(), rects, halfW, height, ledges);
-      holeSubSpans(sp, band, rects, ledges, out);
+      gatherLedges(level, fall, sp.baseY(), rects, halfW, height, ledges);
+      holeSubSpans(sp, rects, ledges, out);
     }
     return out;
   }
@@ -1049,10 +1043,11 @@ public final class SurfaceSelection {
   // contiguous HOLE pieces (coalesced) as HoleSpans. A single edge can span reached
   // and unreached ground, so classifying the whole edge at once mislabels it.
   // Package-private for unit tests (synthetic reached rects / ledges, no world).
-  static void holeSubSpans(SkirtSpan sp, RectMath.Rect band,
-      List<StandableRect> reached, List<StandableRect> ledges, List<HoleSpan> out) {
+  static void holeSubSpans(SkirtSpan sp, List<StandableRect> reached,
+      List<StandableRect> ledges, List<HoleSpan> out) {
     double collisionTopY = sp.baseY();
-    double[] cuts = spanBreakpoints(sp, band, reached);
+    FallColumn fall = FallColumn.of(sp);
+    double[] cuts = spanBreakpoints(sp, reached);
     double holeLo = Double.NaN;
     double holeHi = 0.0;
     double holeFall = 0.0;
@@ -1062,8 +1057,7 @@ public final class SurfaceSelection {
       if (b - a <= EPS) {
         continue;
       }
-      RectMath.Rect subFp = subBand(sp, band, a, b);
-      DropClassification c = classifyDrop(subFp, collisionTopY, reached, ledges);
+      DropClassification c = classifyDrop(fall.clampedTo(a, b), collisionTopY, reached, ledges);
       if (c.kind() != DropClass.HOLE) {
         continue;
       }
@@ -1088,11 +1082,10 @@ public final class SurfaceSelection {
 
   // Breakpoints along a drop span's varying axis where its classification can
   // change: the span ends, integer block boundaries, and the varying-axis edges of
-  // every reached rect whose fixed axis overlaps the fall footprint. Splitting here
-  // makes each sub-span homogeneous (uniform "reached below or not"), so classifyDrop
-  // is exact on it. Duplicates collapse to zero-width sub-spans (skipped by caller).
-  private static double[] spanBreakpoints(SkirtSpan sp, RectMath.Rect band,
-      List<StandableRect> rects) {
+  // every reached rect that crosses the rim line. Splitting here makes each sub-span
+  // homogeneous (uniform "reached below or not"), so classifyDrop is exact on it.
+  // Duplicates collapse to zero-width sub-spans (skipped by caller).
+  private static double[] spanBreakpoints(SkirtSpan sp, List<StandableRect> rects) {
     double lo = sp.lo();
     double hi = sp.hi();
     List<Double> cuts = new ArrayList<>();
@@ -1102,7 +1095,7 @@ public final class SurfaceSelection {
       addCut(cuts, k, lo, hi);
     }
     for (StandableRect r : rects) {
-      if (fixedAxisOverlaps(sp, band, r)) {
+      if (RectMath.crossesLine(r, sp.alongX(), sp.maxSide(), sp.line())) {
         addCut(cuts, sp.alongX() ? r.minX() : r.minZ(), lo, hi);
         addCut(cuts, sp.alongX() ? r.maxX() : r.maxZ(), lo, hi);
       }
@@ -1120,37 +1113,6 @@ public final class SurfaceSelection {
       cuts.add(c);
     }
   }
-
-  // True iff rect r overlaps the fall footprint band on the FIXED axis (Z for an
-  // X-running span, else X) — i.e. r could be the landing under some sub-span.
-  private static boolean fixedAxisOverlaps(SkirtSpan sp, RectMath.Rect band, StandableRect r) {
-    if (sp.alongX()) {
-      return Math.min(r.maxZ(), band.maxZ()) - Math.max(r.minZ(), band.minZ()) > EPS;
-    }
-    return Math.min(r.maxX(), band.maxX()) - Math.max(r.minX(), band.minX()) > EPS;
-  }
-
-  // The fall footprint band clipped to the varying-axis sub-interval [a,b].
-  private static RectMath.Rect subBand(SkirtSpan sp, RectMath.Rect band, double a, double b) {
-    if (sp.alongX()) {
-      return new RectMath.Rect(a, band.minZ(), b, band.maxZ());
-    }
-    return new RectMath.Rect(band.minX(), a, band.maxX(), b);
-  }
-
-  // The fall footprint of a drop span: a FALL_PROBE-deep band just beyond the rim
-  // (on the drop side), along the span's [lo,hi]. maxSide drops toward +axis.
-  static RectMath.Rect fallFootprint(SkirtSpan sp) {
-    if (sp.alongX()) {
-      double zNear = sp.maxSide() ? sp.line() : sp.line() - FALL_PROBE;
-      double zFar = sp.maxSide() ? sp.line() + FALL_PROBE : sp.line();
-      return new RectMath.Rect(sp.lo(), zNear, sp.hi(), zFar);
-    }
-    double xNear = sp.maxSide() ? sp.line() : sp.line() - FALL_PROBE;
-    double xFar = sp.maxSide() ? sp.line() + FALL_PROBE : sp.line();
-    return new RectMath.Rect(xNear, sp.lo(), xFar, sp.hi());
-  }
-
 
   // Level-backed ColumnBoxes producer: the collision boxes of block (x,y,z) as
   // absolute WorldBoxes carrying the block's collision/outline tops (the outline
@@ -1178,33 +1140,32 @@ public final class SurfaceSelection {
     };
   }
 
-  // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY that
-  // overlap the fall footprint — intermediate ledges that would trap the entity. Only
+  // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY
+  // that cross the fall column — intermediate ledges that would trap the entity. Only
   // called when a reached floor exists below (landY is known). The occluder shell is
   // supplied by WorldSurfaceIndex.tops (the same primitive the flood uses), so the
   // ledge gather cannot re-expose a fragment the flood buried.
-  private static void gatherLedges(Level level, RectMath.Rect fp, double collisionTopY,
+  private static void gatherLedges(Level level, FallColumn fall, double collisionTopY,
       List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
-    gatherLedgesFrom(levelColumnBoxes(level, false), fp, collisionTopY, reached, halfW, height, out);
+    gatherLedgesFrom(levelColumnBoxes(level, false), fall, collisionTopY, reached, halfW, height, out);
   }
 
   // Pure kernel of gatherLedges: reads the world only through the ColumnBoxes port,
   // driving a WorldSurfaceIndex. Finds candidate boxes whose top lies in
-  // (landY, collisionTopY) over the footprint's columns, then exposes each via
+  // (landY, collisionTopY) in the columns around the fall column, then exposes each via
   // index.tops(candidate) — the SAME occluder-shell primitive the flood uses. So a
   // fragment the flood buried (a headroom ceiling above the rim, a wide-entity
   // occluder a column or two out) can never be re-exposed here, and no window is
   // re-derived to drift. Package-private for tests (synthetic world via the port).
-  static void gatherLedgesFrom(ColumnBoxes source, RectMath.Rect fp, double collisionTopY,
+  static void gatherLedgesFrom(ColumnBoxes source, FallColumn fall, double collisionTopY,
       List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
-    // Find landY: the topmost reached surface below collisionTopY overlapping the footprint.
+    // Find landY: the topmost reached surface below collisionTopY crossing the column.
     double landY = Double.NEGATIVE_INFINITY;
     for (StandableRect r : reached) {
       if (r.collisionTopY() >= collisionTopY - EPS) {
         continue;
       }
-      if (Math.min(r.maxX(), fp.maxX()) - Math.max(r.minX(), fp.minX()) <= EPS
-          || Math.min(r.maxZ(), fp.maxZ()) - Math.max(r.minZ(), fp.minZ()) <= EPS) {
+      if (!fall.crosses(r)) {
         continue;
       }
       if (r.collisionTopY() > landY) {
@@ -1220,19 +1181,27 @@ public final class SurfaceSelection {
     int bandLo = (int) Math.floor(landY) - 1;
     int bandHi = (int) Math.floor(collisionTopY + height) + 1;
     WorldSurfaceIndex surfaces = new WorldSurfaceIndex(source, halfW, height, bandLo, bandHi);
-    // Candidate boxes: tops strictly in (landY, collisionTopY) over the footprint's
-    // columns. Dilation reaches at most one column beyond the footprint, so expand
-    // the candidate scan by ceil(halfW); the occluder shell is tops()'s concern.
-    int xLo = (int) Math.floor(fp.minX());
-    int xHi = (int) Math.ceil(fp.maxX()) - 1;
-    int zLo = (int) Math.floor(fp.minZ());
-    int zHi = (int) Math.ceil(fp.maxZ()) - 1;
-    int reachCols = (int) Math.ceil(halfW);
+    // Candidate boxes: tops strictly in (landY, collisionTopY) in the columns whose
+    // dilated tops can still reach the fall column — the rim column and its
+    // neighbours across the line, plus the span's own columns, each widened by the
+    // dilation ceil(halfW). Derived from the column itself rather than from a probe
+    // footprint, so the scan window cannot shrink with the classification region
+    // (the drift LedgeExposureContractTest guards). The occluder shell each candidate
+    // needs on top of this is tops()'s concern.
+    int reachCols = (int) Math.ceil(halfW) + 1;
+    int spanLo = (int) Math.floor(fall.lo()) - reachCols;
+    int spanHi = (int) Math.ceil(fall.hi()) + reachCols;
+    int crossLo = (int) Math.floor(fall.line()) - reachCols;
+    int crossHi = (int) Math.floor(fall.line()) + reachCols;
+    int xLo = fall.alongX() ? spanLo : crossLo;
+    int xHi = fall.alongX() ? spanHi : crossHi;
+    int zLo = fall.alongX() ? crossLo : spanLo;
+    int zHi = fall.alongX() ? crossHi : spanHi;
     int scanLo = (int) Math.floor(landY) - 1;
     int scanHi = (int) Math.ceil(collisionTopY);
     List<WorldBox> candidates = new ArrayList<>();
-    for (int x = xLo - reachCols; x <= xHi + reachCols + 1; x++) {
-      for (int z = zLo - reachCols; z <= zHi + reachCols + 1; z++) {
+    for (int x = xLo; x <= xHi; x++) {
+      for (int z = zLo; z <= zHi; z++) {
         surfaces.ensureRows(x, z, scanLo, scanHi);
         List<WorldBox> column = surfaces.column(x, z);
         if (column == null) {
@@ -1247,14 +1216,13 @@ public final class SurfaceSelection {
       }
     }
     // Expose each candidate against the flood's occluder shell; keep fragments in
-    // (landY, collisionTopY) overlapping the footprint.
+    // (landY, collisionTopY) that cross the fall column.
     for (WorldBox cand : candidates) {
       for (StandableRect s : surfaces.tops(cand)) {
         if (s.collisionTopY() <= landY + EPS || s.collisionTopY() >= collisionTopY - EPS) {
           continue;
         }
-        if (Math.min(s.maxX(), fp.maxX()) - Math.max(s.minX(), fp.minX()) > EPS
-            && Math.min(s.maxZ(), fp.maxZ()) - Math.max(s.minZ(), fp.minZ()) > EPS) {
+        if (fall.crosses(s)) {
           out.add(s);
         }
       }

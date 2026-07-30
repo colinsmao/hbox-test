@@ -7,24 +7,21 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
-
 /**
  * A single drop edge can span reached and unreached ground, so
  * {@code holeSubSpans} must subdivide the edge and emit a hole only over the
  * unreached sub-intervals, not label the whole edge by one verdict.
  *
  * <p>Fixture: a {@code +Z} edge (alongX, maxSide) at {@code z = 1},
- * {@code baseY = 64}. The fall footprint band is {@code z in [1,2]}.
+ * {@code baseY = 64}. The entity falls down the rim line {@code z = 1}.
  */
 final class HoleSubSpanTest {
   private static final double EPS = 1.0e-6;
 
   private static List<HoleSpan> run(SkirtSpan sp, List<StandableRect> reached,
       List<StandableRect> ledges) {
-    Rect band = SurfaceSelection.fallFootprint(sp);
     List<HoleSpan> out = new ArrayList<>();
-    SurfaceSelection.holeSubSpans(sp, band, reached, ledges, out);
+    SurfaceSelection.holeSubSpans(sp, reached, ledges, out);
     return out;
   }
 
@@ -90,6 +87,19 @@ final class HoleSubSpanTest {
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
     StandableRect ledge = new StandableRect(0, 1, 2, 2, 62.0);
     List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
+    assertEquals(1, holes.size());
+    assertEquals(0.0, holes.get(0).lo(), EPS);
+    assertEquals(2.0, holes.get(0).hi(), EPS);
+  }
+
+  @Test
+  void reachedRectBesideTheRimDoesNotSplitTheEdge() {
+    // A reached floor four down whose footprint starts half a block beyond the rim
+    // is beside the fall line, not under it: it neither lands the drop nor marks a
+    // classification change, so the whole edge stays one hole.
+    SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
+    StandableRect beside = new StandableRect(1, 1.5, 2, 2.5, 60.0);
+    List<HoleSpan> holes = run(sp, List.of(beside));
     assertEquals(1, holes.size());
     assertEquals(0.0, holes.get(0).lo(), EPS);
     assertEquals(2.0, holes.get(0).hi(), EPS);

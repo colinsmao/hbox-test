@@ -240,23 +240,42 @@ merge seams nor wall/ceiling up-skirts). One pure predicate,
 `SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
 `BENIGN` in two steps:
 
-1. **Is there a reached surface strictly below the edge, under the fall footprint?** If
+1. **Is there a reached surface strictly below the edge, across the fall column?** If
    **no** &rarr; `HOLE` (the void, or unreached ground the mob cannot climb out of). This
    is the trivial definition of a hole: *not reachable*. Reachability is exactly
    **reached-set membership** — the flood already computed it for this entity (width,
    occlusion, reach all accounted for), so nothing is re-derived here.
 2. **If yes** (a reached floor at `landY`), **is there a standable ledge between the edge
    and that floor?** A ledge is a dilated standable surface with top strictly in
-   `(landY, T)` overlapping the footprint. If one exists &rarr; `HOLE` (the mob lands on
+   `(landY, T)` crossing the column. If one exists &rarr; `HOLE` (the mob lands on
    the ledge and is trapped above the reachable floor). Otherwise &rarr; `BENIGN`, fall
    distance `T − landY`.
 
 Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
-world read: `gatherLedges` finds candidate boxes with tops in `(landY, T)` over the
-footprint's columns and exposes each through **`WorldSurfaceIndex.tops`, the same
+world read: `gatherLedges` finds candidate boxes with tops in `(landY, T)` in the columns
+around the fall column and exposes each through **`WorldSurfaceIndex.tops`, the same
 per-box primitive the flood uses** (dilate by `W/2`, cut by the box's occluder shell) —
 so only flood-standable fragments count as ledges, and a wide hitbox is handled the same
 way the flood handles it. The ledge test reuses the flood's own standability.
+
+### The fall column
+
+Both steps ask the same question — *what is under the falling mob* — and the answer is
+`FallColumn(alongX, maxSide, line, lo, hi)`: **the rim line itself**, over the drop
+span's interval. Surfaces are already dilated by `W/2`, so a rim is exactly the line
+where a point-walker loses support and drops straight down it, and the entity's width is
+already carried by the rects being tested against it. A surface catches that fall iff it
+**crosses the line** — `RectMath.crossesLine(rect, alongX, maxSide, line)`: the rect
+starts at or before the line and reaches strictly past it on the drop side, plus
+positive overlap along the edge (`FallColumn.crosses`). Sub-spans narrow `[lo,hi]` and
+keep the line (`clampedTo`).
+
+The **drop side** is part of the query: only geometry reaching onto the far side of the
+rim can catch the fall. The dropping surface's own edge lies exactly on the line, so the
+crossing test reads it as behind the rim and a drop stays a drop (a symmetric "contains
+the line" test would turn every drop into a step-up). Ground that sits *beside* the rim
+— a terrace across a gap, a floating block a block out, a ledge clear of the cliff face
+— is passed on the way down, so such a rim stays a hole.
 
 **Exposure-agreement contract.** The invariant step 2 relies on: **a candidate ledge is
 exposed by `gatherLedges` iff the flood would expose it.** It holds **by construction**:
@@ -275,7 +294,10 @@ index over the exact shell a candidate top `L` needs, per axis:
 
 Because gather calls `tops()` rather than re-deriving this shell, the window that once
 drifted (capping Y at the rim, XZ at `ceil(halfW)`) and re-exposed buried ledges as false
-`HOLE`s is gone.
+`HOLE`s is gone. The **candidate** window on top of that shell is derived from the fall
+column itself — the rim column, the span's own columns, each widened by `ceil(halfW) + 1`
+for dilation — so it stays a function of the edge being classified rather than of however
+wide the classification region happens to be.
 
 Near the radius the selection is incomplete, but a drop there is still classified
 normally — a genuine deep drop reads HOLE. The **outermost edge**
@@ -285,11 +307,11 @@ a hole beam in the grey ring is blended toward grey by the same distance falloff
 greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
 The candidate drop spans are the compute-side down `SkirtSpan`s (every genuine drop
-edge). `computeHoles` walks them once per select: for each it builds the **fall
-footprint** (a one-block band just beyond the rim, on the drop side), gathers ledges, and
-classifies. Because **one edge can span reached and unreached ground**,
-`holeSubSpans` subdivides the edge at reached-rect
-boundaries into homogeneous sub-spans, classifies each via `classifyDrop`, and publishes
+edge). `computeHoles` walks them once per select: for each it takes the **fall column**,
+gathers ledges, and classifies. Because **one edge can span reached and unreached
+ground**, `holeSubSpans` subdivides the edge at the `[lo,hi]` of the reached rects that
+cross the line (`spanBreakpoints`) into homogeneous sub-spans — so a hole span's bounds
+are the geometry justifying it — classifies each via `classifyDrop`, and publishes
 the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
 ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
