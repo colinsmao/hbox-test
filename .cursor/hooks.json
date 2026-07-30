@@ -8,6 +8,12 @@
         "failClosed": true
       }
     ],
+    "subagentStart": [
+      {
+        "command": "node .cursor/hooks/subagent-model-gate.js",
+        "failClosed": true
+      }
+    ],
     "postToolUse": [
       {
         "command": "node .cursor/hooks/plan-checklist-nudge.js"

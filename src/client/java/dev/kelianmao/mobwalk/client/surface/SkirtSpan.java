@@ -20,10 +20,11 @@ package dev.kelianmao.mobwalk.client.surface;
  * @param direction   {@link Direction#UP} or {@link Direction#DOWN}.
  * @param maxExtent   max run length along {@code direction}; unlimited = {@link #UNLIMITED}.
  * @param depth       source rect flood-depth tag ({@code -1} = none).
+ * @param frontier    source rect cutoff-frontier flag.
  */
 public record SkirtSpan(boolean alongX, boolean maxSide, double line,
     double lo, double hi, double baseY, double visualBaseY,
-    Direction direction, double maxExtent, int depth) {
+    Direction direction, double maxExtent, int depth, boolean frontier) {
 
   /** Vertical run direction for an edge skirt. */
   public enum Direction {
@@ -34,10 +35,11 @@ public record SkirtSpan(boolean alongX, boolean maxSide, double line,
   /** Unlimited geometric extent (open drop / use full Appearance height). */
   public static final double UNLIMITED = Double.POSITIVE_INFINITY;
 
+  /** A span with no flood metadata (test fixtures / pre-flood construction). */
   public SkirtSpan(boolean alongX, boolean maxSide, double line,
       double lo, double hi, double baseY, double visualBaseY,
       Direction direction, double maxExtent) {
-    this(alongX, maxSide, line, lo, hi, baseY, visualBaseY, direction, maxExtent, -1);
+    this(alongX, maxSide, line, lo, hi, baseY, visualBaseY, direction, maxExtent, -1, false);
   }
 
   public boolean isUp() {

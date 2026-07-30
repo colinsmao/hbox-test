@@ -119,6 +119,23 @@ final class DownSkirtComputeTest {
   }
 
   @Test
+  void mergedCrossVisualOverlapHasNoFalseCollisionDrop() {
+    // Dump-shaped fixture: overlapping flush + raised at one collisionTopY.
+    // After the merge contract fix they tile (abut, no overlap); the collision
+    // down-skirt pass must see a seam at the shared rim, not a false drop that
+    // would feed hole beams with fall=0.
+    List<StandableRect> merged = RectMath.mergeAll(List.of(
+      new StandableRect(0, 0, 2, 1, 1.0, 1.0),
+      new StandableRect(1, 0, 3, 1, 1.0, 1.25)));
+    List<SkirtSpan> drops =
+      SurfaceSelection.computeDownSkirts(merged, List.of(), false);
+    assertTrue(find(drops, false, true, 1.0) == null,
+      "shared rim at x=1 must not be a collision drop after merge");
+    assertTrue(find(drops, false, false, 1.0) == null,
+      "shared rim at x=1 must not be a collision drop after merge");
+  }
+
+  @Test
   void sameVisualTopDifferentCollisionSuppressesSkirt() {
     // Soul sand's own remnant (64.875 collision, 65.0 visual) abutting the path lip
     // (64.9375 collision, 65.0 visual): equal visualTopY, so the visual pass draws no

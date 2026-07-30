@@ -50,11 +50,10 @@ default shape of every task.
    every logical change alters what gets calculated and therefore what is drawn.
    Treat logical steps as visual steps by default; when in doubt, it needs an in-game
    checklist.
-5. **Do not expand scope during execution.** Implement only the approved plan step.
-   If execution surfaces extra work (coalesce/union cleanup, related fixes, drive-by
-   refactors, "while we're here"), stop and surface that delta as a plan update for
-   discussion/approval before coding it. Execution follows the plan; scope changes
-   go through the plan first.
+5. **Do not expand scope during execution (does not affect planning stage).**
+   Implement only the approved plan step. If execution surfaces extra work
+   (cleanup, related fixes, possible optimizations), stop and surface that delta as
+   a plan update for discussion/approval, do not just code it.
 
 **The procedure, every step:**
 
@@ -68,9 +67,7 @@ default shape of every task.
 
 Every step's checklist also ends with the build gate (below) and inherits these
 **cross-cutting checks** (necessary, not sufficient): `runClient` launches with no
-log errors; no errors on world load/unload or window resize; the mod does nothing
-on a dedicated server. The current full feature checklist lives in
-[`docs/project.md`](docs/project.md).
+log errors; no errors on world load/unload or window resize.
 
 **Enforcement hooks (`.cursor/hooks.json`).** Project [Cursor hooks](https://cursor.com/docs/hooks)
 back these rules mechanically, so they aren't honor-system only — do not treat them
@@ -132,6 +129,12 @@ PowerShell gotchas that bite repeatedly (use the wrapper, not bash habits):
 Prefer the specialized file tools over shell for reading/searching/editing — that
 sidesteps most quoting issues; reserve the shell for real commands (`git`, `gh`,
 `./gradlew`).
+
+## Subagents
+
+- **Allowed subagent models only:** inherit the parent (omit `model`),
+  `composer-2.5`, or `cursor-grok-4.5-high`. Enforced by the
+  `subagentStart` hook in `.cursor/hooks.json`.
 
 ## Key constraints (all work)
 

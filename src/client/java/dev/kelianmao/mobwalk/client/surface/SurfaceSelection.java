@@ -51,14 +51,16 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *     overlapping translucent quads double-blend into darker seams — then a greedy
  *     strip merge along X then Z collapses the grid back, so a flat floor becomes
  *     one rect instead of many cells (clean skirts, fewer quads).
- * <li><b>Flood</b> the merged-rect graph from the seed rect(s) by <b>geometric
+ * <li><b>Flood</b> from the click origin (raw dilated footprints of the clicked
+ *     block, non-emitted) into the exposed-top graph by <b>geometric
  *     adjacency</b>: two rects are connected iff their footprints share an edge
  *     with positive overlap ({@link RectMath#footprintAdjacent}) and their heights are
- *     within the active {@link EntityProfile}'s {@code reach}. This one
- *     test subsumes the old same-block / own-column / 4-neighbor-column cases: a
- *     glass pane on a block connects to that block's exposed ring because their
- *     footprints abut at the hole edges, no special case needed. A dilated perch
- *     over the void floods directly because adjacency is geometric (no column).
+ *     within the active {@link EntityProfile}'s {@code reach}. Seed-block exposed
+ *     tops start at depth 0; other tops adjacent to the origin start at depth 1.
+ *     This one test subsumes the old same-block / own-column / 4-neighbor-column
+ *     cases: a glass pane on a block connects to that block's exposed ring because
+ *     their footprints abut at the hole edges, no special case needed. A dilated
+ *     perch over the void floods directly because adjacency is geometric (no column).
  * </ol>
  *
  * <p>For a gap of width {@code g} flanked by support, each side grows {@code W/2},
@@ -66,7 +68,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * hole — "can't fall into a hole smaller than yourself". (This stage shows only
  * the <em>geometry</em>; explicit hole detection is a later milestone.)
  *
- * <p><b>Radius is a BFS depth limit</b> (max hop-count from the seed), not a
+ * <p><b>Radius is a BFS depth limit</b> (max hop-count from the click origin), not a
  * spatial X/Z window: horizontal reach is unbounded; termination comes from the
  * hop-count cap plus a Y band of about {@code oy ± radius}. Connectivity gating is
  * unchanged (a drop {@code > reach} or a disconnected patch is never reached).
@@ -102,10 +104,128 @@ public final class SurfaceSelection {
   private record CellSurface(StandableRect rect, int cx, int cz) {
   }
 
+  /**
+   * Non-emitted click origin: the raw pre-occlusion dilated footprint of one
+   * clicked-block collision box at its {@code collisionTopY}. Probes enter the
+   * first BFS wave via adjacency only; they are never painted.
+   */
+  record OriginProbe(double minX, double minZ, double maxX, double maxZ,
+      double collisionTopY) {
+  }
+
+  /**
+   * An exposed top considered for the origin wave, carrying whether its source
+   * box is the clicked seed block (depth 0) or a neighbour (depth 1).
+   */
+  record OriginCandidate(StandableRect rect, int cx, int cz, boolean fromSeedBlock) {
+  }
+
+  /**
+   * One node of the flood's initial wave: an exposed top with its shortest-path
+   * depth from the click origin (0 = seed-block top, 1 = first hop).
+   */
+  record SeedWaveEntry(StandableRect rect, int cx, int cz, int depth) {
+  }
+
   // Column index key (block X/Z) for the per-column box lookup used to bound the
   // occluder search to the candidate's immediate neighborhood. Package-private so
   // the headroom predicate (exposeBox) can be unit-tested with a synthetic index.
   record ColKey(int x, int z) {
+  }
+
+  // World-read port of the shared WorldSurfaceIndex: the collision boxes of the
+  // block at (x,y,z) in absolute WorldBox coords (empty if none). Production wraps
+  // the Level read (the flood's producer also fills the visible/outline top);
+  // tests inject a synthetic world so the lazy scan window that builds the occluder
+  // index (not just exposeBox) is exercised directly.
+  @FunctionalInterface
+  interface ColumnBoxes {
+    List<WorldBox> at(int x, int y, int z);
+  }
+
+  // Shared lazy world-surface index: the per-column collision boxes found so far,
+  // which block rows have been queried, and the memoized per-box exposure (tops).
+  // Both the flood (LazyFlood) and the ledge gather (gatherLedgesFrom) sit on this,
+  // so the occluder shell has ONE definition — occluderColumns in XZ, rows
+  // floor(yMax)-1 .. floor(yMax+height)+1 in Y (the headroom extension) — and cannot
+  // drift between the two callers. Reads the world only through ColumnBoxes.
+  static final class WorldSurfaceIndex {
+    private final ColumnBoxes source;
+    private final double halfW;
+    private final double height;
+    private final int yLo;
+    private final int yHi;
+    private final Map<ColKey, List<WorldBox>> index = new HashMap<>();
+    private final Map<ColKey, BitSet> scanned = new HashMap<>();
+    private final Map<WorldBox, List<StandableRect>> boxSurfaces = new HashMap<>();
+
+    WorldSurfaceIndex(ColumnBoxes source, double halfW, double height, int yLo, int yHi) {
+      this.source = source;
+      this.halfW = halfW;
+      this.height = height;
+      this.yLo = yLo;
+      this.yHi = yHi;
+    }
+
+    // The boxes of column (cx,cz) discovered so far, or null if never scanned.
+    // Callers snapshot size() before calling tops (which may append occluder rows
+    // to this same live list).
+    List<WorldBox> column(int cx, int cz) {
+      return index.get(new ColKey(cx, cz));
+    }
+
+    // Query (and memoize) the collision boxes in column (cx,cz) for every block
+    // row in [a,b] not yet scanned, clamped to the band [yLo,yHi]. Idempotent:
+    // each (column,row) is queried at most once, so no duplicate boxes.
+    void ensureRows(int cx, int cz, int a, int b) {
+      a = Math.max(a, yLo);
+      b = Math.min(b, yHi);
+      if (a > b) {
+        return;
+      }
+      ColKey key = new ColKey(cx, cz);
+      BitSet bits = scanned.get(key);
+      if (bits == null) {
+        bits = new BitSet(yHi - yLo + 1);
+        scanned.put(key, bits);
+        index.put(key, new ArrayList<>());
+      }
+      List<WorldBox> column = index.get(key);
+      for (int y = a; y <= b; y++) {
+        int bit = y - yLo;
+        if (bits.get(bit)) {
+          continue;
+        }
+        bits.set(bit);
+        column.addAll(source.at(cx, y, cz));
+      }
+    }
+
+    // Dilated, occluder-trimmed tops of a single box (memoized). Exposes the box's
+    // occluder shell — the columns exposeBox scans, over the rows that can hold a
+    // box intruding into the standing column (T, T+height] above this top — before
+    // computing, so the headroom occlusion test sees a complete shell. The upper
+    // shell row is extended by floor(yMax+height)+1 (vs the box's own top) so
+    // headroom occluders ABOVE the top are scanned, not just the buried ones;
+    // height == 0 collapses it to row±1 (today's spans-above shell).
+    List<StandableRect> tops(WorldBox box) {
+      List<StandableRect> cached = boxSurfaces.get(box);
+      if (cached != null) {
+        return cached;
+      }
+      int[] win = occluderColumns(box, halfW);
+      int row = (int) Math.floor(box.yMax());
+      int rowHi = (int) Math.floor(box.yMax() + height) + 1;
+      for (int cx = win[0]; cx <= win[1]; cx++) {
+        for (int cz = win[2]; cz <= win[3]; cz++) {
+          ensureRows(cx, cz, row - 1, rowHi);
+        }
+      }
+      List<StandableRect> out = new ArrayList<>();
+      exposeBox(box, index, halfW, height, out);
+      boxSurfaces.put(box, out);
+      return out;
+    }
   }
 
   // Tolerance for the double coordinate compares (box edges are multiples of 1/16).
@@ -159,8 +279,11 @@ public final class SurfaceSelection {
 
   /**
    * Replace the selection with the merged standable surfaces reachable from the
-   * surfaces of {@code start}, within BFS hop-count {@code radius} of the seed,
-   * for the entity's width/reach, across footprint-adjacent height-gated steps.
+   * click origin at {@code start}, within BFS hop-count {@code radius} of that
+   * origin, for the entity's width/reach, across footprint-adjacent height-gated
+   * steps. The origin is the clicked block's raw dilated collision footprints
+   * (non-emitted); only exposed tops enter the painted set (depth 0 on the seed
+   * block's own exposed tops, depth 1 on other tops adjacent to the origin).
    *
    * <p>Runs the output-sensitive {@link LazyFlood} (on-demand column/row
    * exposure), then computes occluders, down-skirts, and holes.
@@ -198,7 +321,7 @@ public final class SurfaceSelection {
     downSkirts = raisedVisual
       ? computeDownSkirts(result, occluders, true)
       : dropEdges;
-    holes = computeHoles(level, result, dropEdges, profile, radius);
+    holes = computeHoles(level, result, dropEdges, profile);
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop);
       debugDumpOnce = false;
@@ -241,9 +364,9 @@ public final class SurfaceSelection {
     MobWalk.LOGGER.info("[flood-debug] {}={}", label, rects.size());
     for (StandableRect r : rects) {
       MobWalk.LOGGER.info(
-        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} depth={}",
+        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} depth={} frontier={}",
         label, r.minX(), r.maxX(), r.minZ(), r.maxZ(),
-        r.collisionTopY(), r.visualTopY(), r.depth());
+        r.collisionTopY(), r.visualTopY(), r.depth(), r.frontier());
     }
   }
 
@@ -274,6 +397,66 @@ public final class SurfaceSelection {
   /** Immutable snapshot of the hole spans (through-walls beam markers) for the reached set. */
   public List<HoleSpan> allHoles() {
     return holes;
+  }
+
+  /**
+   * Initial BFS wave from non-emitted {@link OriginProbe}s: keep candidates that
+   * are footprint-adjacent to a probe within {@code reach} of that probe's
+   * height; assign depth 0 when {@code fromSeedBlock}, else 1; keep the minimum
+   * depth on duplicates; drop depths above {@code depthLimit}. Returns depth-0
+   * entries before depth-1 so a FIFO queue preserves shortest-path order.
+   * Package-private for unit tests (synthetic probes/candidates, no world).
+   */
+  static List<SeedWaveEntry> assignOriginWave(List<OriginProbe> probes,
+      List<OriginCandidate> candidates, double reach, int depthLimit) {
+    if (probes.isEmpty() || candidates.isEmpty() || depthLimit < 0) {
+      return List.of();
+    }
+    Map<CellSurface, Integer> best = new HashMap<>();
+    for (OriginCandidate c : candidates) {
+      StandableRect r = c.rect();
+      boolean adjacent = false;
+      for (OriginProbe p : probes) {
+        if (Math.abs(r.collisionTopY() - p.collisionTopY()) > reach + EPS) {
+          continue;
+        }
+        if (probeFootprintAdjacent(p, r)) {
+          adjacent = true;
+          break;
+        }
+      }
+      if (!adjacent) {
+        continue;
+      }
+      int depth = c.fromSeedBlock() ? 0 : 1;
+      if (depth > depthLimit) {
+        continue;
+      }
+      CellSurface key = new CellSurface(r, c.cx(), c.cz());
+      best.merge(key, depth, RectMath::minDepth);
+    }
+    List<SeedWaveEntry> depth0 = new ArrayList<>();
+    List<SeedWaveEntry> depth1 = new ArrayList<>();
+    for (Map.Entry<CellSurface, Integer> e : best.entrySet()) {
+      CellSurface s = e.getKey();
+      SeedWaveEntry entry = new SeedWaveEntry(s.rect(), s.cx(), s.cz(), e.getValue());
+      if (e.getValue() == 0) {
+        depth0.add(entry);
+      } else {
+        depth1.add(entry);
+      }
+    }
+    List<SeedWaveEntry> out = new ArrayList<>(depth0.size() + depth1.size());
+    out.addAll(depth0);
+    out.addAll(depth1);
+    return out;
+  }
+
+  // footprintAdjacent for a raw dilated probe vs an exposed standable top.
+  private static boolean probeFootprintAdjacent(OriginProbe p, StandableRect r) {
+    return RectMath.footprintAdjacent(
+      new StandableRect(p.minX(), p.minZ(), p.maxX(), p.maxZ(), p.collisionTopY()),
+      r);
   }
 
   /**
@@ -490,9 +673,10 @@ public final class SurfaceSelection {
       double halfW, double height, List<SkirtSpan> out) {
     double collisionTopY = r.collisionTopY();
     double visualTopY = r.visualTopY();
-    // The occluder skirt inherits its surface's flood-depth so the two share a
-    // color band in the debug depth-coloring (see StandableRect.depth).
+    // The occluder skirt inherits its surface's flood-depth and frontier flag so
+    // draw shares the surface's color / cutoff band (see StandableRect).
     int depth = r.depth();
+    boolean frontier = r.frontier();
     for (WorldBox b : candidates) {
       if (!wallOccluder(b, collisionTopY, height)) {
         continue;
@@ -508,11 +692,11 @@ public final class SurfaceSelection {
       if (zHi - zLo > EPS) {
         if (Math.abs(oMinX - r.maxX()) < EPS) {
           out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
         if (Math.abs(oMaxX - r.minX()) < EPS) {
           out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
       }
       double xLo = Math.max(oMinX, r.minX());
@@ -520,11 +704,11 @@ public final class SurfaceSelection {
       if (xHi - xLo > EPS) {
         if (Math.abs(oMinZ - r.maxZ()) < EPS) {
           out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
         if (Math.abs(oMaxZ - r.minZ()) < EPS) {
           out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth));
+            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
         }
       }
     }
@@ -557,8 +741,10 @@ public final class SurfaceSelection {
       double visualBase = head.visualBaseY();
       // Coalesced spans can come from different surfaces (same edge line/height,
       // different depth); take the min so the merged marker reads as the nearest
-      // surface's band (mirrors the max-stop handling above).
+      // surface's band (mirrors the max-stop handling above). Frontier only when
+      // every piece is frontier — an inner piece keeps the span drawable.
       int spanDepth = head.depth();
+      boolean spanFrontier = head.frontier();
       for (int i = 1; i < group.size(); i++) {
         SkirtSpan s = group.get(i);
         if (s.lo() <= hi + EPS) {
@@ -566,20 +752,22 @@ public final class SurfaceSelection {
           stop = Math.max(stop, s.visualBaseY() + s.maxExtent());
           visualBase = Math.max(visualBase, s.visualBaseY());
           spanDepth = RectMath.minDepth(spanDepth, s.depth());
+          spanFrontier = spanFrontier && s.frontier();
         } else {
           out.add(new SkirtSpan(head.alongX(), head.maxSide(),
             head.line(), lo, hi, head.baseY(), visualBase,
-            SkirtSpan.Direction.UP, stop - visualBase, spanDepth));
+            SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier));
           lo = s.lo();
           hi = s.hi();
           stop = s.visualBaseY() + s.maxExtent();
           visualBase = s.visualBaseY();
           spanDepth = s.depth();
+          spanFrontier = s.frontier();
         }
       }
       out.add(new SkirtSpan(head.alongX(), head.maxSide(),
         head.line(), lo, hi, head.baseY(), visualBase,
-        SkirtSpan.Direction.UP, stop - visualBase, spanDepth));
+        SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier));
     }
     return out;
   }
@@ -805,7 +993,7 @@ public final class SurfaceSelection {
       }
       if (!Double.isNaN(runLo)) {
         out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-          SkirtSpan.Direction.DOWN, runExtent, r.depth()));
+          SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier()));
       }
       runLo = a;
       runHi = b;
@@ -813,7 +1001,7 @@ public final class SurfaceSelection {
     }
     if (!Double.isNaN(runLo)) {
       out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-        SkirtSpan.Direction.DOWN, runExtent, r.depth()));
+        SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier()));
     }
   }
 
@@ -836,7 +1024,7 @@ public final class SurfaceSelection {
   // span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
   // homogeneous sub-spans. Runs once per select (not per frame).
   private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
-      List<SkirtSpan> drops, EntityProfile profile, int depthLimit) {
+      List<SkirtSpan> drops, EntityProfile profile) {
     if (drops.isEmpty()) {
       return List.of();
     }
@@ -844,14 +1032,13 @@ public final class SurfaceSelection {
     double height = profile.height();
     List<HoleSpan> out = new ArrayList<>();
     List<StandableRect> ledges = new ArrayList<>();
-    BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
     for (SkirtSpan sp : drops) {
-      if (sp.depth() >= depthLimit) {
+      if (sp.frontier()) {
         continue;
       }
       RectMath.Rect band = fallFootprint(sp);
       ledges.clear();
-      gatherLedges(level, cursor, band, sp.baseY(), rects, halfW, height, ledges);
+      gatherLedges(level, band, sp.baseY(), rects, halfW, height, ledges);
       holeSubSpans(sp, band, rects, ledges, out);
     }
     return out;
@@ -965,15 +1152,51 @@ public final class SurfaceSelection {
   }
 
 
+  // Level-backed ColumnBoxes producer: the collision boxes of block (x,y,z) as
+  // absolute WorldBoxes carrying the block's collision/outline tops (the outline
+  // read is paid only when computeVisualTop is on). Shared by the flood and the
+  // ledge gather so there is one world-read implementation behind WorldSurfaceIndex.
+  private static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop) {
+    BlockPos.MutableBlockPos scan = new BlockPos.MutableBlockPos();
+    return (x, y, z) -> {
+      scan.set(x, y, z);
+      BlockState state = level.getBlockState(scan);
+      VoxelShape shape = state.getCollisionShape(level, scan, CollisionContext.empty());
+      if (shape.isEmpty()) {
+        return List.of();
+      }
+      double blockCollisionTop = y + shape.max(Direction.Axis.Y);
+      double blockOutlineTop = visibleTop(level, scan, state, blockCollisionTop, computeVisualTop);
+      List<WorldBox> boxes = new ArrayList<>();
+      for (AABB box : shape.toAabbs()) {
+        boxes.add(new WorldBox(x, y, z,
+          x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
+          y + box.minY, y + box.maxY,
+          blockCollisionTop, blockOutlineTop));
+      }
+      return boxes;
+    };
+  }
+
   // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY that
-  // overlap the fall footprint — intermediate ledges that would trap the entity. For
-  // each block column overlapping fp, scan rows in (landY, collisionTopY), gather collision
-  // boxes, build a local occluder index, and call exposeBox on each candidate whose
-  // top is strictly between landY and collisionTopY. Appends exposed StandableRects to out.
-  // Only called when a reached floor exists below (landY is known).
-  private static void gatherLedges(Level level, BlockPos.MutableBlockPos cursor,
-      RectMath.Rect fp, double collisionTopY, List<StandableRect> reached, double halfW, double height,
-      List<StandableRect> out) {
+  // overlap the fall footprint — intermediate ledges that would trap the entity. Only
+  // called when a reached floor exists below (landY is known). The occluder shell is
+  // supplied by WorldSurfaceIndex.tops (the same primitive the flood uses), so the
+  // ledge gather cannot re-expose a fragment the flood buried.
+  private static void gatherLedges(Level level, RectMath.Rect fp, double collisionTopY,
+      List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
+    gatherLedgesFrom(levelColumnBoxes(level, false), fp, collisionTopY, reached, halfW, height, out);
+  }
+
+  // Pure kernel of gatherLedges: reads the world only through the ColumnBoxes port,
+  // driving a WorldSurfaceIndex. Finds candidate boxes whose top lies in
+  // (landY, collisionTopY) over the footprint's columns, then exposes each via
+  // index.tops(candidate) — the SAME occluder-shell primitive the flood uses. So a
+  // fragment the flood buried (a headroom ceiling above the rim, a wide-entity
+  // occluder a column or two out) can never be re-exposed here, and no window is
+  // re-derived to drift. Package-private for tests (synthetic world via the port).
+  static void gatherLedgesFrom(ColumnBoxes source, RectMath.Rect fp, double collisionTopY,
+      List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
     // Find landY: the topmost reached surface below collisionTopY overlapping the footprint.
     double landY = Double.NEGATIVE_INFINITY;
     for (StandableRect r : reached) {
@@ -991,54 +1214,42 @@ public final class SurfaceSelection {
     if (landY == Double.NEGATIVE_INFINITY) {
       return;
     }
-    // Scan block columns overlapping the footprint. Candidates are boxes whose
-    // top lies in (landY, collisionTopY). The occluder index must also include collision
-    // from the block row below landY — shapes that live in a lower block but
-    // rise into (landY, collisionTopY) (walls/fences at height 1.5). Those
-    // occluders-from-below keep exposeBox burial complete for rising shapes.
-    // Motivating case: lantern on a wall — the wall box is in floor(landY)-1
-    // and must bury the lantern body.
-    //
-    // Assumption (recorded): one block row below landY is enough because
-    // vanilla collision that matters here extends at most ~1.5 upward from its
-    // block Y. A taller single-block collision (or a multi-block pillar whose
-    // lowest piece sits further below) would need a deeper yLo; revisit then.
+    // Band covers candidate finding (down to floor(landY)-1 for shapes rising from the
+    // row below) and every candidate's headroom shell (up to floor(collisionTopY+height)+1,
+    // since candidate tops are < collisionTopY). tops() ensures its own shell within it.
+    int bandLo = (int) Math.floor(landY) - 1;
+    int bandHi = (int) Math.floor(collisionTopY + height) + 1;
+    WorldSurfaceIndex surfaces = new WorldSurfaceIndex(source, halfW, height, bandLo, bandHi);
+    // Candidate boxes: tops strictly in (landY, collisionTopY) over the footprint's
+    // columns. Dilation reaches at most one column beyond the footprint, so expand
+    // the candidate scan by ceil(halfW); the occluder shell is tops()'s concern.
     int xLo = (int) Math.floor(fp.minX());
     int xHi = (int) Math.ceil(fp.maxX()) - 1;
     int zLo = (int) Math.floor(fp.minZ());
     int zHi = (int) Math.ceil(fp.maxZ()) - 1;
-    int yLo = (int) Math.floor(landY) - 1;
-    int yHi = (int) Math.ceil(collisionTopY);
-    Map<ColKey, List<WorldBox>> index = new HashMap<>();
+    int reachCols = (int) Math.ceil(halfW);
+    int scanLo = (int) Math.floor(landY) - 1;
+    int scanHi = (int) Math.ceil(collisionTopY);
     List<WorldBox> candidates = new ArrayList<>();
-    for (int x = xLo - (int) Math.ceil(halfW); x <= xHi + (int) Math.ceil(halfW) + 1; x++) {
-      for (int z = zLo - (int) Math.ceil(halfW); z <= zHi + (int) Math.ceil(halfW) + 1; z++) {
-        for (int y = yLo; y <= yHi; y++) {
-          cursor.set(x, y, z);
-          VoxelShape shape = level.getBlockState(cursor)
-            .getCollisionShape(level, cursor, CollisionContext.empty());
-          if (shape.isEmpty()) {
-            continue;
-          }
-          for (AABB box : shape.toAabbs()) {
-            WorldBox wb = new WorldBox(x, y, z,
-              x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
-              y + box.minY, y + box.maxY);
-            index.computeIfAbsent(new ColKey(x, z), k -> new ArrayList<>()).add(wb);
-            double top = wb.yMax();
-            if (top > landY + EPS && top < collisionTopY - EPS) {
-              candidates.add(wb);
-            }
+    for (int x = xLo - reachCols; x <= xHi + reachCols + 1; x++) {
+      for (int z = zLo - reachCols; z <= zHi + reachCols + 1; z++) {
+        surfaces.ensureRows(x, z, scanLo, scanHi);
+        List<WorldBox> column = surfaces.column(x, z);
+        if (column == null) {
+          continue;
+        }
+        for (WorldBox wb : column) {
+          double top = wb.yMax();
+          if (top > landY + EPS && top < collisionTopY - EPS) {
+            candidates.add(wb);
           }
         }
       }
     }
-    // exposeBox each candidate and collect fragments overlapping the footprint.
-    List<StandableRect> exposed = new ArrayList<>();
+    // Expose each candidate against the flood's occluder shell; keep fragments in
+    // (landY, collisionTopY) overlapping the footprint.
     for (WorldBox cand : candidates) {
-      exposed.clear();
-      exposeBox(cand, index, halfW, height, exposed);
-      for (StandableRect s : exposed) {
+      for (StandableRect s : surfaces.tops(cand)) {
         if (s.collisionTopY() <= landY + EPS || s.collisionTopY() >= collisionTopY - EPS) {
           continue;
         }
@@ -1110,8 +1321,9 @@ public final class SurfaceSelection {
    * reach} step, plus each box's occluder shell at the rows around its own top),
    * never the full {@code [yLo,yHi]} band. {@link #ensureRows} tracks scanned
    * rows per column (a {@link BitSet}) so each {@code (column,row)} is queried at
-   * most once. Only the origin column exposes its full band (to seed every
-   * standable top there). This drops the per-column vertical factor from
+   * most once. The flood boots from the clicked block's raw dilated collision
+   * footprints (non-emitted origin probes); only exposed tops enter the reached
+   * set. This drops the per-column vertical factor from
    * {@code O(radius)} to {@code O(heights the flood actually traverses there)},
    * so open ground goes from {@code ~radius^3} toward {@code ~radius^2}. It is
    * orthogonal to (and composes with) the horizontal {@code occluderColumns}
@@ -1140,50 +1352,37 @@ public final class SurfaceSelection {
    * unchanged — {@code RectMath.footprintAdjacent} already treats overlap as connected).
    */
   private static final class LazyFlood {
-    private final Level level;
     private final int ox;
     private final int oy;
     private final int oz;
     private final int depthLimit;
     private final double halfW;
-    private final double height;
     private final double reach;
     // Chebyshev neighbour-search radius in cells = floor(W)+1 (see class doc).
     private final int neighbour;
-    // Whether to pay the visible/outline-top read (Appearance render toggle; see
-    // visibleTop). Off, nothing raises and the neighbour split never fires.
-    private final boolean computeVisualTop;
-    private final int yLo;
-    private final int yHi;
-    // Per-column collision boxes found so far (the occluder index), and which
-    // block rows of each column have already been queried (bit i == row yLo+i).
-    // Lazy in Y: a column is scanned only over the narrow row windows the flood
-    // actually needs near its current height, never the full [yLo,yHi] band.
-    private final Map<ColKey, List<WorldBox>> index = new HashMap<>();
-    private final Map<ColKey, BitSet> scanned = new HashMap<>();
-    // exposeBox memoized per source box (its occluder shell is fixed once the
-    // rows around its top are exposed), so a box's top is computed exactly once
-    // even though a cell is revisited from many neighbours / at many heights.
-    private final Map<WorldBox, List<StandableRect>> boxSurfaces = new HashMap<>();
-    private final BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+    // The shared lazy world-surface index (per-column boxes + scanned rows + memoized
+    // per-box tops). Lazy in Y: a column is scanned only over the narrow row windows
+    // the flood needs near its current height. The ledge gather uses the same type so
+    // the occluder shell is defined once (see WorldSurfaceIndex).
+    private final WorldSurfaceIndex surfaces;
     // Pre-merge BFS reached set (for /mobwalk dump); empty until run() finishes.
     private List<StandableRect> preMergeReached = List.of();
 
     LazyFlood(Level level, BlockPos start, int depthLimit, EntityProfile profile,
         boolean computeVisualTop) {
-      this.level = level;
       BlockPos origin = start.immutable();
       this.ox = origin.getX();
       this.oy = origin.getY();
       this.oz = origin.getZ();
       this.depthLimit = depthLimit;
       this.halfW = profile.width() / 2.0;
-      this.height = profile.height();
+      double height = profile.height();
       this.reach = profile.reach();
       this.neighbour = (int) Math.floor(profile.width()) + 1;
-      this.computeVisualTop = computeVisualTop;
-      this.yLo = Math.max(oy - depthLimit - 1, level.getMinY());
-      this.yHi = Math.min(oy + depthLimit + 1, level.getMaxY());
+      int bandLo = Math.max(oy - depthLimit - 1, level.getMinY());
+      int bandHi = Math.min(oy + depthLimit + 1, level.getMaxY());
+      this.surfaces = new WorldSurfaceIndex(
+        levelColumnBoxes(level, computeVisualTop), halfW, height, bandLo, bandHi);
     }
 
     List<StandableRect> preMergeReached() {
@@ -1191,21 +1390,37 @@ public final class SurfaceSelection {
     }
 
     List<StandableRect> run() {
-      // Seeds: standable tops of the clicked block. Other tops in the origin
-      // column join via normal BFS hops.
-      List<CellSurface> seeds = collectSeedBlock();
-      if (seeds.isEmpty()) {
+      // Click origin: raw pre-occlusion dilated footprints of the clicked block
+      // (never painted). First expansion enters the exposed-top graph at depth 0
+      // (seed-block tops) or depth 1 (other abutting tops).
+      List<OriginProbe> probes = buildClickProbes();
+      if (probes.isEmpty()) {
+        preMergeReached = List.of();
+        return List.of();
+      }
+      List<OriginCandidate> candidates = new ArrayList<>();
+      for (OriginProbe probe : probes) {
+        double h = probe.collisionTopY();
+        for (int cx = ox - neighbour; cx <= ox + neighbour; cx++) {
+          for (int cz = oz - neighbour; cz <= oz + neighbour; cz++) {
+            collectCandidates(cx, cz, h - reach, h + reach, candidates);
+          }
+        }
+      }
+      List<SeedWaveEntry> initial = assignOriginWave(probes, candidates, reach, depthLimit);
+      if (initial.isEmpty()) {
         preMergeReached = List.of();
         return List.of();
       }
       // hopCount doubles as the visited set: a key is present iff visited, and its
-      // value is the BFS hop-count from the seed (0 = seed). FIFO queue + set on
-      // enqueue makes this the shortest surface-graph distance.
+      // value is the BFS hop-count from the click origin (0 = seed-block top).
+      // FIFO + depth-0-before-depth-1 enqueue makes this the shortest distance.
       Map<CellSurface, Integer> hopCount = new HashMap<>();
       Deque<CellSurface> queue = new ArrayDeque<>();
-      for (CellSurface seed : seeds) {
-        if (hopCount.putIfAbsent(seed, 0) == null) {
-          queue.addLast(seed);
+      for (SeedWaveEntry entry : initial) {
+        CellSurface s = new CellSurface(entry.rect(), entry.cx(), entry.cz());
+        if (hopCount.putIfAbsent(s, entry.depth()) == null) {
+          queue.addLast(s);
         }
       }
       // The reached raw (pre-merge) nodes and their depths, in lock-step; the
@@ -1239,10 +1454,9 @@ public final class SurfaceSelection {
         }
       }
       preMergeReached = List.copyOf(reached);
-      // Frontier-split merge: union inner and frontier separately, subtract
-      // inner from frontier (inner has priority in the dilation overlap),
-      // so the frontier ring keeps its real depth and is never collapsed
-      // into the inner blob.
+      // Composite-priority merge: INNER surface classes then FRONTIER surface
+      // classes in one priority partition (inner owns dilation overlap), so
+      // the frontier ring stays a separate depth band.
       int[] rawDepths = new int[reachedDepths.size()];
       for (int i = 0; i < rawDepths.length; i++) {
         rawDepths[i] = reachedDepths.get(i);
@@ -1250,27 +1464,53 @@ public final class SurfaceSelection {
       return RectMath.mergeCoplanarSplitFrontier(reached, rawDepths, depthLimit);
     }
 
-    // Standable tops of the clicked seed block (source block Y == oy). Keyed on
-    // block Y so every top of that block is seeded, including fence tops above
-    // oy+1.
-    private List<CellSurface> collectSeedBlock() {
-      ensureRows(ox, oz, oy, oy);
-      List<WorldBox> column = index.get(new ColKey(ox, oz));
+    // Raw pre-occlusion dilated footprints of collision boxes owned by the
+    // clicked block (source block Y == oy). Non-emitted flood origin.
+    private List<OriginProbe> buildClickProbes() {
+      surfaces.ensureRows(ox, oz, oy, oy);
+      List<WorldBox> column = surfaces.column(ox, oz);
       if (column == null) {
         return List.of();
       }
-      List<CellSurface> surfaces = new ArrayList<>();
+      List<OriginProbe> probes = new ArrayList<>();
       int count = column.size();
       for (int i = 0; i < count; i++) {
         WorldBox box = column.get(i);
         if (box.by() != oy) {
           continue;
         }
-        for (StandableRect r : tops(box)) {
-          surfaces.add(new CellSurface(r, ox, oz));
+        probes.add(new OriginProbe(
+          box.minX() - halfW, box.minZ() - halfW,
+          box.maxX() + halfW, box.maxZ() + halfW,
+          box.yMax()));
+      }
+      return probes;
+    }
+
+    // Exposed tops of cell (cx,cz) in [topLo,topHi] with seed-block provenance,
+    // appended to {@code out} (duplicates across overlapping probe windows are
+    // fine — assignOriginWave keeps min depth).
+    private void collectCandidates(int cx, int cz, double topLo, double topHi,
+        List<OriginCandidate> out) {
+      surfaces.ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
+      List<WorldBox> column = surfaces.column(cx, cz);
+      if (column == null) {
+        return;
+      }
+      int count = column.size();
+      for (int i = 0; i < count; i++) {
+        WorldBox box = column.get(i);
+        if (Math.abs(box.by() - oy) > depthLimit) {
+          continue;
+        }
+        if (box.yMax() < topLo - EPS || box.yMax() > topHi + EPS) {
+          continue;
+        }
+        boolean fromSeed = box.bx() == ox && box.by() == oy && box.bz() == oz;
+        for (StandableRect r : surfaces.tops(box)) {
+          out.add(new OriginCandidate(r, cx, cz, fromSeed));
         }
       }
-      return surfaces;
     }
 
     // Node surfaces of cell (cx,cz) whose top lies in [topLo,topHi] and whose
@@ -1278,12 +1518,12 @@ public final class SurfaceSelection {
     // such tops (plus each box's occluder shell), so vertical work tracks the
     // flood front, not the band. exposeBox is memoized per box.
     private List<CellSurface> collect(int cx, int cz, double topLo, double topHi) {
-      ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
-      List<WorldBox> column = index.get(new ColKey(cx, cz));
+      surfaces.ensureRows(cx, cz, (int) Math.floor(topLo) - 1, (int) Math.floor(topHi) + 1);
+      List<WorldBox> column = surfaces.column(cx, cz);
       if (column == null) {
         return List.of();
       }
-      List<CellSurface> surfaces = new ArrayList<>();
+      List<CellSurface> result = new ArrayList<>();
       // Index over an explicit count: tops() may append to this same column
       // (occluder rows in the box's own cell), and we must not revisit those.
       int count = column.size();
@@ -1296,77 +1536,12 @@ public final class SurfaceSelection {
         if (box.yMax() < topLo - EPS || box.yMax() > topHi + EPS) {
           continue;
         }
-        for (StandableRect r : tops(box)) {
-          surfaces.add(new CellSurface(r, cx, cz));
+        for (StandableRect r : surfaces.tops(box)) {
+          result.add(new CellSurface(r, cx, cz));
         }
       }
-      return surfaces;
+      return result;
     }
 
-    // Dilated, occluder-trimmed tops of a single box (memoized). Exposes the
-    // box's occluder shell — the columns exposeBox scans, over the rows that can
-    // hold a box intruding into the standing column (T, T+height] above this top —
-    // before computing, so the headroom occlusion test sees a complete shell.
-    // The upper shell row is extended by floor(yMax+height)+1 (vs the box's own
-    // top) so headroom occluders ABOVE the top are scanned, not just the buried
-    // ones; height == 0 collapses it to row±1 (today's spans-above shell).
-    private List<StandableRect> tops(WorldBox box) {
-      List<StandableRect> cached = boxSurfaces.get(box);
-      if (cached != null) {
-        return cached;
-      }
-      int[] win = occluderColumns(box, halfW);
-      int row = (int) Math.floor(box.yMax());
-      int rowHi = (int) Math.floor(box.yMax() + height) + 1;
-      for (int cx = win[0]; cx <= win[1]; cx++) {
-        for (int cz = win[2]; cz <= win[3]; cz++) {
-          ensureRows(cx, cz, row - 1, rowHi);
-        }
-      }
-      List<StandableRect> out = new ArrayList<>();
-      exposeBox(box, index, halfW, height, out);
-      boxSurfaces.put(box, out);
-      return out;
-    }
-
-    // Query (and memoize) the collision boxes in column (cx,cz) for every block
-    // row in [a,b] not yet scanned, clamped to the band [yLo,yHi]. Idempotent:
-    // each (column,row) is queried at most once, so no duplicate boxes.
-    private void ensureRows(int cx, int cz, int a, int b) {
-      a = Math.max(a, yLo);
-      b = Math.min(b, yHi);
-      if (a > b) {
-        return;
-      }
-      ColKey key = new ColKey(cx, cz);
-      BitSet bits = scanned.get(key);
-      if (bits == null) {
-        bits = new BitSet(yHi - yLo + 1);
-        scanned.put(key, bits);
-        index.put(key, new ArrayList<>());
-      }
-      List<WorldBox> column = index.get(key);
-      for (int y = a; y <= b; y++) {
-        int bit = y - yLo;
-        if (bits.get(bit)) {
-          continue;
-        }
-        bits.set(bit);
-        cursor.set(cx, y, cz);
-        BlockState state = level.getBlockState(cursor);
-        VoxelShape shape = state.getCollisionShape(level, cursor, CollisionContext.empty());
-        if (shape.isEmpty()) {
-          continue;
-        }
-        double blockCollisionTop = y + shape.max(Direction.Axis.Y);
-        double blockOutlineTop = visibleTop(level, cursor, state, blockCollisionTop, computeVisualTop);
-        for (AABB box : shape.toAabbs()) {
-          column.add(new WorldBox(cx, y, cz,
-            cx + box.minX, cz + box.minZ, cx + box.maxX, cz + box.maxZ,
-            y + box.minY, y + box.maxY,
-            blockCollisionTop, blockOutlineTop));
-        }
-      }
-    }
   }
 }

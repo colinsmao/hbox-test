@@ -189,9 +189,9 @@ the published snapshots into `SurfaceEmitter.emit`.
   `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
   switches RGB to the cyclic BFS-depth hue band (`Palette` / `depthColor`, blue at
   depth 0, cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color. Cutoff ring greying (`Palette.colorAtDepth` → `greyBlend`)
-  applies in both modes when Debug `showCutoffRing` is on (default); when off, those
-  ring depths are not drawn.
+  out-of-sequence color. Frontier greying (`Palette.colorAtDepth` when
+  `rect.frontier()`) applies in both modes when Debug `showCutoffRing` is on
+  (default); when off, frontier tops are not drawn.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
   `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
   surfaces *through* blocks is a debug aid, so when the option is on the top is
@@ -206,16 +206,19 @@ the published snapshots into `SurfaceEmitter.emit`.
   while sneaking** when `crouchSeeThroughWalls` is on (`crouching`, sampled in
   `extract` — same gate as through-walls tops).
 - **Skirts: square, fading, depth-tested.** Each edge drops a double-winding vertical
-  skirt of height Appearance `downSkirtHeight` (default `2`; `0` skips draw), darker,
-  **solid over its top half and fading to transparent over the bottom half** so a deep
-  drop doesn't read as a hard floating wall. Skirts always live in the depth-tested
-  `SKIRT` layer, so a step reads as a riser, a real drop as an open wall, and interior
-  skirts on solid-backed floors self-hide. (A **translucent** block writes no depth and
-  so doesn't occlude a skirt — accepted limitation.) Tops/borders draw at **true rect
-  bounds**; only the skirts are nudged out by a tiny `SKIRT_OFFSET` (0.002, square) to
-  dodge z-fighting the coplanar terrain face (`Y_OFFSET` is likewise 0.002). *Skirts are
-  square, not splayed: a trapezoidal/dilated skirt clips the block's upper edge and
-  re-introduces overlap.*
+  skirt of height Appearance `downSkirtHeight` (default `2`; `0` skips draw), dimmed
+  by vanilla face brightness (N/S 0.8, E/W 0.6), **fading linearly from walkable fill alpha at the rim to
+  transparent at the far end of the Appearance height**. Draw length is
+  `min(Appearance height, maxExtent)`; when `maxExtent` clips the quad shorter than
+  the configured height, the tip samples the same fade curve and keeps residual alpha
+  (e.g. extent 0.5 with height 2 ends at 0.75× fill alpha). Skirts always live in the
+  depth-tested `SKIRT` layer, so a step reads as a riser, a real drop as an open wall,
+  and interior skirts on solid-backed floors self-hide. (A **translucent** block writes
+  no depth and so doesn't occlude a skirt — accepted limitation.) Tops/borders draw at
+  **true rect bounds**; only the skirts are nudged out by a tiny `SKIRT_OFFSET` (0.002,
+  square) to dodge z-fighting the coplanar terrain face (`Y_OFFSET` is likewise 0.002).
+  *Skirts are square, not splayed: a trapezoidal/dilated skirt clips the block's upper
+  edge and re-introduces overlap.*
 - **Skirt-diff, computed compute-side (`computeDownSkirts` / down `SkirtSpan`).** Any
   rectangle partition of a holed / L-shaped level has *internal* edges between
   equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
@@ -255,8 +258,9 @@ the published snapshots into `SurfaceEmitter.emit`.
   hole candidates.
 - **Upward (occluder) skirts.** Drawn from published up `SkirtSpan`s at Appearance
   `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to `maxExtent` (wall
-  available above the surface), solid at the base and fading to transparent at the tip.
-  Same depth-tested `SKIRT` layer as down skirts; nudged toward the surface interior by
+  available above the surface). Same single-quad fade as down skirts (peak =
+  walkable fill alpha at the surface; tip samples the Appearance-height curve when
+  clipped). Same depth-tested `SKIRT` layer; nudged toward the surface interior by
   `SKIRT_OFFSET`.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a wand
   selection active it re-runs `select` once with a one-shot flag, writes a single
@@ -281,22 +285,12 @@ the published snapshots into `SurfaceEmitter.emit`.
   raise is inherently a compute-side read. All walkability math is unaffected
   (collision-top only); this is purely where the paint is drawn.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
-  `showCutoffRing` is on (default), surfaces near the BFS depth limit are drawn
-  blended toward **grey** (`Palette.colorAtDepth`), so a depth-cutoff reads differently from a
-  true boundary (a selection stopped by a real drop stays colored). When off, those
-  ring depths (`depth > limit−2`) are not drawn. The blend is keyed on each rect's
-  `depth` relative to `depthLimit` (= `Configs.floodRadius()`):
-  `depth <= limit−2` → no grey; `depth == limit−1` → half grey; `depth >= limit` → full
-  grey. This is possible because the **frontier-split merge**
-  (`mergeCoplanarSplitFrontier`) keeps the frontier ring (depth == limit) as separate
-  rects from the inner blob: raw nodes are partitioned into inner (depth < limit) and
-  frontier (depth >= limit), each is unioned/strip-merged independently, and the inner
-  area is subtracted from the frontier nodes so the two tile cleanly (inner has priority
-  in the dilation overlap zone). Without the split, a plain coplanar merge would collapse
-  the whole same-height area into one rect at `min` depth (0), defeating the depth-based
-  grey and perimeter suppression. Down-skirt spans and hole beams at the frontier
-  (`sp.depth() >= limit`) are suppressed compute-side — they are cutoff artifacts, not
-  real geometry.
+  `showCutoffRing` is on (default), surfaces on the merge **frontier** band
+  (`StandableRect.frontier()`, the `RadiusTier.FRONTIER` ownership class at the
+  BFS depth limit) are drawn **fully grey** (`Palette.colorAtDepth`). INNER
+  geometry keeps the walkable color (or `shadeByDepth` hue). When off,
+  frontier tops are not drawn. Skirt and hole spans on frontier rects are always
+  suppressed compute-side — they are cutoff artifacts, not real geometry.
 - **Hole beams.** A drop edge the classifier labels a **hole** (a mob
   leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **vertical
   beam** from the cliff-edge top `T`. Appearance `showBeamsThroughWalls` (default on)
@@ -307,7 +301,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   Appearance `holeBeamColor`. Appearance `showHoleBeams` (default on) gates
   drawing; `holeBeamColor` supplies RGB and alpha (uniform along the beam). Benign
   drops keep their ordinary down-skirt and get **no** beam.
-  Drop spans at the **frontier** (`depth >= depthLimit`) are skipped by `computeHoles`
+  Drop spans on the **frontier** (`SkirtSpan.frontier()`) are skipped by `computeHoles`
   — they are depth-cutoff artifacts, not real geometry (without this, the entire
   perimeter drew a hole-beam wall).
   The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
@@ -332,18 +326,17 @@ the published snapshots into `SurfaceEmitter.emit`.
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the level-identity reset, and the `volatile`
-  snapshot/occluder/down-skirt/hole/crouch/`depthLimit` handoff into
+  snapshot/occluder/down-skirt/hole/crouch handoff into
   `SurfaceEmitter`.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
-  depth-based grey blend (`Palette.colorAtDepth`, keyed on `rect.depth()` vs
-  `depthLimit`), the square fading skirt draw (`fadedSkirt`/`vQuad`, tiny
-  `SKIRT_OFFSET`), drawing the **published** skirt spans (`emitSkirts`, from
-  `SkirtSpan` UP/DOWN lists; length `min(Appearance height, maxExtent)`; frontier
-  spans `depth >= limit` suppressed), and the **hole beams** (`emitHoles`, from
-  `HoleSpan`, into the depth-off `BEAM` layer or depth-tested `SKIRT` layer per
-  `showBeamsThroughWalls`) — emit draws only the published spans — the cyclic
-  depth-gradient color (`Palette` / `DEPTH_CYCLE` hue band), and the
-  double-sided-winding requirement.
+  frontier grey (`Palette.GREY_RGB`, keyed on `rect.frontier()`), the square fading
+  skirt draw (`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** skirt spans
+  (`emitSkirts`, from `SkirtSpan` UP/DOWN lists; length `min(Appearance height,
+  maxExtent)`; fade over Appearance height so a clip keeps tip alpha; frontier spans
+  suppressed), and the **hole beams** (`emitHoles`, from `HoleSpan`, into the
+  depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`) —
+  emit draws only the published spans — the cyclic depth-gradient color (`Palette` /
+  `DEPTH_CYCLE` hue band), and the double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
@@ -353,8 +346,9 @@ the published snapshots into `SurfaceEmitter.emit`.
   `CollisionSurfaceOverlay.dumpFloodDebug` → `sendSystemMessage` chat summary).
 - `RectMath.java`: pure rect/interval algebra — guillotine `subtractRects`,
   `union` re-cut + strip-merge, depth-aware
-  **`mergeCoplanarSplitFrontier`** (union inner and frontier separately, subtract
-  inner from frontier so they tile cleanly), `footprintAdjacent`,
+  **`mergeCoplanarSplitFrontier`** (one composite `(radiusTier, surfaceClass)`
+  priority partition per collision band; INNER owns frontier overlap),
+  `footprintAdjacent`,
   `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
   uses `mergeCoplanarSplitFrontier`).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
@@ -371,7 +365,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   strictly below the rim under the fall footprint, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,
   the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` / `holeSubSpans`
-  / `fallFootprint`; frontier drops `depth >= depthLimit` skipped; subdivided at
+  / `fallFootprint`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
   reached-rect boundaries and published as `HoleSpan`),
   and the extraction-thread-only (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**

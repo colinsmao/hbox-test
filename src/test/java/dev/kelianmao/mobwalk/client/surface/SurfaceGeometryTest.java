@@ -101,7 +101,7 @@ final class SurfaceGeometryTest {
   @Test
   void downSkirtInheritsSurfaceDepth() {
     // A skirt span carries its source rect's flood-depth so the two share a band.
-    StandableRect r = new StandableRect(0, 0, 1, 1, 64.0, 64.0, 3);
+    StandableRect r = new StandableRect(0, 0, 1, 1, 64.0, 64.0, 3, false);
     List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(), false);
     assertFalse(spans.isEmpty());
     for (SkirtSpan s : spans) {
@@ -130,11 +130,12 @@ final class SurfaceGeometryTest {
     boolean hasInner = false;
     boolean hasFrontier = false;
     for (StandableRect r : result) {
-      if (r.depth() < limit) {
-        hasInner = true;
-      }
-      if (r.depth() >= limit) {
+      if (r.frontier()) {
         hasFrontier = true;
+        assertEquals(limit, r.depth(), "frontier depth should be the limit");
+      } else {
+        hasInner = true;
+        assertTrue(r.depth() < limit, "inner depth should be below the limit");
       }
     }
     assertTrue(hasInner, "no inner rect found");
@@ -156,7 +157,7 @@ final class SurfaceGeometryTest {
     StandableRect inner = null;
     StandableRect frontier = null;
     for (StandableRect r : result) {
-      if (r.depth() >= limit) {
+      if (r.frontier()) {
         frontier = r;
       } else {
         // Pick the inner rect closest to the frontier.
@@ -207,6 +208,7 @@ final class SurfaceGeometryTest {
       nodes, depths, limit);
 
     assertEquals(1, result.size());
+    assertTrue(!result.get(0).frontier());
     assertTrue(result.get(0).depth() < limit);
     assertEquals(0.0, result.get(0).minX(), EPS);
     assertEquals(2.0, result.get(0).maxX(), EPS);

@@ -58,7 +58,8 @@ Milestones 1–8 are merged. The repo is a
 client-only Fabric Gradle project generated from `FabricMC/fabric-example-mod` and
 trimmed to client-only (see **Repository layout** below). `./gradlew build` passes
 (produces `build/libs/mobwalk-1.0.0.jar`). Per-area detail lives in the subsystem
-guides; the delivery history:
+guides; in-game validation is per plan step plus the cross-cutting gates in
+`AGENTS.md` (**Stage-gating**). The delivery history:
 
 - **M1 — HUD framework** (`Overlay` / `OverlayManager`) with the transient
 flood-radius readout (`RadiusIndicatorOverlay`).
@@ -149,61 +150,6 @@ Authoritative sources (pin the version selector to `26.1.2`):
 "Rendering in the World".
 - Fabric API javadocs: [https://maven.fabricmc.net/docs](https://maven.fabricmc.net/docs).
 - Version numbers / template: [https://fabricmc.net/develop](https://fabricmc.net/develop).
-
-
-
-## Current manual acceptance checklist
-
-The cumulative in-game checks for the features shipped so far. (The *rule* that
-every plan step needs its own enumerated checklist, and how to gate on it, lives
-in `AGENTS.md` under **Stage-gating**; this is the current feature snapshot.)
-
-1. `runClient` launches with no errors in the log.
-2. **HUD:** in a world, the box + label is visible at the chosen corner and F1
-  (hide HUD) hides it.
-3. **In-world:** holding the wand (in **either hand** — off hand acts only when the
-  main hand is empty or also a wand; default item is stick, configurable via General
-  `wandItem`), the standable collision surface of the targeted
-   block is drawn flat on top, double-sided without bad z-fighting; sweeping the
-   crosshair paints a growing set whose surfaces all stay drawn; per-block shapes
-   are correct (full / slab / stairs-as-L / fence-post-tops / carpet-thin) and tall
-   grass/flowers resolve to the block below; with default General `showSurfaces`
-   (**While Holding Wand**), the selection hides when the wand is unequipped and
-   returns on re-equip (**Always** keeps it visible; **Never** hides draw); right-clicking
-   resets it (exactly once per
-   click — holding does not spam) while swinging the acting arm; breaking/replacing a
-   painted block updates or drops its surface. An edge against a **wall** draws an
-   **upward** skirt (not a downward drop); a real drop/void keeps its downward
-   skirt. Appearance `downSkirtHeight` / `upwardSkirtHeight` set those draw heights
-   (`0` hides), each clamped to the span's `maxExtent` (wall top above for up;
-   abutting lower reached surface for stepped downs; open drops use the full
-   configured length). `/mobwalk dump` one-shots
-   the flood pipeline to `latest.log` and posts a short chat summary.
-4. **Headroom:** with Player/Ravager selected, a floor under a low ceiling (gap
-  `< H`) is **not** painted (its lost headroom shows as an upward skirt marking the
-   ceiling), while a tall-enough tunnel paints; Point (zero height) paints regardless
-   of ceiling.
-5. **Holes:** an edge over the void or an unreachable pit raises a through-walls red
-  beam at the rim; a drop onto reachable ground (even deep / roundabout via stairs
-   elsewhere) does **not**; an edge over a floor that is only reachable by landing on an
-   intermediate ledge does (the ledge would trap the mob). A long dangerous rim shows a
-   row of beams. Tops are colored at draw. Skirts and
-   beams at the very outermost radius edge are not drawn.
-6. **Surface height (Appearance `drawOnVisibleFace`, default on):** on a **soul
-   sand / mud** block (renders full-height but collides at 14/16), the standable top
-   draws on the **visible top face** by default; turning the Appearance option off
-   drops it to the true collision height (buried inside the block) and re-floods;
-   turning it on restores the visible face. A dilated path lip reaching over a soul-sand
-   cube paints on the cube top (with its own down-skirt at the step), while its collision
-   stays a path. Ordinary full blocks / slabs / stairs look identical in both modes, and
-   the fill color doesn't shift when toggling.
-7. **Through water:** right-clicking the bottom of a pond paints its surface,
-  visible through the water (water-tinted) **without** crouching; a surface behind
-   opaque terrain (a hill) is still occluded unless crouching. (Water itself is not
-   walkable.)
-8. No errors on world load/unload or window resize; the selection clears on
-  leaving/changing the world.
-9. The mod does nothing on a dedicated server.
 
 
 

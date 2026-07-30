@@ -17,22 +17,25 @@ package dev.kelianmao.mobwalk.client.surface;
  * block it equals {@code collisionTopY}. Nothing but rendering reads it (see
  * {@code docs/geometry.md} "Visible-face top vs collision top").
  *
- * <p>{@code depth} is a <b>debug-only</b> flood-distance tag: the BFS hop-count
- * from the seed at which this surface was reached (0 = seed), aggregated by min
- * over the raw nodes a merged rect covers. {@code -1} means "no flood depth"
- * (constructed outside the flood, or a test fixture); the renderer draws that
- * grey. Nothing but the debug depth-coloring reads it.
+ * <p>{@code depth} is flood-distance metadata: the BFS hop-count from the seed at
+ * which this surface was reached (0 = seed), aggregated by min over the raw nodes
+ * a merged rect covers. {@code -1} means "no flood depth" (constructed outside the
+ * flood, or a test fixture). Debug {@code shadeByDepth} reads it for hue.
+ *
+ * <p>{@code frontier} is the merge radius-tier flag ({@code RadiusTier.FRONTIER}):
+ * incomplete selection at the BFS depth limit. Cutoff-ring greying and perimeter
+ * suppression key on this flag; exact {@code depth} is not an ownership axis.
  */
 public record StandableRect(double minX, double minZ, double maxX, double maxZ,
-    double collisionTopY, double visualTopY, int depth) {
-  /** A rect with an explicit visible top but no flood depth ({@code depth = -1}). */
+    double collisionTopY, double visualTopY, int depth, boolean frontier) {
+  /** A rect with an explicit visible top but no flood metadata. */
   public StandableRect(double minX, double minZ, double maxX, double maxZ,
       double collisionTopY, double visualTopY) {
-    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, -1);
+    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, -1, false);
   }
 
   /** A rect whose visible top coincides with its collision top (the common case). */
   public StandableRect(double minX, double minZ, double maxX, double maxZ, double collisionTopY) {
-    this(minX, minZ, maxX, maxZ, collisionTopY, collisionTopY, -1);
+    this(minX, minZ, maxX, maxZ, collisionTopY, collisionTopY, -1, false);
   }
 }
