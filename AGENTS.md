@@ -83,6 +83,19 @@ as a substitute for actually validating in-game, and keep them working if you to
   known Windows stdout-capture quirk, so this one is best-effort — the commit gate is
   the reliable backstop.
 
+## Bugfixing
+
+When fixing a bug, drive the change with a regression test that encodes the **real
+failure mode** (the geometry / inputs that break in-game — not a simplified case after
+code implementation that trivially passes):
+
+1. **Write the repro test first.**
+2. **Run it — it should fail on current code, and in the expected way.**
+3. **Change production code only.**
+4. **Re-run the same test — it must pass without editing asserts or pass criteria.**
+
+A test that only agrees with an incomplete fix is useless.
+
 ## Build, test & run
 
 ```bash

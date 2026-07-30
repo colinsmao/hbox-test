@@ -348,7 +348,8 @@ the published snapshots into `SurfaceEmitter.emit`.
   `union` re-cut + strip-merge, depth-aware
   **`mergeCoplanarSplitFrontier`** (one composite `(radiusTier, surfaceClass)`
   priority partition per collision band; INNER owns frontier overlap),
-  `footprintAdjacent`,
+  `footprintAdjacent`, `crossesLine` (a rect reaches across an edge line onto its far
+  side — the fall-column predicate),
   `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
   uses `mergeCoplanarSplitFrontier`).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
@@ -362,11 +363,11 @@ the published snapshots into `SurfaceEmitter.emit`.
   `computeDownSkirts` / `edgeDownSpans` / land-clamped `maxExtent`, published as
   up and down `SkirtSpan` lists), the **hole
   classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
-  strictly below the rim under the fall footprint, and then HOLE anyway if a standable
+  strictly below the rim across the `FallColumn`, and then HOLE anyway if a standable
   **ledge** sits between the rim and that floor; reachability is reached-set membership,
-  the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` / `holeSubSpans`
-  / `fallFootprint`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
-  reached-rect boundaries and published as `HoleSpan`),
+  the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` /
+  `holeSubSpans`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
+  the line-crossing reached rects' bounds and published as `HoleSpan`),
   and the extraction-thread-only (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
 - `WorldOverlayManager.java`: three-layer setup (depth-off `FILLED` tops,

@@ -13,8 +13,9 @@ import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
 /**
  * Sanity tests over the pure rect ops in {@link RectMath}
  * ({@code subtractRects} / {@code union} / {@code mergeAll} /
- * {@code footprintAdjacent}). They build synthetic rects only — no world, no game
- * loop — and pin current behavior so later stages can refactor with a net.
+ * {@code footprintAdjacent} / {@code crossesLine}). They build synthetic rects only
+ * — no world, no game loop — and pin current behavior so later stages can refactor
+ * with a net.
  */
 final class SurfaceGeometryTest {
   private static final double EPS = 1.0e-9;
@@ -212,5 +213,38 @@ final class SurfaceGeometryTest {
     assertTrue(result.get(0).depth() < limit);
     assertEquals(0.0, result.get(0).minX(), EPS);
     assertEquals(2.0, result.get(0).maxX(), EPS);
+  }
+
+  // --- crossesLine: what lies on the far side of an edge (a line plus a side) ---
+
+  @Test
+  void rectReachingPastTheLineCrossesIt() {
+    // +X edge at x = 1: a rect from the line outward crosses it.
+    assertTrue(RectMath.crossesLine(new StandableRect(1, 0, 2, 1, 60.0), false, true, 1.0));
+    // -X edge at x = 1: the mirror, a rect from the line inward.
+    assertTrue(RectMath.crossesLine(new StandableRect(0, 0, 1, 1, 60.0), false, false, 1.0));
+  }
+
+  @Test
+  void rectStartingBeyondTheLineDoesNotCrossIt() {
+    // Half a block clear of a +X edge at x = 1: beside the line, not under it.
+    assertFalse(RectMath.crossesLine(new StandableRect(1.5, 0, 2.5, 1, 60.0), false, true, 1.0));
+    assertFalse(RectMath.crossesLine(new StandableRect(-1.5, 0, -0.5, 1, 60.0), false, false, 1.0));
+  }
+
+  @Test
+  void rectEndingAtTheLineIsOnTheNearSide() {
+    // The edge's own surface ends exactly at its line; it is behind the edge, not
+    // across it, on either side.
+    assertFalse(RectMath.crossesLine(new StandableRect(0, 0, 1, 1, 64.0), false, true, 1.0));
+    assertFalse(RectMath.crossesLine(new StandableRect(1, 0, 2, 1, 64.0), false, false, 1.0));
+  }
+
+  @Test
+  void crossingIsTestedOnThePerpendicularAxis() {
+    // alongX edges run along X at a fixed Z, so Z decides crossing and X does not.
+    StandableRect r = new StandableRect(0, 1, 1, 2, 60.0);
+    assertTrue(RectMath.crossesLine(r, true, true, 1.0));
+    assertFalse(RectMath.crossesLine(r, false, true, 1.0));
   }
 }

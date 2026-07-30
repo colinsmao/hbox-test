@@ -112,7 +112,7 @@ it.
   │   │   ├── Overlay.java / OverlayManager.java / RadiusIndicatorOverlay.java
   │   │   └── WorldOverlay.java / WorldOverlayManager.java
   │   └── surface/                         # compute + selection widget + emit
-  │       ├── EntityProfile / StandableRect / SkirtSpan / HoleSpan
+  │       ├── EntityProfile / StandableRect / SkirtSpan / HoleSpan / FallColumn
   │       ├── RectMath.java / SurfaceSelection.java
   │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java
   ├── client/resources/assets/mobwalk/lang/en_us.json

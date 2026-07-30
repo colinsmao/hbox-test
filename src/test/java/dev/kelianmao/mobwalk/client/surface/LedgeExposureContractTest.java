@@ -8,7 +8,6 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.RectMath.Rect;
 import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColumnBoxes;
 import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
 
@@ -32,7 +31,8 @@ final class LedgeExposureContractTest {
   private static final double HALF_W = EntityProfile.RAVAGER.width() / 2.0;   // 0.975
   private static final double HEIGHT = EntityProfile.RAVAGER.height();        // 2.2
   private static final double T = 45.5;                                       // rim collisionTopY
-  private static final Rect FP = new Rect(0, 0, 1, 1);                        // fall footprint
+  // The rim: a +Z edge at z = 0 over x in [0,1]; the entity falls down that line.
+  private static final FallColumn FALL = new FallColumn(true, true, 0.0, 0.0, 1.0);
 
   // A reached floor at Y=44 spanning the footprint (sets landY = 44).
   private static final List<StandableRect> FLOOR = List.of(new StandableRect(-1, -1, 2, 2, 44.0));
@@ -50,7 +50,7 @@ final class LedgeExposureContractTest {
 
   private static List<StandableRect> gather(ColumnBoxes world) {
     List<StandableRect> out = new ArrayList<>();
-    SurfaceSelection.gatherLedgesFrom(world, FP, T, FLOOR, HALF_W, HEIGHT, out);
+    SurfaceSelection.gatherLedgesFrom(world, FALL, T, FLOOR, HALF_W, HEIGHT, out);
     return out;
   }
 

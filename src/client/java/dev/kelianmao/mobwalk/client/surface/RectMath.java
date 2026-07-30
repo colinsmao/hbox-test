@@ -77,6 +77,22 @@ public final class RectMath {
         && (Math.abs(a.maxZ() - b.minZ()) < EPS || Math.abs(b.maxZ() - a.minZ()) < EPS);
   }
 
+  // True iff rect r reaches across an edge line onto the far side: it starts at or
+  // before the line and extends strictly past it. The question "what is on the far
+  // side of this edge" is one-dimensional plus a side — a rect ending exactly at the
+  // line (the edge's own surface, or anything behind it) is on the near side, and one
+  // starting beyond the line never touches it. Directional on purpose: a symmetric
+  // "contains the line" test would match the edge's own rect.
+  // alongX: the edge runs along X at a fixed Z, so the crossing axis is Z (else X).
+  // maxSide: the far side is +axis.
+  static boolean crossesLine(StandableRect r, boolean alongX, boolean maxSide, double line) {
+    double min = alongX ? r.minZ() : r.minX();
+    double max = alongX ? r.maxZ() : r.maxX();
+    return maxSide
+        ? min <= line + EPS && max > line + EPS
+        : max >= line - EPS && min < line - EPS;
+  }
+
   // Test helper: coplanar merge with every node treated as inner (all-zero
   // depths, limit above 0). Same union + strip-merge as the production path's
   // inner bucket; package-private for unit tests that need merge without a

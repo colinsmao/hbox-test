@@ -10,7 +10,7 @@ package dev.kelianmao.mobwalk.client.surface;
  * occluded by terrain (drawn in the depth-off {@code FILLED} pipeline).
  *
  * <p>Computed on the client/extraction thread (it reads collision boxes below the
- * fall footprint — see {@code SurfaceSelection.computeHoles}) once per select, and
+ * {@link FallColumn} — see {@code SurfaceSelection.computeHoles}) once per select, and
  * published in the snapshot alongside the {@link SkirtSpan}s. Geometry mirrors a
  * down skirt (the beam is drawn at the same rim); {@code fallDistance} is carried
  * for later refinement (Step 4/5).
