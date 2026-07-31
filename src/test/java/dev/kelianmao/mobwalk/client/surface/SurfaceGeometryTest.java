@@ -102,7 +102,8 @@ final class SurfaceGeometryTest {
   @Test
   void downSkirtInheritsSurfaceDepth() {
     // A skirt span carries its source rect's flood-depth so the two share a band.
-    StandableRect r = new StandableRect(0, 0, 1, 1, 64.0, 64.0, 3, false);
+    StandableRect r = new StandableRect(0, 0, 1, 1, 64.0, 64.0,
+      HazardClass.NONE, 3, false);
     List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(), false);
     assertFalse(spans.isEmpty());
     for (SkirtSpan s : spans) {

@@ -17,6 +17,11 @@ package dev.kelianmao.mobwalk.client.surface;
  * block it equals {@code collisionTopY}. Nothing but rendering reads it (see
  * {@code docs/geometry.md} "Visible-face top vs collision top").
  *
+ * <p>{@code hazard} is the surface's hazard identity ({@link HazardClass}): stamped
+ * from the source {@code WorldBox} in {@code exposeBox}, carried through the merge
+ * as an ownership axis ({@code hazardPriority}), and printed by {@code /mobwalk dump}.
+ * Ordinary solids are {@link HazardClass#NONE}.
+ *
  * <p>{@code depth} is flood-distance metadata: the BFS hop-count from the seed at
  * which this surface was reached (0 = seed), aggregated by min over the raw nodes
  * a merged rect covers. {@code -1} means "no flood depth" (constructed outside the
@@ -27,15 +32,21 @@ package dev.kelianmao.mobwalk.client.surface;
  * suppression key on this flag; exact {@code depth} is not an ownership axis.
  */
 public record StandableRect(double minX, double minZ, double maxX, double maxZ,
-    double collisionTopY, double visualTopY, int depth, boolean frontier) {
-  /** A rect with an explicit visible top but no flood metadata. */
+    double collisionTopY, double visualTopY, HazardClass hazard, int depth, boolean frontier) {
+  /** A rect with an explicit visible top and hazard identity but no flood metadata. */
+  public StandableRect(double minX, double minZ, double maxX, double maxZ,
+      double collisionTopY, double visualTopY, HazardClass hazard) {
+    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, hazard, -1, false);
+  }
+
+  /** A rect with an explicit visible top but no flood metadata ({@code NONE} hazard). */
   public StandableRect(double minX, double minZ, double maxX, double maxZ,
       double collisionTopY, double visualTopY) {
-    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, -1, false);
+    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, HazardClass.NONE, -1, false);
   }
 
   /** A rect whose visible top coincides with its collision top (the common case). */
   public StandableRect(double minX, double minZ, double maxX, double maxZ, double collisionTopY) {
-    this(minX, minZ, maxX, maxZ, collisionTopY, collisionTopY, -1, false);
+    this(minX, minZ, maxX, maxZ, collisionTopY, collisionTopY, HazardClass.NONE, -1, false);
   }
 }

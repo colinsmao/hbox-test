@@ -9,7 +9,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
-import dev.kelianmao.mobwalk.client.surface.WorldGeometry.FluidKind;
+import dev.kelianmao.mobwalk.client.surface.HazardClass;
 import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
@@ -28,9 +28,9 @@ final class OccluderClassificationTest {
   }
 
   // Non-occluding fluid surface (same shape as FluidClipContractTest.fluidSurface).
-  private static WorldBox fluidSurface(int bx, int by, int bz, double height, FluidKind kind) {
+  private static WorldBox fluidSurface(int bx, int by, int bz, double height, HazardClass hazard) {
     double top = by + height;
-    return new WorldBox(bx, by, bz, bx, bz, bx + 1, bz + 1, by, top, top, top, kind, false);
+    return new WorldBox(bx, by, bz, bx, bz, bx + 1, bz + 1, by, top, top, top, hazard, false);
   }
 
   private static List<SkirtSpan> classify(StandableRect r, double halfW, double height, WorldBox... boxes) {
@@ -110,7 +110,7 @@ final class OccluderClassificationTest {
     // way a wall would, but occlusion is a volume property — fluid surfaces must not
     // mark up-skirts.
     StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
-    WorldBox water = fluidSurface(1, 64, 0, 8.0 / 9.0, FluidKind.WATER);
+    WorldBox water = fluidSurface(1, 64, 0, 8.0 / 9.0, HazardClass.WATER);
     List<SkirtSpan> spans = classify(floor, 0.0, 0.0, water);
     assertTrue(spans.isEmpty());
   }
@@ -133,7 +133,7 @@ final class OccluderClassificationTest {
 
     ColumnBoxes waterWorld = (x, y, z) -> {
       if (x == 1 && z == 0 && y == 64) {
-        return List.of(fluidSurface(1, 64, 0, 8.0 / 9.0, FluidKind.WATER));
+        return List.of(fluidSurface(1, 64, 0, 8.0 / 9.0, HazardClass.WATER));
       }
       return List.of();
     };

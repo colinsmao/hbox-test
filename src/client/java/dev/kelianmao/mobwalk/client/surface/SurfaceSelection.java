@@ -318,9 +318,9 @@ public final class SurfaceSelection {
     MobWalk.LOGGER.info("[flood-debug] {}={}", label, rects.size());
     for (StandableRect r : rects) {
       MobWalk.LOGGER.info(
-        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} depth={} frontier={}",
+        "[flood-debug]   {} [{},{}]x[{},{}] collisionTopY={} visualTopY={} hazard={} depth={} frontier={}",
         label, r.minX(), r.maxX(), r.minZ(), r.maxZ(),
-        r.collisionTopY(), r.visualTopY(), r.depth(), r.frontier());
+        r.collisionTopY(), r.visualTopY(), r.hazard(), r.depth(), r.frontier());
     }
   }
 
@@ -505,20 +505,23 @@ public final class SurfaceSelection {
     }
 
     for (RectMath.Rect exposed : RectMath.subtractRects(base, clipRects)) {
-      emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, raiseCores, raiseOutlines, out);
+      emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, target.hazard(),
+        raiseCores, raiseOutlines, out);
     }
   }
 
   // Split an exposed standable rect so the parts that sit over a raised-outline
   // neighbour's undilated footprint draw at that neighbour's outline top (paint on
   // the cube), while the rest keep {@code visualTopY}. {@code collisionTopY} is
-  // unchanged on every piece. When several neighbours cover a region, the highest
-  // outline wins (claimed high→low so lower cores do not re-cover).
-  private static void emitWithNeighborVisualRaise(RectMath.Rect exposed, double collisionTopY, double visualTopY,
+  // unchanged on every piece; {@code hazard} stays the source box's identity.
+  // When several neighbours cover a region, the highest outline wins (claimed
+  // high→low so lower cores do not re-cover).
+  private static void emitWithNeighborVisualRaise(RectMath.Rect exposed, double collisionTopY,
+      double visualTopY, HazardClass hazard,
       List<RectMath.Rect> raiseCores, List<Double> raiseOutlines, List<StandableRect> out) {
     if (raiseCores.isEmpty()) {
       out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(),
-        collisionTopY, visualTopY));
+        collisionTopY, visualTopY, hazard));
       return;
     }
     List<Integer> hit = new ArrayList<>();
@@ -532,12 +535,12 @@ public final class SurfaceSelection {
     }
     if (hit.isEmpty()) {
       out.add(new StandableRect(exposed.minX(), exposed.minZ(), exposed.maxX(), exposed.maxZ(),
-        collisionTopY, visualTopY));
+        collisionTopY, visualTopY, hazard));
       return;
     }
     for (RectMath.Rect remnant : RectMath.subtractRects(exposed, coresHere)) {
       out.add(new StandableRect(remnant.minX(), remnant.minZ(), remnant.maxX(), remnant.maxZ(),
-        collisionTopY, visualTopY));
+        collisionTopY, visualTopY, hazard));
     }
     hit.sort((a, b) -> Double.compare(raiseOutlines.get(b), raiseOutlines.get(a)));
     List<RectMath.Rect> claimed = new ArrayList<>();
@@ -549,7 +552,7 @@ public final class SurfaceSelection {
       double outline = raiseOutlines.get(i);
       for (RectMath.Rect piece : RectMath.subtractRects(inter, claimed)) {
         out.add(new StandableRect(piece.minX(), piece.minZ(), piece.maxX(), piece.maxZ(),
-          collisionTopY, outline));
+          collisionTopY, outline, hazard));
       }
       claimed.add(inter);
     }

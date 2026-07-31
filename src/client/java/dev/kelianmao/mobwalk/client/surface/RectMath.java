@@ -39,9 +39,10 @@ public final class RectMath {
     FRONTIER
   }
 
-  // Composite ownership class: radius tier outer, surface class (today
-  // visualTopY) inner. Equality for strip-merge grouping uses EPS on visual.
-  private record OwnershipClass(RadiusTier tier, double visualTopY) {
+  // Composite ownership class: radius tier outer, then surface class
+  // (hazardPriority, visualTopY). Equality for strip-merge grouping uses the
+  // hazard class and EPS on visual. Higher HazardClass.priority() claims first.
+  private record OwnershipClass(RadiusTier tier, HazardClass hazard, double visualTopY) {
   }
 
   // Grouping key for the merge: two doubles quantized to 1/1024 of a block
@@ -104,11 +105,12 @@ public final class RectMath {
   // Production merge used by the lazy flood path. Groups by collisionTopY (the
   // partition key — see docs/geometry.md "Merge contract"). Within each collision
   // band: form composite ownership layers (INNER surface classes highest-first,
-  // then FRONTIER surface classes highest-first — today surface class is
-  // visualTopY), run one priority partition, strip-merge equal ownership classes,
-  // then tag INNER depth by min covering node and FRONTIER depth by limit.
-  // Greedy strip-merge is not a minimal partition, but a miss only costs an
-  // extra interior skirt, never reachability. Package-private for unit tests.
+  // then FRONTIER surface classes highest-first — surface class is
+  // (hazardPriority, visualTopY)), run one priority partition, strip-merge equal
+  // ownership classes, then tag INNER depth by min covering node and FRONTIER
+  // depth by limit. Greedy strip-merge is not a minimal partition, but a miss
+  // only costs an extra interior skirt, never reachability. Package-private for
+  // unit tests.
   static List<StandableRect> mergeCoplanarSplitFrontier(
       List<StandableRect> nodes, int[] nodeDepths, int limit) {
     if (nodes.isEmpty()) {
@@ -170,7 +172,7 @@ public final class RectMath {
         out.add(new StandableRect(
           cell.rect().minX(), cell.rect().minZ(),
           cell.rect().maxX(), cell.rect().maxZ(),
-          collisionTopY, ownership.visualTopY(), depth, frontier));
+          collisionTopY, ownership.visualTopY(), ownership.hazard(), depth, frontier));
       }
       i = j;
     }
@@ -202,20 +204,26 @@ public final class RectMath {
     return out;
   }
 
-  // Build ownership layers for one radius tier, highest visualTopY first.
+  // Build ownership layers for one radius tier: highest HazardClass.priority()
+  // first, then highest visualTopY within a priority. Same (hazard, visualTopY)
+  // nodes share a layer; different hazards stay separate even at equal visual.
   private static List<PriorityLayer<OwnershipClass>> ownershipLayers(
       RadiusTier tier, List<StandableRect> nodes) {
     if (nodes.isEmpty()) {
       return List.of();
     }
     List<StandableRect> sorted = new ArrayList<>(nodes);
-    sorted.sort(Comparator.comparingDouble(StandableRect::visualTopY).reversed());
+    sorted.sort(Comparator
+      .comparingInt((StandableRect n) -> n.hazard().priority()).reversed()
+      .thenComparing(Comparator.comparingDouble(StandableRect::visualTopY).reversed()));
     List<PriorityLayer<OwnershipClass>> layers = new ArrayList<>();
     int i = 0;
     while (i < sorted.size()) {
+      HazardClass hazard = sorted.get(i).hazard();
       double visualTopY = sorted.get(i).visualTopY();
       int j = i + 1;
       while (j < sorted.size()
+          && sorted.get(j).hazard() == hazard
           && Math.abs(sorted.get(j).visualTopY() - visualTopY) <= EPS) {
         j++;
       }
@@ -224,7 +232,7 @@ public final class RectMath {
         StandableRect n = sorted.get(k);
         rects.add(new Rect(n.minX(), n.minZ(), n.maxX(), n.maxZ()));
       }
-      layers.add(new PriorityLayer<>(new OwnershipClass(tier, visualTopY), rects));
+      layers.add(new PriorityLayer<>(new OwnershipClass(tier, hazard, visualTopY), rects));
       i = j;
     }
     return layers;
@@ -247,8 +255,9 @@ public final class RectMath {
     return best;
   }
 
-  // Coalesce abutting cells that share an ownership class (same radius tier and
-  // visualTopY within EPS). Re-merges shatterings left by priority subtract.
+  // Coalesce abutting cells that share an ownership class (same radius tier,
+  // hazard class, and visualTopY within EPS). Re-merges shatterings left by
+  // priority subtract.
   private static List<ClassifiedRect<OwnershipClass>> stripMergeEqualOwnership(
       List<ClassifiedRect<OwnershipClass>> cells) {
     if (cells.isEmpty()) {
@@ -257,6 +266,7 @@ public final class RectMath {
     List<ClassifiedRect<OwnershipClass>> sorted = new ArrayList<>(cells);
     sorted.sort(Comparator
       .comparing((ClassifiedRect<OwnershipClass> c) -> c.priorityClass().tier())
+      .thenComparingInt(c -> c.priorityClass().hazard().priority())
       .thenComparingDouble(c -> c.priorityClass().visualTopY()));
     List<ClassifiedRect<OwnershipClass>> out = new ArrayList<>();
     int i = 0;
@@ -265,6 +275,7 @@ public final class RectMath {
       int j = i + 1;
       while (j < sorted.size()
           && sorted.get(j).priorityClass().tier() == ownership.tier()
+          && sorted.get(j).priorityClass().hazard() == ownership.hazard()
           && Math.abs(sorted.get(j).priorityClass().visualTopY()
             - ownership.visualTopY()) <= EPS) {
         j++;

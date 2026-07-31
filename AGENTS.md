@@ -38,13 +38,11 @@ default shape of every task.
 2. **Every step has its own enumerated in-game checklist.** Not a summary, not
    "verify it works": a numbered list of concrete `action → exact expected on-screen
    result` items (e.g. "right-click a slab → its half-height top face is drawn, and
-   *only* that block"), plus a regression line for anything the step could break.
-   Writing the checklist is part of writing the plan — a step without one is
-   incomplete, so don't present a plan as ready until every step carries a checklist.
+   *only* that block"). Writing the checklist is part of writing the plan, so don't
+   present a plan as ready until every step carries a checklist.
    **Keep it lean:** only cases that must be checked in-game (impossible or meaningless
    as a unit test). Drop duplicates, variants of the same path, and anything pure
-   logic already covers. A long checklist is a smell — split the step or move cases
-   into tests.
+   logic already covers.
 3. **Validate in-game, then commit, before the next step.** The human runs the
    checklist in-game (`./gradlew runClient`) and ticks every box — then commit that
    step. Do not start the next step until the current one is validated and committed.
@@ -175,11 +173,6 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 - **No third-party rendering libraries** — a thin in-house abstraction is more
   stable than a dependency that must also chase the API churn (see
   [`docs/rendering.md`](docs/rendering.md)).
-- **Surface/collision geometry stays in rect/double space, not a pixel raster**
-  (a raster rewrite was prototyped and rejected — see
-  [`docs/geometry.md`](docs/geometry.md)).
-- **Mismatched JDK is the most common setup failure** — verify `java -version` is
-  `25` before debugging build issues.
 - **Locale files are author-owned copy.** Treat `assets/mobwalk/lang/*.json` (and
   other locale resources) as the desired wording. Add keys for new options; update
   a string only when the user asks or the option’s meaning changed. Do not rephrase,
@@ -197,14 +190,11 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   docs; **docs are current at the commit level.** Never lump distinct steps together.
   This cadence is also what makes the commit hook a per-step checkpoint: batching many
   steps into one commit defeats it.
-- **Within a step, docs come *last* — after checks pass, not during the code.** Docs
-  belong in the commit, but don't write them until the step's behavior is final, or the
-  bug-fix loop just makes you rewrite them. The order is: **code → run checks
+- **Within a step, docs usually come *last* — after checks pass, not during the code,
+  to reduce docs churn after bugfixes.** Docs belong in the commit, but don't write
+  them until the step's behavior is final. The order is: **code → run checks
   (build/test + in-game) → fix bugs and re-check (loop) → checks pass → write/update the
-  docs → human approval → commit (code + docs together).** So a step in flight is
-  expected to have finished, validated code with its docs still unwritten right up until
-  the commit; capture learnings in `PLAN.md` meanwhile so nothing is lost — they ride
-  along in that step's commit.
+  docs → human approval → commit (code + docs together).**
 - **Commit granularity is judgment — avoid commit noise.** Group by concept, not by
   file. A tiny tangential tweak (a small rule/prompt/doc-wording fix) may ride along
   with a related commit rather than getting its own; reserve a standalone commit for a
@@ -233,7 +223,7 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
 - **Indentation is two spaces** (Java, Gradle, JSON under `src/`).
 - **Describe what something *is* / *does*, never what it isn't / doesn't.** This is
-  a hard style rule for `docs/*.md`, `PLAN.md` prose, and code comments: write the
+  a hard style rule for `docs/*.md` prose and code comments: write the
   positive fact only. Do **not** pad with negations of alternatives or absences
   ("no keybind", "no HUD", "never spam", "does not touch X", "not a Y"). Readers
   learn the system from what exists; listing what was rejected or omitted is noise

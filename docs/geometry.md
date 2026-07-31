@@ -9,7 +9,7 @@ space**, never a pixel raster (a raster rewrite was prototyped and rejected — 
 
 **World read vs flood math.** `WorldGeometry` is the adapter over the
 `ColumnBoxes` port: it translates Minecraft block/fluid state into domain
-`WorldBox` / `FluidKind` (including fluid-surface emission via
+`WorldBox` / `HazardClass` (including fluid-surface emission via
 `fluidSurfaceHeight`). `SurfaceSelection` holds the pure flood, merge, skirts,
 and holes, and reaches the world only through that port (`WorldSurfaceIndex`,
 `gatherLedgesFrom`, `computeOccludersFrom`).
@@ -63,13 +63,12 @@ already claimed by higher classes before emitting that class. Different ownershi
 classes that abut remain separate; equal-class neighbours may strip-merge. The
 full ownership class is therefore also the post-resolution homogeneity rule.
 
-Today the surface class is `visualTopY`, with the highest visible shell first, so
-an overlap within one radius tier draws on the face the player sees while
-flush-only remnants stay flush. The hazard milestone extends the surface class to
-an ordered tuple such as `(hazardPriority, visualTopY)`: a hazardous class claims
+Today the surface class is `(hazardPriority, visualTopY)`, ordered by
+`HazardClass.priority()` then highest visible shell: a hazardous class claims
 overlap from a benign class in the same radius tier, then visual height orders
-otherwise equal hazard classes. The priority-partition algorithm and the durable
-invariants stay unchanged.
+otherwise equal hazard classes. Water and lava arrive as `HazardClass` values from
+vanilla fluid tags at world read; later hazards add constants on the same enum.
+The priority-partition algorithm and the durable invariants stay unchanged.
 
 **Aggregate metadata.** Exact `depth` is traversal metadata rather than an ownership
 axis. An inner winner's depth aggregates by minimum over every covering inner node,
@@ -160,9 +159,11 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   is `FluidState.getHeight` when that value is above `0.4` (vanilla fluid-jump
   threshold), otherwise `0` (thin sheet seated on the cell floor, coplanar with
   the solid underfoot). Falling fluid uses the same path as still fluid
-  (`getHeight == 1.0`). The fluid surface carries a `FluidKind` stamp (`WATER` /
-  `LAVA`) for later merge / seating / draw; solids stay `NONE`. Geometry today only
-  needs “emit or not.”
+  (`getHeight == 1.0`). The fluid surface carries a `HazardClass` stamp (`WATER` /
+  `LAVA`) for merge ownership / seating / draw; solids stay `NONE`. Geometry today only
+  needs “emit or not.” Thin sheets at height `0` share `collisionTopY` with the solid
+  underfoot; merge ownership lets the fluid's higher `HazardClass.priority()` claim
+  that overlap.
 - **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
   fluid surface in a fluid column survives exposure. Consecutive tops differ by at
   most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
@@ -174,8 +175,10 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   finds the kept floor (or the plane one cell down) as a landing. Edge marking stays
   with the occluder / drop passes.
 
-Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing),
-`FluidClipContractTest` (standable top, no clip from fluid, shore complementarity).
+Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
+coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
+complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
+disjoint rects).
 
 ## Entity-width dilation
 

@@ -18,22 +18,13 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
  * Adapter over the {@link ColumnBoxes} port: translate Minecraft block/fluid state
- * into domain geometry ({@link WorldBox}, {@link FluidKind}). Pure flood / skirt /
+ * into domain geometry ({@link WorldBox}, {@link HazardClass}). Pure flood / skirt /
  * hole logic lives in {@link SurfaceSelection}; emission policy that decides whether
  * a cell produces a fluid surface ({@link #fluidSurfaceHeight}) lives here with the
- * translation that stamps {@link FluidKind}.
+ * translation that stamps {@link HazardClass} from vanilla fluid tags.
  */
 public final class WorldGeometry {
   private WorldGeometry() {
-  }
-
-  /**
-   * Which fluid a fluid surface came from. {@link #NONE} is ordinary geometry.
-   */
-  public enum FluidKind {
-    NONE,
-    WATER,
-    LAVA
   }
 
   /**
@@ -52,26 +43,26 @@ public final class WorldGeometry {
   // (collision vs visible/outline, world Y), carried so exposeBox can raise a
   // standable top to the visible face for render-taller-than-collide blocks (soul
   // sand, mud) without touching any walkability math (see exposeBox / StandableRect).
-  // fluid: fluid-surface identity (NONE on ordinary solids). occludes: participates in
-  // burial/headroom clip — solids true; non-occluding support surfaces (fluid) false.
-  // Zero-thickness geometry alone still headroom-occludes; this bit skips clip.
+  // hazard: surface hazard identity (NONE on ordinary solids). occludes: participates
+  // in burial/headroom clip — solids true; non-occluding support surfaces (fluid)
+  // false. Zero-thickness geometry alone still headroom-occludes; this bit skips clip.
   // Package-private for unit tests (synthetic boxes feed the classifier/headroom).
   record WorldBox(int bx, int by, int bz,
       double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
       double blockCollisionTop, double blockOutlineTop,
-      FluidKind fluid, boolean occludes) {
+      HazardClass hazard, boolean occludes) {
     // Boxes gathered as occluders/ledges only never become a drawn top, so they
     // default both block tops to yMax (visualTopY then never raises off yMax).
     WorldBox(int bx, int by, int bz,
         double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
-      this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, yMax, yMax, FluidKind.NONE, true);
+      this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, yMax, yMax, HazardClass.NONE, true);
     }
 
     WorldBox(int bx, int by, int bz,
         double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
         double blockCollisionTop, double blockOutlineTop) {
       this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, blockCollisionTop, blockOutlineTop,
-        FluidKind.NONE, true);
+        HazardClass.NONE, true);
     }
   }
 
@@ -100,7 +91,7 @@ public final class WorldGeometry {
   // Level-backed ColumnBoxes producer: the collision boxes of block (x,y,z) as
   // absolute WorldBoxes carrying the block's collision/outline tops (the outline
   // read is paid only when computeVisualTop is on), plus an optional non-occluding
-  // fluid surface (FluidKind on that box only). Shared by the flood, the ledge
+  // fluid surface (HazardClass on that box only). Shared by the flood, the ledge
   // gather, and the occluder pass so there is one world-read implementation behind
   // WorldSurfaceIndex / computeOccludersFrom.
   static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop,
@@ -110,9 +101,9 @@ public final class WorldGeometry {
       scan.set(x, y, z);
       BlockState state = level.getBlockState(scan);
       FluidState fluidState = state.getFluidState();
-      FluidKind kind = fluidKind(fluidState, swimmableFluids);
+      HazardClass hazard = hazardClass(fluidState, swimmableFluids);
       double fluidHeight = fluidState.isEmpty() ? 0.0 : fluidState.getHeight(level, scan);
-      OptionalDouble fluidTop = fluidSurfaceHeight(kind, fluidHeight, reach);
+      OptionalDouble fluidTop = fluidSurfaceHeight(hazard, fluidHeight, reach);
 
       VoxelShape shape = state.getCollisionShape(level, scan, CollisionContext.empty());
       List<WorldBox> boxes = new ArrayList<>();
@@ -120,7 +111,7 @@ public final class WorldGeometry {
         double top = y + fluidTop.getAsDouble();
         boxes.add(new WorldBox(x, y, z,
           x, z, x + 1, z + 1,
-          y, top, top, top, kind, false));
+          y, top, top, top, hazard, false));
       }
       if (shape.isEmpty()) {
         return boxes;
@@ -131,7 +122,7 @@ public final class WorldGeometry {
         boxes.add(new WorldBox(x, y, z,
           x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
           y + box.minY, y + box.maxY,
-          blockCollisionTop, blockOutlineTop, FluidKind.NONE, true));
+          blockCollisionTop, blockOutlineTop, HazardClass.NONE, true));
       }
       return boxes;
     };
@@ -139,13 +130,13 @@ public final class WorldGeometry {
 
   /**
    * Whether a cell emits a fluid surface, and at what height above the block floor.
-   * Enabled fluid always emits: at {@code getHeight} when above
+   * Enabled fluid hazard always emits: at {@code getHeight} when above
    * {@link #FLUID_JUMP_THRESHOLD}, otherwise at {@code 0} (coplanar with the solid
    * underfoot). Seating at the effective standing height is Step 3 ({@code reach}
    * is reserved for that seating).
    */
-  static OptionalDouble fluidSurfaceHeight(FluidKind kind, double fluidHeight, double reach) {
-    if (kind == FluidKind.NONE) {
+  static OptionalDouble fluidSurfaceHeight(HazardClass hazard, double fluidHeight, double reach) {
+    if (hazard == HazardClass.NONE) {
       return OptionalDouble.empty();
     }
     // reach reserved for Step 3 effective-plane seating
@@ -155,19 +146,19 @@ public final class WorldGeometry {
     return OptionalDouble.of(fluidHeight);
   }
 
-  // Minecraft FluidState tags → domain FluidKind. Toggle off or empty/untagged
-  // fluid maps to NONE (no fluid surface).
-  static FluidKind fluidKind(FluidState fluid, boolean swimmableFluids) {
+  // Minecraft FluidState tags → HazardClass. Toggle off or empty/untagged fluid
+  // maps to NONE (no fluid surface).
+  static HazardClass hazardClass(FluidState fluid, boolean swimmableFluids) {
     if (!swimmableFluids || fluid.isEmpty()) {
-      return FluidKind.NONE;
+      return HazardClass.NONE;
     }
     if (fluid.is(FluidTags.WATER)) {
-      return FluidKind.WATER;
+      return HazardClass.WATER;
     }
     if (fluid.is(FluidTags.LAVA)) {
-      return FluidKind.LAVA;
+      return HazardClass.LAVA;
     }
-    return FluidKind.NONE;
+    return HazardClass.NONE;
   }
 
   // The source block's visible top (world Y), used to raise a standable surface to

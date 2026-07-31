@@ -143,6 +143,13 @@ In-game checklist (unit tests cover merge ownership / partition invariants):
 3. Water abutting lava at the same height → two separate regions in the dump.
 4. `./gradlew build` green.
 
+## Step 2 note (HazardClass)
+
+`FluidKind` deleted. `HazardClass` (NONE/WATER/LAVA + `priority()`) is end-to-end on
+`WorldBox` / `StandableRect` / merge ownership / dump (`hazard=`). `FluidTags` map at
+world read. Checklist: dump shows `hazard=WATER` on water, `hazard=NONE` on solids;
+water|lava abut → separate regions; Step 1 pond picture unchanged; build green.
+
 ## Step 3 — Seat the surface plane at the effective standing height
 
 A pure helper `fluidSurfaceY(blockY, fluidHeight, kind, reach)` returns
