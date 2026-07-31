@@ -10,14 +10,17 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.concurrent.ConcurrentHashMap;
 
 import dev.kelianmao.mobwalk.MobWalk;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -78,6 +81,22 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * {@link #allRects()} snapshot the overlay publishes into a {@code volatile} field.
  */
 public final class SurfaceSelection {
+  /**
+   * Which fluid a swim plate came from. {@link #NONE} is ordinary geometry.
+   */
+  public enum FluidKind {
+    NONE,
+    WATER,
+    LAVA
+  }
+
+  /**
+   * Vanilla {@code LivingEntity.getFluidJumpThreshold()} — at or below this fluid
+   * height the plate sits at the cell floor ({@code 0}) so it stays coplanar with
+   * the solid underfoot; above it the plate sits at {@code getHeight}.
+   */
+  static final double FLUID_JUMP_THRESHOLD = 0.4;
+
   // One collision sub-box in absolute world coords: its (undilated) XZ footprint
   // plus its vertical extent. The arrangement dilates the footprint by W/2 on
   // demand; yMin/yMax drive the spans-above occlusion test. bx/by/bz are the
@@ -86,15 +105,26 @@ public final class SurfaceSelection {
   // (collision vs visible/outline, world Y), carried so exposeBox can raise a
   // standable top to the visible face for render-taller-than-collide blocks (soul
   // sand, mud) without touching any walkability math (see exposeBox / StandableRect).
+  // fluid: swim-plane identity (NONE on ordinary solids). occludes: participates in
+  // burial/headroom clip — solids true; non-occluding support surfaces (fluid plates)
+  // false. Zero-thickness geometry alone still headroom-occludes; this bit skips clip.
   // Package-private for unit tests (synthetic boxes feed the classifier/headroom).
   record WorldBox(int bx, int by, int bz,
       double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
-      double blockCollisionTop, double blockOutlineTop) {
+      double blockCollisionTop, double blockOutlineTop,
+      FluidKind fluid, boolean occludes) {
     // Boxes gathered as occluders/ledges only never become a drawn top, so they
     // default both block tops to yMax (visualTopY then never raises off yMax).
     WorldBox(int bx, int by, int bz,
         double minX, double minZ, double maxX, double maxZ, double yMin, double yMax) {
-      this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, yMax, yMax);
+      this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, yMax, yMax, FluidKind.NONE, true);
+    }
+
+    WorldBox(int bx, int by, int bz,
+        double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
+        double blockCollisionTop, double blockOutlineTop) {
+      this(bx, by, bz, minX, minZ, maxX, maxZ, yMin, yMax, blockCollisionTop, blockOutlineTop,
+        FluidKind.NONE, true);
     }
   }
 
@@ -297,10 +327,10 @@ public final class SurfaceSelection {
    * {@code select} (see {@code CollisionSurfaceOverlay}).
    */
   public void select(Level level, BlockPos start, int radius, EntityProfile profile,
-      boolean computeVisualTop) {
+      boolean computeVisualTop, boolean swimmableFluids) {
     boolean dump = debugDumpOnce;
     debugReachedPreMerge = List.of();
-    LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop);
+    LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop, swimmableFluids);
     result = lazy.run();
     if (dump) {
       debugReachedPreMerge = lazy.preMergeReached();
@@ -321,7 +351,7 @@ public final class SurfaceSelection {
     downSkirts = raisedVisual
       ? computeDownSkirts(result, occluders, true)
       : dropEdges;
-    holes = computeHoles(level, result, dropEdges, profile);
+    holes = computeHoles(level, result, dropEdges, profile, swimmableFluids);
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop);
       debugDumpOnce = false;
@@ -521,18 +551,24 @@ public final class SurfaceSelection {
           if (other == target) {
             continue;
           }
-          // Occluder iff it rises above T AND either reaches down to/below
-          // the surface (buried: a box resting on top has yMin == T, a box
-          // straddling T has yMin < T) OR floats within the standing column
-          // (T, T+H) (a headroom ceiling). The buried term is the H == 0 base
-          // case (Point) — without it a box sitting directly on the surface
-          // would NOT occlude and every embedded/stacked top would leak.
-          boolean buried = other.yMin() <= collisionTopY + EPS;
-          boolean headroomCeiling = other.yMin() < collisionTopY + height - EPS;
-          if (other.yMax() > collisionTopY + EPS && (buried || headroomCeiling)) {
-            clipRects.add(new RectMath.Rect(
-              other.minX() - halfW, other.minZ() - halfW,
-              other.maxX() + halfW, other.maxZ() + halfW));
+          // Non-occluding support surfaces (fluid swim plates) supply a standable
+          // top and no collision volume, so they contribute no clip rect. Occlusion
+          // (burial and headroom) is a property of volume only — a zero-thickness
+          // box still headroom-occludes; this bit skips the clip path entirely.
+          if (other.occludes()) {
+            // Occluder iff it rises above T AND either reaches down to/below
+            // the surface (buried: a box resting on top has yMin == T, a box
+            // straddling T has yMin < T) OR floats within the standing column
+            // (T, T+H) (a headroom ceiling). The buried term is the H == 0 base
+            // case (Point) — without it a box sitting directly on the surface
+            // would NOT occlude and every embedded/stacked top would leak.
+            boolean buried = other.yMin() <= collisionTopY + EPS;
+            boolean headroomCeiling = other.yMin() < collisionTopY + height - EPS;
+            if (other.yMax() > collisionTopY + EPS && (buried || headroomCeiling)) {
+              clipRects.add(new RectMath.Rect(
+                other.minX() - halfW, other.minZ() - halfW,
+                other.maxX() + halfW, other.maxZ() + halfW));
+            }
           }
           if (other.blockOutlineTop() > other.blockCollisionTop() + EPS
               && other.blockOutlineTop() > collisionTopY + EPS) {
@@ -1018,7 +1054,7 @@ public final class SurfaceSelection {
   // span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
   // homogeneous sub-spans. Runs once per select (not per frame).
   private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
-      List<SkirtSpan> drops, EntityProfile profile) {
+      List<SkirtSpan> drops, EntityProfile profile, boolean swimmableFluids) {
     if (drops.isEmpty()) {
       return List.of();
     }
@@ -1032,7 +1068,8 @@ public final class SurfaceSelection {
       }
       FallColumn fall = FallColumn.of(sp);
       ledges.clear();
-      gatherLedges(level, fall, sp.baseY(), rects, halfW, height, ledges);
+      gatherLedges(level, fall, sp.baseY(), rects, halfW, height, ledges, swimmableFluids,
+        profile.reach());
       holeSubSpans(sp, rects, ledges, out);
     }
     return out;
@@ -1116,28 +1153,72 @@ public final class SurfaceSelection {
 
   // Level-backed ColumnBoxes producer: the collision boxes of block (x,y,z) as
   // absolute WorldBoxes carrying the block's collision/outline tops (the outline
-  // read is paid only when computeVisualTop is on). Shared by the flood and the
+  // read is paid only when computeVisualTop is on), plus an optional non-occluding
+  // fluid swim plate (FluidKind on the plate only). Shared by the flood and the
   // ledge gather so there is one world-read implementation behind WorldSurfaceIndex.
-  private static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop) {
+  private static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop,
+      boolean swimmableFluids, double reach) {
     BlockPos.MutableBlockPos scan = new BlockPos.MutableBlockPos();
     return (x, y, z) -> {
       scan.set(x, y, z);
       BlockState state = level.getBlockState(scan);
+      FluidState fluidState = state.getFluidState();
+      FluidKind kind = fluidKind(fluidState, swimmableFluids);
+      double fluidHeight = fluidState.isEmpty() ? 0.0 : fluidState.getHeight(level, scan);
+      OptionalDouble plate = plateHeight(kind, fluidHeight, reach);
+
       VoxelShape shape = state.getCollisionShape(level, scan, CollisionContext.empty());
+      List<WorldBox> boxes = new ArrayList<>();
+      if (plate.isPresent()) {
+        double top = y + plate.getAsDouble();
+        boxes.add(new WorldBox(x, y, z,
+          x, z, x + 1, z + 1,
+          y, top, top, top, kind, false));
+      }
       if (shape.isEmpty()) {
-        return List.of();
+        return boxes;
       }
       double blockCollisionTop = y + shape.max(Direction.Axis.Y);
       double blockOutlineTop = visibleTop(level, scan, state, blockCollisionTop, computeVisualTop);
-      List<WorldBox> boxes = new ArrayList<>();
       for (AABB box : shape.toAabbs()) {
         boxes.add(new WorldBox(x, y, z,
           x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
           y + box.minY, y + box.maxY,
-          blockCollisionTop, blockOutlineTop));
+          blockCollisionTop, blockOutlineTop, FluidKind.NONE, true));
       }
       return boxes;
     };
+  }
+
+  /**
+   * Whether a cell emits a swim plate, and at what height above the block floor.
+   * Enabled fluid always emits: at {@code getHeight} when above
+   * {@link #FLUID_JUMP_THRESHOLD}, otherwise at {@code 0} (coplanar with the solid
+   * underfoot). Seating at the effective standing height is Step 3 ({@code reach}
+   * is reserved for that seating).
+   */
+  static OptionalDouble plateHeight(FluidKind kind, double fluidHeight, double reach) {
+    if (kind == FluidKind.NONE) {
+      return OptionalDouble.empty();
+    }
+    // reach reserved for Step 3 effective-plane seating
+    if (fluidHeight <= FLUID_JUMP_THRESHOLD + EPS) {
+      return OptionalDouble.of(0.0);
+    }
+    return OptionalDouble.of(fluidHeight);
+  }
+
+  private static FluidKind fluidKind(FluidState fluid, boolean swimmableFluids) {
+    if (!swimmableFluids || fluid.isEmpty()) {
+      return FluidKind.NONE;
+    }
+    if (fluid.is(FluidTags.WATER)) {
+      return FluidKind.WATER;
+    }
+    if (fluid.is(FluidTags.LAVA)) {
+      return FluidKind.LAVA;
+    }
+    return FluidKind.NONE;
   }
 
   // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY
@@ -1146,8 +1227,10 @@ public final class SurfaceSelection {
   // supplied by WorldSurfaceIndex.tops (the same primitive the flood uses), so the
   // ledge gather cannot re-expose a fragment the flood buried.
   private static void gatherLedges(Level level, FallColumn fall, double collisionTopY,
-      List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
-    gatherLedgesFrom(levelColumnBoxes(level, false), fall, collisionTopY, reached, halfW, height, out);
+      List<StandableRect> reached, double halfW, double height, List<StandableRect> out,
+      boolean swimmableFluids, double reach) {
+    gatherLedgesFrom(levelColumnBoxes(level, false, swimmableFluids, reach), fall, collisionTopY,
+      reached, halfW, height, out);
   }
 
   // Pure kernel of gatherLedges: reads the world only through the ColumnBoxes port,
@@ -1337,7 +1420,7 @@ public final class SurfaceSelection {
     private List<StandableRect> preMergeReached = List.of();
 
     LazyFlood(Level level, BlockPos start, int depthLimit, EntityProfile profile,
-        boolean computeVisualTop) {
+        boolean computeVisualTop, boolean swimmableFluids) {
       BlockPos origin = start.immutable();
       this.ox = origin.getX();
       this.oy = origin.getY();
@@ -1350,7 +1433,8 @@ public final class SurfaceSelection {
       int bandLo = Math.max(oy - depthLimit - 1, level.getMinY());
       int bandHi = Math.min(oy + depthLimit + 1, level.getMaxY());
       this.surfaces = new WorldSurfaceIndex(
-        levelColumnBoxes(level, computeVisualTop), halfW, height, bandLo, bandHi);
+        levelColumnBoxes(level, computeVisualTop, swimmableFluids, reach), halfW, height, bandLo,
+        bandHi);
     }
 
     List<StandableRect> preMergeReached() {

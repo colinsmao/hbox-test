@@ -134,6 +134,39 @@ an exposed surface at the same radius.
 A **Point** profile (`W = 0`) reproduces the original zero-width point-walker
 exactly (dilation is a no-op, tops only abut).
 
+## Fluid surfaces
+
+Water and lava are **non-occluding support surfaces**: each fluid cell can emit a
+standable plate that travels the same path as a solid top (dilation, clip, flood,
+merge, skirts, holes), while contributing no collision volume to occlusion.
+
+- **Occlusion is a volume property.** Burial and headroom ask which boxes span
+  above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
+  fluid plates set `occludes=false`, so every solid top under fluid survives, and
+  solids still clip a fluid top the same way they clip any other top.
+- **Emission (`levelColumnBoxes`).** When Generic `swimmableFluids` is on, a cell
+  whose fluid state is in `FluidTags.WATER` or `FluidTags.LAVA` emits one
+  full-footprint plate (`yMin = y`, `yMax = y + plateHeight`). Height is
+  `FluidState.getHeight` when that value is above `0.4` (vanilla fluid-jump
+  threshold), otherwise `0` (thin sheet seated on the cell floor, coplanar with
+  the solid underfoot). Falling fluid uses the same path as still fluid
+  (`getHeight == 1.0`). The plate carries a `FluidKind` stamp (`WATER` / `LAVA`)
+  for later merge / seating / draw; solids stay `NONE`. Geometry today only
+  needs “emit or not.”
+- **Column continuity.** Because a fluid plate never occludes, every cell's plate
+  in a fluid column survives exposure. Consecutive tops differ by at most `1.0`
+  (plane to plane exactly `1.0`; lowest plate one block above the floor), so the
+  ordinary climb test connects surface, intermediates, and floor — including a
+  waterfall column — with no fluid-specific hop rule.
+- **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
+  the fluid top is clipped by that solid the same amount. At a flush pond rim the
+  surviving fluid edge meets the shore's dilated footprint, so the drop classifier
+  finds the kept floor (or the plane one cell down) as a landing rather than a
+  hole. Edge marking stays with the occluder / drop passes.
+
+Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing),
+`FluidClipContractTest` (standable top, no clip from fluid, shore complementarity).
+
 ## Entity-width dilation
 
 Treat the entity as a point and pre-grow the world by its half-width `W/2`:

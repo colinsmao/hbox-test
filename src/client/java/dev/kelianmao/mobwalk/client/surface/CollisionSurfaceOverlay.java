@@ -170,7 +170,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     Level level = Minecraft.getInstance().level;
     var profile = Configs.mobProfile();
     if (level != null && lastSeed != null && profile.isPresent()) {
-      cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
+      cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
+        Configs.swimmableFluids());
       publish();
     }
   }
@@ -221,7 +222,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       } else {
         var profile = Configs.mobProfile();
         if (profile.isPresent()) {
-          cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
+          cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
+            Configs.swimmableFluids());
           lastSeed = start;
         }
       }
@@ -288,7 +290,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       return null;
     }
     cache.requestDebugDump();
-    cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
+    cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
+      Configs.swimmableFluids());
     publish();
     return new FloodDebugCounts(
       cache.allRects().size(),

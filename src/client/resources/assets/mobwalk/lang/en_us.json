@@ -20,6 +20,8 @@
 
   "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block, in flood steps. Large values may impact performance, especially with a large mob hitbox (must check farther per step).",
 
+  "mobwalk.config.generic.comment.swimmableFluids": "If enabled, water and lava are treated as walkable to approximate swimming.",
+
   "mobwalk.gui.text_field.invalid_item_id": "Unknown or invalid item id",
 
   "mobwalk.config.profiles.button.builtinProfiles": "Edit Built-in Profiles",

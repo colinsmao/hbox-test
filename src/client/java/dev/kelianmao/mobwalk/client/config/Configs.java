@@ -3,6 +3,7 @@ package dev.kelianmao.mobwalk.client.config;
 import dev.kelianmao.mobwalk.client.overlay.WorldOverlayManager;
 import dev.kelianmao.mobwalk.client.surface.CollisionSurfaceOverlay;
 import dev.kelianmao.mobwalk.client.surface.EntityProfile;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -134,6 +135,8 @@ public final class Configs implements IConfigHandler {
     public static final ConfigTable CUSTOM_PROFILES = Profiles.CUSTOM_PROFILES;
     public static final ConfigInteger FLOOD_RADIUS =
       new ConfigInteger("floodRadius", 20, 0, 30, true).apply(GENERIC_KEY);
+    public static final ConfigBoolean SWIMMABLE_FLUIDS =
+      new ConfigBoolean("swimmableFluids", true).apply(GENERIC_KEY);
 
     /** GUI order (includes tables). File I/O uses {@link #FILE_OPTIONS}. */
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
@@ -142,7 +145,8 @@ public final class Configs implements IConfigHandler {
       MOB_PROFILE,
       BUILTIN_PROFILES,
       CUSTOM_PROFILES,
-      FLOOD_RADIUS
+      FLOOD_RADIUS,
+      SWIMMABLE_FLUIDS
     );
 
     /** Generic JSON category — profile tables live under Profiles. */
@@ -150,7 +154,8 @@ public final class Configs implements IConfigHandler {
       SHOW_SURFACES,
       WAND_ITEM,
       MOB_PROFILE,
-      FLOOD_RADIUS
+      FLOOD_RADIUS,
+      SWIMMABLE_FLUIDS
     );
 
     private Generic() {}
@@ -405,6 +410,12 @@ public final class Configs implements IConfigHandler {
         collision.reselectWithMobProfile();
       }
     });
+    Generic.SWIMMABLE_FLUIDS.setValueChangeCallback(cfg -> {
+      CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+      if (collision != null) {
+        collision.reselectWithMobProfile();
+      }
+    });
     Profiles.BUILTIN_PROFILES.setValueChangeCallback(cfg -> onProfilesChanged());
     Profiles.CUSTOM_PROFILES.setValueChangeCallback(cfg -> onCustomProfilesChanged());
   }
@@ -572,6 +583,11 @@ public final class Configs implements IConfigHandler {
 
   public static boolean drawOnVisibleFace() {
     return Appearance.DRAW_ON_VISIBLE_FACE.getBooleanValue();
+  }
+
+  /** Whether water/lava emit swim planes for {@link SurfaceSelection#select}. */
+  public static boolean swimmableFluids() {
+    return Generic.SWIMMABLE_FLUIDS.getBooleanValue();
   }
 
   public static boolean showBeamsThroughWalls() {

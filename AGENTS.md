@@ -41,6 +41,10 @@ default shape of every task.
    *only* that block"), plus a regression line for anything the step could break.
    Writing the checklist is part of writing the plan — a step without one is
    incomplete, so don't present a plan as ready until every step carries a checklist.
+   **Keep it lean:** only cases that must be checked in-game (impossible or meaningless
+   as a unit test). Drop duplicates, variants of the same path, and anything pure
+   logic already covers. A long checklist is a smell — split the step or move cases
+   into tests.
 3. **Validate in-game, then commit, before the next step.** The human runs the
    checklist in-game (`./gradlew runClient`) and ticks every box — then commit that
    step. Do not start the next step until the current one is validated and committed.

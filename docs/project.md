@@ -81,8 +81,10 @@ General / Appearance / Debug tabs, live apply, save-on-close, and General
 uncapped customs); see `[settings.md](settings.md)`.
 - **M8 — surface/overlay pipeline refactor**: extract `RectMath` / `SurfaceEmitter`,
 split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygiene.
-
-
+- **M9 — hazards (in progress):** Step 1 landed — water/lava emit non-occluding
+swim plates behind Generic `swimmableFluids` (thin fluid at cell-floor height);
+see [geometry.md](geometry.md) → Fluid surfaces. Later steps: fluid identity through
+merge, escape seating, hazard fill + perimeter beams (`PLAN.md`).
 
 ## Repository layout
 
