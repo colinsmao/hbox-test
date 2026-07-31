@@ -143,7 +143,10 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 - **Occlusion is a volume property.** Burial and headroom ask which boxes span
   above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
   fluid plates set `occludes=false`, so every solid top under fluid survives, and
-  solids still clip a fluid top the same way they clip any other top.
+  solids still clip a fluid top the same way they clip any other top. The same
+  rule gates up-skirts: `wallOccluder` requires `occludes`, and `computeOccluders`
+  reads through the shared `ColumnBoxes` port (`levelColumnBoxes`) so a plate the
+  flood emits cannot mark a false wall face.
 - **Emission (`levelColumnBoxes`).** When Generic `swimmableFluids` is on, a cell
   whose fluid state is in `FluidTags.WATER` or `FluidTags.LAVA` emits one
   full-footprint plate (`yMin = y`, `yMax = y + plateHeight`). Height is
@@ -391,10 +394,9 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   joins `floodRadius` / profile changes, which already re-flood). The memo treats the
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
-  Occluder and ledge scans never raise: the occluder scan leaves the
-  auxiliary-constructor default (`= yMax`), and the ledge scan reads through
-  `levelColumnBoxes(level, false)` so both tops collapse to the collision top. The
-  flood's own scan producer (`levelColumnBoxes(level, computeVisualTop)`, feeding
+  Occluder and ledge scans never raise: both read through
+  `levelColumnBoxes(level, false, …)` so both tops collapse to the collision top. The
+  flood's own scan producer (`levelColumnBoxes(level, computeVisualTop, …)`, feeding
   `WorldSurfaceIndex`) computes both tops at the node-producing site.
 - **The raise rule (`exposeBox`).**
   `visualTopY = (|collisionTopY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > collisionTopY) ?

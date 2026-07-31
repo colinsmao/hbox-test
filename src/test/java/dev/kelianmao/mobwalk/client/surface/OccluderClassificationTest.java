@@ -8,6 +8,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColumnBoxes;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.FluidKind;
 import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
 
 /**
@@ -23,6 +25,12 @@ final class OccluderClassificationTest {
   // vertical [y, y+1].
   private static WorldBox block(int x, int y, int z) {
     return new WorldBox(x, y, z, x, z, x + 1, z + 1, y, y + 1);
+  }
+
+  // Non-occluding swim plate (same shape as FluidClipContractTest.plate).
+  private static WorldBox plate(int bx, int by, int bz, double height, FluidKind kind) {
+    double top = by + height;
+    return new WorldBox(bx, by, bz, bx, bz, bx + 1, bz + 1, by, top, top, top, kind, false);
   }
 
   private static List<SkirtSpan> classify(StandableRect r, double halfW, double height, WorldBox... boxes) {
@@ -94,5 +102,42 @@ final class OccluderClassificationTest {
     List<SkirtSpan> merged = SurfaceSelection.mergeOccluderSpans(spans);
     assertEquals(1, merged.size());
     assertEquals(2.0, merged.get(0).maxExtent(), EPS); // stop at 66 − base 64
+  }
+
+  @Test
+  void fluidPlateAcrossEdgeEmitsNoUpSpan() {
+    // A non-occluding water plate abutting the +X edge rises above T the same way a
+    // wall would, but occlusion is a volume property — plates must not mark up-skirts.
+    StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
+    WorldBox water = plate(1, 64, 0, 8.0 / 9.0, FluidKind.WATER);
+    List<SkirtSpan> spans = classify(floor, 0.0, 0.0, water);
+    assertTrue(spans.isEmpty());
+  }
+
+  @Test
+  void computeOccludersFromMarksWallNotFluidPlate() {
+    // Port-level: wall column marks an up-skirt; water plate column marks none.
+    StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
+    EntityProfile point = EntityProfile.POINT;
+    ColumnBoxes wallWorld = (x, y, z) -> {
+      if (x == 1 && z == 0 && y == 64) {
+        return List.of(block(1, 64, 0));
+      }
+      return List.of();
+    };
+    List<SkirtSpan> wallSpans = SurfaceSelection.computeOccludersFrom(
+      wallWorld, 0, 256, List.of(floor), point);
+    assertEquals(1, wallSpans.size());
+    assertTrue(wallSpans.get(0).isUp());
+
+    ColumnBoxes waterWorld = (x, y, z) -> {
+      if (x == 1 && z == 0 && y == 64) {
+        return List.of(plate(1, 64, 0, 8.0 / 9.0, FluidKind.WATER));
+      }
+      return List.of();
+    };
+    List<SkirtSpan> waterSpans = SurfaceSelection.computeOccludersFrom(
+      waterWorld, 0, 256, List.of(floor), point);
+    assertTrue(waterSpans.isEmpty());
   }
 }

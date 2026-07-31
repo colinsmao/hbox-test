@@ -335,7 +335,7 @@ public final class SurfaceSelection {
     if (dump) {
       debugReachedPreMerge = lazy.preMergeReached();
     }
-    occluders = computeOccluders(level, result, profile);
+    occluders = computeOccluders(level, result, profile, swimmableFluids);
     List<SkirtSpan> dropEdges = computeDownSkirts(result, occluders, false);
     // Visual-keyed down-skirts when any rect draws above its collision top;
     // otherwise dropEdges already match the render heights.
@@ -686,17 +686,21 @@ public final class SurfaceSelection {
   }
 
   // True iff box is an occluder/wall for a surface at height T given the entity
-  // headroom: its top rises strictly above T AND its base sits at or below the top
-  // of the standing column T+height. height == 0 (Part A / Point) is the pure wall
-  // test (a box rising above T whose base is at or below T); height > 0 also admits
-  // ceilings/overhangs hanging within the standing column (Part B headroom). The
-  // {@code <=} on the lower bound (vs the strict {@code <} the exposeBox cut uses)
-  // is deliberate: occluder spans are only emitted where a dilated occluder ABUTS a
-  // surface edge (occluderSpansForRect), and that abutment gate — not the predicate —
-  // rejects the boundary/own-floor cases, while keeping Point's at-floor walls
-  // (yMin == T) marked.
+  // headroom: it participates in volume occlusion ({@code occludes}), its top rises
+  // strictly above T, AND its base sits at or below the top of the standing column
+  // T+height. Non-occluding support surfaces (fluid swim plates) supply a standable
+  // top and no volume, so they never mark up-skirts — same rule as exposeBox.
+  // height == 0 (Part A / Point) is the pure wall test (a box rising above T whose
+  // base is at or below T); height > 0 also admits ceilings/overhangs hanging within
+  // the standing column (Part B headroom). The {@code <=} on the lower bound (vs the
+  // strict {@code <} the exposeBox cut uses) is deliberate: occluder spans are only
+  // emitted where a dilated occluder ABUTS a surface edge (occluderSpansForRect),
+  // and that abutment gate — not the predicate — rejects the boundary/own-floor
+  // cases, while keeping Point's at-floor walls (yMin == T) marked.
   static boolean wallOccluder(WorldBox b, double collisionTopY, double height) {
-    return b.yMax() > collisionTopY + EPS && b.yMin() <= collisionTopY + height + EPS;
+    return b.occludes()
+      && b.yMax() > collisionTopY + EPS
+      && b.yMin() <= collisionTopY + height + EPS;
   }
 
   // Append the upward (occluder) skirt spans for one surface rect: for every
@@ -1320,7 +1324,21 @@ public final class SurfaceSelection {
   // marks only walls (boxes rising above T whose base is at/below T); height > 0
   // also marks overhangs/ceilings within the standing column (T, T+height], the same
   // occluders exposeBox tests, so the skirts visualize the headroom being applied.
-  private List<SkirtSpan> computeOccluders(Level level, List<StandableRect> rects, EntityProfile profile) {
+  // Reads the world only through ColumnBoxes (same port as the flood / ledge gather),
+  // so fluid plates emitted by levelColumnBoxes cannot mark false up-skirts.
+  private List<SkirtSpan> computeOccluders(Level level, List<StandableRect> rects,
+      EntityProfile profile, boolean swimmableFluids) {
+    return computeOccludersFrom(
+      levelColumnBoxes(level, false, swimmableFluids, profile.reach()),
+      level.getMinY(), level.getMaxY(), rects, profile);
+  }
+
+  // Pure kernel of computeOccluders: reads the world only through the ColumnBoxes
+  // port. Keeps this pass's own XZ window and per-rect Y window (clamped to
+  // worldMinY/worldMaxY) — not WorldSurfaceIndex / occluderColumns, whose flood
+  // band and undilated-box window would silently drop occluders here.
+  static List<SkirtSpan> computeOccludersFrom(ColumnBoxes source, int worldMinY, int worldMaxY,
+      List<StandableRect> rects, EntityProfile profile) {
     if (rects.isEmpty()) {
       return List.of();
     }
@@ -1328,30 +1346,19 @@ public final class SurfaceSelection {
     double height = profile.height();
     List<SkirtSpan> out = new ArrayList<>();
     List<WorldBox> candidates = new ArrayList<>();
-    BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
     for (StandableRect r : rects) {
       double collisionTopY = r.collisionTopY();
       int xLo = (int) Math.floor(r.minX() - halfW) - 1;
       int xHi = (int) Math.ceil(r.maxX() + halfW);
       int zLo = (int) Math.floor(r.minZ() - halfW) - 1;
       int zHi = (int) Math.ceil(r.maxZ() + halfW);
-      int yLo = Math.max((int) Math.floor(collisionTopY) - 1, level.getMinY());
-      int yHi = Math.min((int) Math.floor(collisionTopY + height) + 1, level.getMaxY());
+      int yLo = Math.max((int) Math.floor(collisionTopY) - 1, worldMinY);
+      int yHi = Math.min((int) Math.floor(collisionTopY + height) + 1, worldMaxY);
       candidates.clear();
       for (int x = xLo; x <= xHi; x++) {
         for (int z = zLo; z <= zHi; z++) {
           for (int y = yLo; y <= yHi; y++) {
-            cursor.set(x, y, z);
-            VoxelShape shape = level.getBlockState(cursor)
-              .getCollisionShape(level, cursor, CollisionContext.empty());
-            if (shape.isEmpty()) {
-              continue;
-            }
-            for (AABB box : shape.toAabbs()) {
-              candidates.add(new WorldBox(x, y, z,
-                x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
-                y + box.minY, y + box.maxY));
-            }
+            candidates.addAll(source.at(x, y, z));
           }
         }
       }
