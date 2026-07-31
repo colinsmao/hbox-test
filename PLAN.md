@@ -8,10 +8,9 @@ Durable knowledge lives in `docs/`, so this file is cleared once the plan lands.
 
 # M9 hazards — water and lava as swimmable hazard surfaces
 
-Give water and lava standable fluid surfaces (behind a manual toggle per fluid) so pools
-stop reading as false holes, seated at an effective standing height so the existing
-reach reproduces the measured escape, with hazard-colored fill plus perimeter beams
-marking it.
+Give water and lava standable fluid surfaces (behind a manual toggle) so pools
+stop reading as false holes, with a fluid-specific climb ceiling reproducing the measured
+escape out of a pool, and hazard-colored fill plus perimeter beams marking it.
 
 ## The model
 
@@ -59,28 +58,33 @@ rect/flood machinery.
   sits at `getHeight`; at or below it the fluid surface sits at relative height `0`
   (coplanar with the solid underfoot). Hazard priority over that solid at the same
   `collisionTopY` is Step 2.
-- **Hazard identity lives on the fluid surface.** Only the fluid box carries `FluidKind`;
-  solids stay `NONE`. Thin sheets get a floor-height fluid surface so they carry the
-  fluid hazard over the solid underfoot.
-- **Escape lives in the surface plane's height.** For a surface cell the plane's
-  `collisionTopY` is an **effective standing height** (Step 3):
-  `clamp(blockTop + escape - reach, y, y + fluidHeight)`. Water `escape = 0.875`.
-- **Draw stays on the fluid surface.** `visualTopY = y + fluidHeight` via the existing
-  raise when seating lowers `collisionTopY` (Step 3). Thin fluid surfaces at `0` keep
-  both tops at the cell floor until seating.
+- **Hazard identity lives on the fluid surface.** Only the fluid box carries a
+  `HazardClass`; solids stay `NONE`. Thin sheets get a floor-height fluid surface so they
+  carry the fluid hazard over the solid underfoot.
+- **Escape lives in the climb test.** When the lower surface of a pair is fluid and the
+  higher is solid, the budget is capped at `collisionTopY + 1/9 + escape` (Step 3);
+  climbing to another fluid keeps the plain reach, which is what leaves the column ladder
+  intact. `escape` is the thickest rim a mob leaves the fluid onto, measured from the
+  fluid **block** top — the same number an in-game measurement produces (water `6/16`) —
+  and the `1/9` is the still-fluid assumption that converts it to a height above the
+  plane, so fluid height stays out of the arithmetic.
+- **Planes stay at the physical fluid surface.** `collisionTopY = visualTopY =
+  y + fluidHeight`, so every pass downstream of the flood (drops, skirts, holes) reads a
+  real height.
 - **Fluids connect** across rivers. Cost tracks water volume inside the hop budget —
   Step 1 gates on measurement; deferred knob is a fluid-hop cap.
 - **Fluid identity through the merge.** Ownership `(radiusTier, hazardPriority, visualTopY)`
   — hazard priority separates water/lava and lets a thin fluid surface claim over solid.
-- **One fluid enum is the extension point.** `FluidKind { NONE, WATER, LAVA }` owns
-  escape, color, and merge priority.
+- **One hazard enum is the extension point.** `HazardClass { NONE, WATER, LAVA }` keys
+  the color and the merge priority; the escape thickness is one value shared by all
+  fluids.
 - **Marking.** Hazard fill color + perimeter `HazardSpan` beams.
 
 ```mermaid
 flowchart TD
   levelColumnBoxes["levelColumnBoxes (world read)"] -->|"collision boxes + fluid surfaces"| index[WorldSurfaceIndex]
   index --> exposeBox["exposeBox: dilate, clip by occluding volumes only"]
-  exposeBox --> flood["LazyFlood: unchanged, one climb test"]
+  exposeBox --> flood["LazyFlood: one climb test, fluid escape cap"]
   flood --> merge["mergeCoplanarSplitFrontier: (tier, hazard, visualTopY)"]
   merge --> skirts[computeDownSkirts / computeOccluders]
   merge --> holes["computeHoles (FallColumn)"]
@@ -150,29 +154,85 @@ In-game checklist (unit tests cover merge ownership / partition invariants):
 world read. Checklist: dump shows `hazard=WATER` on water, `hazard=NONE` on solids;
 water|lava abut → separate regions; Step 1 pond picture unchanged; build green.
 
-## Step 3 — Seat the surface plane at the effective standing height
+## Step 3 — Fluid escape in the climb test, and its setting
 
-A pure helper `fluidSurfaceY(blockY, fluidHeight, kind, reach)` returns
-`clamp(blockY + 1 + escape - reach, blockY, blockY + fluidHeight)`, used for the
-`yMax` of a **surface** cell's box in `WorldGeometry.levelColumnBoxes` (a submerged cell
-keeps `y + 1`), with `blockOutlineTop = blockY + fluidHeight` so the existing raise puts
-`visualTopY` back on the visible surface. Escape constants (`WATER_ESCAPE = 0.875`, lava
-measured below) live next to `EntityProfile.DEFAULT_JUMP_REACH`. New `FluidEscapeTest`
-covers the seating arithmetic, the 14/16 pass, the full-block reject, both clamp ends,
-`visualTopY` staying on the surface, and the seated plane staying at or above the plane
-one cell down.
+Measured in-game: a mob paths out of water onto a rim up to `6/16` thick and stops at
+`7/16` (unlit campfire), well short of what a player manages with an active jump. That
+escape is modelled as **a cap inside the climb test** on fluid-to-solid pairs, rather
+than by moving any plane.
 
-In-game checklist (unit tests cover seating arithmetic and clamp ends):
-1. Pool ringed by soul sand one level above the water → soul sand and terrain past it
-   paint.
-2. Same pool ringed by full blocks one level above → ring unpainted, rim carries a hole
-   beam.
-3. Flush shore still paints; water paint stays on the visible surface (not sunk).
-4. Dry cliff/stair selection unchanged.
-5. `./gradlew build` green.
+- The whole rule is one predicate over two rects, `ClimbRule.climbs(a, b)`: take the
+  lower by `collisionTopY`, give it a budget of `lower.collisionTopY() + reach`, and when
+  the lower is fluid and the upper is solid cap that at
+  `lower.collisionTopY() + FLUID_SURFACE_DROP + fluidEscape`; the edge exists iff the
+  higher's `collisionTopY` is at or below the budget. One undirected edge with the lower
+  supplying it, so *reachable is escapable* is untouched.
+- `FLUID_SURFACE_DROP = 1/9` is the still-fluid assumption made concrete: a source sits
+  `8/9` up its cell, so adding `1/9` back turns the setting (a rim thickness above the
+  fluid **block** top) into a height above the plane the rect actually carries. That is
+  what keeps the predicate a pure function of two `StandableRect`s — no source block, no
+  fluid height, nothing new on the node.
+- **The cap binds only when the target is solid**, which is what leaves the fluid column
+  on the ordinary reach: consecutive planes sit `1.0` apart, far past any escape
+  thickness, so a pool floor and a waterfall stay connected exactly as in Step 1. It does
+  bind for **every** fluid rect rather than surface cells alone, so a submerged plane
+  cannot route around the surface plane's limit at a low setting; a shelf inside the
+  water column is still reached from the plane above it, where the solid is the lower
+  rect.
+- Taking the cap as a `min` against `collisionTopY + reach` keeps leaving a fluid no
+  easier than jumping on land, and is what keeps the existing
+  `collect(cx, cz, h - reach, h + reach)` candidate window a valid superset, so the
+  window is unchanged. It also covers the thin sheet, whose plane is a full block below
+  the rim it is nominally measured against — and the solid it flows over is an exposed
+  coplanar rect on the plain reach anyway.
+- `ClimbRule(reach, fluidEscape)` is built once per `select` from the profile and the
+  setting and handed to `LazyFlood` and `assignOriginWave`, so the pure layer stays free
+  of config reads and testable on plain doubles. `OriginProbe` gains a `HazardClass`
+  (`buildClickProbes` emits a probe per box in the clicked cell, fluid surfaces
+  included).
+- For a `NONE`/`NONE` pair the new test is exactly what the window already enforced, so
+  dry terrain is bit-identical and the existing suite is the regression gate.
+- `reach` drops out of the world read — `WorldGeometry.levelColumnBoxes` and
+  `fluidSurfaceHeight` lose the parameter they reserved for seating.
 
-Lava escape constant: measure with a Warden (flush / soul-sand / full-block rims), set
-the constant, then re-check items 1–3 on lava before treating this step done.
+One Generic setting supplies `fluidEscape` for every fluid, alongside the single
+`swimmableFluids` toggle: `fluidEscapeThickness`, a `ConfigDouble` in blocks over
+`[0, 2]` defaulting to `0.375` (`6/16`), with the `floodRadius` live-apply → re-flood
+callback and a `comment.*` key in
+[en_us.json](src/client/resources/assets/mobwalk/lang/en_us.json) naming the two anchors
+(`0.375` mob pathing, `0.875` onto soul sand) and that a value at or above the profile's
+vertical reach makes leaving fluid the same as jumping on land. `logFloodDebug` prints it
+next to `reach=`.
+
+New `FluidEscapeTest` covers the budget for each pair of hazard kinds, the land clamp, the
+`6/16` pass and `7/16` reject from a source-height plane, `climbs` symmetry (same verdict
+whichever order the pair is passed), a fluid-to-fluid pair `1.0` apart connecting at any
+escape setting (the column ladder), a solid-to-fluid pair keeping the plain profile
+reach, a submerged plane granting no more than the surface plane above it, and a thin
+sheet climbing out at full reach through the solid it flows over.
+
+In-game checklist (unit tests cover the budget formula, the clamp, symmetry, and the
+column ladder):
+1. Deep still pool, rim one level above the water ringed with **4-layer snow** (collides
+   `6/16`; its outline is `8/16`, so with `drawOnVisibleFace` on the paint sits above the
+   collision top) → click the pool floor: the water column, the snow ring, and the
+   terrain past it all paint.
+2. Same rim as **unlit campfires** (`7/16`) → click the pool floor: water paints, the
+   campfire ring stays unpainted, the water rim carries hole beams.
+3. Same rim as **full blocks** → ring unpainted with hole beams at the rim; click the
+   ring instead → water stays unpainted.
+4. **Flush shore** (shore top level with the water block top) → shore, water, and the
+   terrain past it paint as one connected region.
+5. **Waterfall** down a cliff into the pool → click the pool floor: the falling column
+   paints from the pool up to its source.
+6. Configure → General → `fluidEscapeThickness` `0.875` → a soul-sand (`14/16`) ring
+   paints while the full-block ring still fails; `2.0` → the full-block ring paints.
+7. Dry cliff / stair / trench selection unchanged from Step 2.
+8. `./gradlew build` green.
+
+Lava: re-check items 1–4 on a lava pool with a Warden before treating this step done. If
+lava turns out to want a materially different thickness, splitting the setting per hazard
+is the follow-up.
 
 ## Step 4 — Hazard fill + perimeter beams
 
@@ -227,13 +287,13 @@ within a step); the concrete case tables are written during the step.
 5. **Tag coverage** (Step 2, `FluidPlaneTest`). The fluid surface carries the kind; solids
    stay `NONE`. Thin sheets use a height-0 fluid surface (hazard priority claims over
    solid in Step 2).
-6. **Effective-plane identity** (Step 3, `FluidEscapeTest`). Unclamped,
-   `collisionTopY + profile.reach() == blockTop + escape(kind)`; always
-   `collisionTopY <= visualTopY`, with `visualTopY` the physical fluid surface, and
-   always at or above the plane one cell down. The second half is what the existing
-   raise-direction assumption in the merge ownership order and the visual skirt pass
-   rests on, and the clamp is its enforcement — so test both clamp ends (a huge custom
-   reach, a tiny one).
+6. **Escape cap** (Step 3, `FluidEscapeTest`). A pair's budget is
+   `lower.collisionTopY() + profile.reach()`, further capped at
+   `lower.collisionTopY() + 1/9 + fluidEscape` when the lower is fluid and the higher is
+   solid. `climbs` gives the same verdict whichever order the pair is passed and always
+   spends the lower rect's budget, so every edge stays undirected and *reachable is
+   escapable* holds. The cap is confined to fluid-to-solid pairs, so consecutive planes in
+   a fluid column stay connected for every profile at every setting value.
 
 Doc homes: a new "Fluid surfaces" section in [docs/geometry.md](docs/geometry.md) for
 1–3 and 6, its merge-contract paragraph for 4–5, and the color precedence in
@@ -253,12 +313,19 @@ climbables inherit it.
 - **Falling fluid emits like still fluid.** Downward push unmodelled.
 - **Manual toggle, no roster field.** One Generic `swimmableFluids` (on by default) for
   vanilla water and lava, rather than a `lavaImmune` column on the profile roster.
-- **Escape reaches are constants**, one per fluid, documented next to
-  `EntityProfile.DEFAULT_JUMP_REACH`. Promoting them to settings stays a one-liner.
-- **One climb test, no directed edges.** The escape is encoded in where the surface plane
-  sits rather than in a special flood rule, so `LazyFlood`, the origin wave, and the
-  skirt passes keep working unmodified. Two surfaces connect when the lower can climb to
-  the higher; a descent is described by hole classification.
+- **One Generic escape-thickness setting** covers every fluid, matching the single
+  `swimmableFluids` toggle. A setting rather than a constant because the true value is
+  uncertain and the useful range spans two different questions — `0.375` answers "where
+  will a mob go", `0.875` and up answers "where can one physically get" — and that is the
+  user's call, not the code's.
+- **Escape is measured from the fluid block top**, so the setting is the rim thickness an
+  in-game test produces. One constant (`1/9`, the still-fluid surface drop) converts it
+  to a height above the plane, which keeps fluid height out of the arithmetic and the
+  climb test a pure function of two rects.
+- **One climb test, one undirected edge.** The escape is a per-node ceiling spent by the
+  lower surface rather than a directed rule, so the pair stays unordered and the merge,
+  origin wave, and skirt passes keep working unmodified. Two surfaces connect when the
+  lower can climb to the higher; a descent is described by hole classification.
 - **Vanilla water and lava only**; other modded fluids keep today's behavior.
 - **Fluids connect** across rivers rather than terminating the flood.
 - **Wading is not modelled** as a depth rule; the vanilla `0.4` fluid-jump threshold
@@ -266,18 +333,22 @@ climbables inherit it.
 
 ## Limitations to record in the docs
 
-- One escape constant per fluid covers every profile, and models physical capability
-  rather than AI: vanilla wardens avoid pathing into lava despite their immunity
-  (MC-249415), so an enabled lava plane says "it can cross", not "it will".
-- A fluid rect's `collisionTopY` at the surface is an **effective standing height**
-  derived from the profile reach; `visualTopY` holds the physical surface. So fluid
-  geometry depends on `reach` as well as on width and height, and the docs' "collision
-  top" wording needs that caveat.
-- A pool whose rim sits more than `reach` above the effective plane is outside the
-  connected region entirely, so it stays unpainted and its rim reads as a hole beam.
-  That is the accurate verdict for a mob that falls in, at the cost of the "the trap is
-  water" cue. Coloring such a beam by the fluid found under the fall column is a
-  cheap follow-up if it matters in practice.
+- One escape thickness covers every fluid and every profile. At its default it models
+  **AI pathing** rather than physical capability, so a rim the mod calls unreachable can still
+  be left by a mob that is pushed, knocked back, or ridden — and vanilla wardens avoid
+  pathing into lava despite their immunity (MC-249415), so an enabled lava plane says
+  "it can cross", not "it will". Raising the setting moves the model back toward
+  capability.
+- The escape thickness is measured on **still** water and converted to a height above the
+  plane by a fixed `1/9`, the drop from a cell top to a source's surface. Whether mob
+  pathing changes with flow level is unverified, so a shallower flowing cell gets that
+  same budget above its own plane.
+- A pool whose rim sits more than the escape thickness above the water block top is
+  outside the connected region entirely, so it stays unpainted and its rim reads as a
+  hole beam. That is the accurate verdict for a mob that falls in, at the cost of the
+  "the trap is water" cue — and at the mob-pathing default it is the **common** case
+  (any pool dug into terrain), so coloring such a beam by the fluid found under its fall
+  column is worth folding into Step 4.
 - The reached set now includes the water volume and the seafloor under it, so a click
   near open water spends its hop budget on water where it used to spend it on land. The
   cap on consecutive fluid hops is the knob if that trade goes the wrong way.
