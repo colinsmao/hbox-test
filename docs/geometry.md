@@ -1,11 +1,21 @@
 # Surface / collision geometry
 
 How standable surfaces are represented, made entity-size aware (width dilation),
-and computed (the output-sensitive flood). This is the **math layer** under the
+connected (reachability), and computed (the output-sensitive flood). This is the
+**math layer** under the
 block-hitbox overlay; how those surfaces are *drawn* lives in
 [`rendering.md`](rendering.md). Surface/collision geometry stays in **rect/double
 space**, never a pixel raster (a raster rewrite was prototyped and rejected — see
 [Appendix A](#appendix-a-rejected-pixel-raster)).
+
+**The core model, in one paragraph.** A standable surface is a rect at a collision
+height. Two surfaces are **connected** when their footprints touch and the **lower one
+can climb to the higher** within the profile's `reach`: a climb test over an *unordered*
+pair, which is why it reads `|dTopY| <= reach` and yields **one undirected edge** (see
+[Reachability model](#reachability-model)). The selection is everything connected to the
+clicked seed, so **reachable is escapable** — every edge is climbable in the up direction,
+therefore every path is walkable backwards. Falling is a separate subject with its own
+home, [hole classification](#hole-classification), and is unbounded there.
 
 **World read vs flood math.** `WorldGeometry` is the adapter over the
 `ColumnBoxes` port: it translates Minecraft block/fluid state into domain
@@ -123,7 +133,8 @@ defined by four rules:
    otherwise. From there a surface is reached iff it connects to an already-reached
    surface by **one geometric adjacency rule**: the footprints share an edge with
    positive overlap (or overlap with positive area), `footprintAdjacent`, **and**
-   `|dTopY| <= reach` (the profile's single step threshold). This subsumes the old
+   `|dTopY| <= reach` — the lower of the two can climb to the higher, one undirected
+   edge (see [Reachability model](#reachability-model)). This subsumes the old
    same-block / own-column / neighbour-column special cases: a glass pane on a block
    connects to that block's exposed ring because their footprints abut at the hole
    edges — no special case. Only exposed tops are painted; a fully occluded click
@@ -139,6 +150,88 @@ an exposed surface at the same radius.
 
 A **Point** profile (`W = 0`) reproduces the original zero-width point-walker
 exactly (dilation is a no-op, tops only abut).
+
+## Entity-width dilation
+
+Treat the entity as a point and pre-grow the world by its half-width `W/2`:
+
+- **The forbidden region grows, not just the supports.** Dilation distributes over
+  a union (`dilate(A ∪ B) = dilate(A) ∪ dilate(B)`), so growing each support rect by
+  `W/2` and unioning is equivalent to shrinking each gap by `W/2` per side. A gap of
+  width `g` flanked by support: `g <= W` bridges (no hole), `g > W` leaves a hole —
+  exactly "can't fall into a hole smaller than yourself". Plateau edges overhang by
+  `~W/2`; a wall pulls the standable region back `~W/2` from its base (the entity
+  perches onto the wall top) as a free byproduct.
+- **Occlusion is the same pass.** The spans-above test (rule 1 above) runs on the
+  *dilated* footprints, so cutting a buried lower top and supplying the higher one
+  is one operation, not a separate subtract.
+- **`exposeBox` is the unit op.** It grows one box's footprint by `W/2`, then
+  subtracts (guillotine `RectMath.subtractRects`) every *dilated* box that occludes its top
+  (`yMax > T && (yMin <= T || yMin < T+H)` — the buried-or-headroom test, rule 1),
+  yielding 0..N surviving top rects. The boxes it must subtract live in a bounded
+  column window — see `occluderColumns` below.
+
+Locality is bounded (growth is `< 1` block even for the Ravager), which is what
+makes the output-sensitive flood possible.
+
+## Reachability model
+
+Reach is a **climb test over an unordered pair** (`profile.reach()` = `max(jump, step)`):
+of two surfaces, it asks whether the **lower can climb to the higher**. The pair is
+unordered, which is why the test reads `|dTopY| <= reach` — the absolute value picks
+whichever surface is lower — and why one passing pair yields **one undirected edge** that
+the flood walks in either direction. So the only quantity reach ever measures is a climb,
+and a rim whose drop exceeds `reach` yields no edge at all: the ground under it enters the
+reached set only by another route (a staircase, a slope), if at all.
+
+That single property carries the model's central guarantee. Every edge is climbable in the
+up direction, so every path is walkable backwards, and **membership in the reached set
+means the entity can be there *and get back out*** — reachable is escapable. This is the
+guarantee [hole classification](#hole-classification) spends: asking "is a reached surface
+below this rim?" is asking "can it climb out again?", and the answer holds only because
+the edge is mutual.
+
+Falling belongs to [hole classification](#hole-classification), and is unbounded there:
+`classifyDrop` accepts the topmost reached surface below the rim at **any** depth. So the
+two vertical questions in this codebase have separate homes — connectivity is gated by the
+climb, and the physics of descent live in the drop classifier.
+
+**Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
+the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
+**`1.0`**. That value is the profile’s fixed vertical threshold only — the flood
+does not model horizontal jump distance (parkour), and it does not apply block or
+effect modifiers to jump height (honey, slime-block bounce, Jump Boost, and
+similar). Reachability is plain yes/no — a location is reachable from the seed or it is not —
+so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
+the radius budget, which can cut off a very long winding path. So a shallow
+(`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
+the width rule you need a gap that is **deeper than `reach` or over the void**.
+**Entity-height headroom** is
+modelled (rule 1: a top survives only where `(T, T+H]` is clear),
+so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
+classification builds on this (below): the flood still only paints
+*coverage*, and a separate predicate reads that coverage to label each drop edge.
+
+## Entity profiles (size + headroom)
+
+`EntityProfile(name, width, height, reach)` selects the entity the flood is computed
+for. The profile is chosen live via the `mobProfile` setting (see
+[`settings.md`](settings.md)); the shipped builtin sizes live on `EntityProfile`
+constants, with enables/order in `ProfileRoster`.
+
+Each field drives one part of the math: `W` drives dilation (above), `H` drives
+headroom (rule 1), and `reach` is the climb threshold — `max(jump, step)`, applied as
+the [climb test](#reachability-model) above. Skirt
+*draw* heights are Appearance `downSkirtHeight` / `upwardSkirtHeight` (not `reach`).
+Widths and heights are the
+vanilla hitbox sizes: doubles, not `1/16`-aligned, consistent with the rect-space
+model. Two examples anchor the range:
+
+- **Player** — `W = 0.6`, `H = 1.8`, `reach = 1.2522` (the documented living-entity
+  jump peak, shared by the larger Ravager).
+- **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
+  zero height reduces headroom to the buried test, so Point stays the pure
+  point-walker and geometric baseline.
 
 ## Fluid surfaces
 
@@ -167,7 +260,8 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 - **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
   fluid surface in a fluid column survives exposure. Consecutive tops differ by at
   most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
-  floor), so the ordinary climb test connects surface, intermediates, and floor —
+  floor), so the ordinary [climb test](#reachability-model) connects surface,
+  intermediates, and floor —
   including a waterfall column.
 - **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
   the fluid top is clipped by that solid the same amount. At a flush pond rim the
@@ -179,29 +273,6 @@ Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
 coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
 complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
 disjoint rects).
-
-## Entity-width dilation
-
-Treat the entity as a point and pre-grow the world by its half-width `W/2`:
-
-- **The forbidden region grows, not just the supports.** Dilation distributes over
-  a union (`dilate(A ∪ B) = dilate(A) ∪ dilate(B)`), so growing each support rect by
-  `W/2` and unioning is equivalent to shrinking each gap by `W/2` per side. A gap of
-  width `g` flanked by support: `g <= W` bridges (no hole), `g > W` leaves a hole —
-  exactly "can't fall into a hole smaller than yourself". Plateau edges overhang by
-  `~W/2`; a wall pulls the standable region back `~W/2` from its base (the entity
-  perches onto the wall top) as a free byproduct.
-- **Occlusion is the same pass.** The spans-above test (rule 1 above) runs on the
-  *dilated* footprints, so cutting a buried lower top and supplying the higher one
-  is one operation, not a separate subtract.
-- **`exposeBox` is the unit op.** It grows one box's footprint by `W/2`, then
-  subtracts (guillotine `RectMath.subtractRects`) every *dilated* box that occludes its top
-  (`yMax > T && (yMin <= T || yMin < T+H)` — the buried-or-headroom test, rule 1),
-  yielding 0..N surviving top rects. The boxes it must subtract live in a bounded
-  column window — see `occluderColumns` below.
-
-Locality is bounded (growth is `< 1` block even for the Ravager), which is what
-makes the output-sensitive flood possible.
 
 ## How it is computed: the output-sensitive (lazy) flood
 
@@ -257,26 +328,6 @@ milestones).
 
 Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
 first factor; lazy-Y trims the second — orthogonal, and they compose.
-
-## Reachability model
-
-Reach is a **single threshold** (`profile.reach()` = `max(jump, step)`): two surfaces
-connect when their height difference is `<= reach`, anything deeper does not.
-**Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
-the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
-**`1.0`**. That value is the profile’s fixed vertical threshold only — the flood
-does not model horizontal jump distance (parkour), and it does not apply block or
-effect modifiers to jump height (honey, slime-block bounce, Jump Boost, and
-similar). Reachability is plain yes/no — a location is reachable from the seed or it is not —
-so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
-the radius budget, which can cut off a very long winding path. So a shallow
-(`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
-the width rule you need a gap that is **deeper than `reach` or over the void**.
-**Entity-height headroom** is
-modelled (rule 1: a top survives only where `(T, T+H]` is clear),
-so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
-classification builds on this (below): the flood still only paints
-*coverage*, and a separate predicate reads that coverage to label each drop edge.
 
 ## Hole classification
 
@@ -477,26 +528,6 @@ The zero-width **Point** profile (debug) has a few other edge-case
 draw bugs that do not show up on the shipped dilated profiles. Left unfixed on
 purpose due to low ROI. Is a zero-width point supposed to fit through a zero
 size gap? Because a 4.0 wide ghast fits into a 4 block gap.
-
-## Entity profiles (size + headroom)
-
-`EntityProfile(name, width, height, reach)` selects the entity the flood is computed
-for. The profile is chosen live via the `mobProfile` setting (see
-[`settings.md`](settings.md)); the shipped builtin sizes live on `EntityProfile`
-constants, with enables/order in `ProfileRoster`.
-
-Each field drives one part of the math: `W` drives dilation (above), `H` drives
-headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`. Skirt
-*draw* heights are Appearance `downSkirtHeight` / `upwardSkirtHeight` (not `reach`).
-Widths and heights are the
-vanilla hitbox sizes: doubles, not `1/16`-aligned, consistent with the rect-space
-model. Two examples anchor the range:
-
-- **Player** — `W = 0.6`, `H = 1.8`, `reach = 1.2522` (the documented living-entity
-  jump peak, shared by the larger Ravager).
-- **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
-  zero height reduces headroom to the buried test, so Point stays the pure
-  point-walker and geometric baseline.
 
 ## Appendix A: rejected pixel raster
 

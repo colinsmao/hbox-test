@@ -14,10 +14,17 @@ package dev.kelianmao.mobwalk.client.surface;
  * reproduces the pre-profile point-particle behavior — the oracle baseline.
  * {@code width} drives dilation; {@code height} drives headroom.
  *
- * <p>{@code reach} is {@code max(jump, step)}: two surfaces connect when
- * {@code |dTopY| <= reach}. Living-entity builtins use
- * {@link #DEFAULT_JUMP_REACH}; {@link #POINT} keeps {@code 1.0} as the geometric
- * oracle. Reach is the profile’s fixed vertical threshold only (see geometry.md).
+ * <p>{@code reach} is {@code max(jump, step)}, and it measures exactly one thing:
+ * a <b>climb</b>. Of an unordered pair of surfaces it asks whether the lower can
+ * climb to the higher, so the test reads {@code |dTopY| <= reach} (the absolute
+ * value picks the lower one) and yields one <b>undirected</b> edge. Reachable is
+ * therefore escapable, which is the guarantee hole classification spends; descent
+ * is unbounded and lives in {@code SurfaceSelection.classifyDrop}. See
+ * {@code docs/geometry.md} "Reachability model".
+ *
+ * <p>Living-entity builtins use {@link #DEFAULT_JUMP_REACH}; {@link #POINT} keeps
+ * {@code 1.0} as the geometric oracle. Reach is the profile’s fixed vertical
+ * threshold only (see geometry.md).
  *
  * <p>{@code height} is the entity's hitbox height (vanilla values; doubles, not
  * {@code 1/16}-quantized — see {@code docs/geometry.md}). It drives the

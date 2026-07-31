@@ -50,8 +50,9 @@ import net.minecraft.world.level.Level;
  * <li><b>Flood</b> from the click origin (raw dilated footprints of the clicked
  *     block, non-emitted) into the exposed-top graph by <b>geometric
  *     adjacency</b>: two rects are connected iff their footprints share an edge
- *     with positive overlap ({@link RectMath#footprintAdjacent}) and their heights are
- *     within the active {@link EntityProfile}'s {@code reach}. Seed-block exposed
+ *     with positive overlap ({@link RectMath#footprintAdjacent}) and the lower of
+ *     the two can climb to the higher within the active {@link EntityProfile}'s
+ *     {@code reach} (one undirected edge). Seed-block exposed
  *     tops start at depth 0; other tops adjacent to the origin start at depth 1.
  *     This one test subsumes the old same-block / own-column / 4-neighbor-column
  *     cases: a glass pane on a block connects to that block's exposed ring because
@@ -1326,8 +1327,11 @@ public final class SurfaceSelection {
         double h = s.rect().collisionTopY();
         for (int cx = s.cx() - neighbour; cx <= s.cx() + neighbour; cx++) {
           for (int cz = s.cz() - neighbour; cz <= s.cz() + neighbour; cz++) {
-            // Only tops within a single step of h can connect, so scan
-            // just that height window of the neighbour column.
+            // A pair connects iff the LOWER of the two can climb to the higher, so
+            // the window spans one climb in each role: up to h+reach for a candidate
+            // this surface climbs to, down to h-reach for one that climbs to this.
+            // Hence a drop deeper than one climb yields no edge (see geometry.md
+            // "Reachability model") — which is what makes reached imply escapable.
             for (CellSurface t : collect(cx, cz, h - reach, h + reach)) {
               if (hopCount.containsKey(t)) {
                 continue;
