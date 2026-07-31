@@ -352,6 +352,9 @@ the published snapshots into `SurfaceEmitter.emit`.
   side — the fall-column predicate),
   `subtractIntervals`, `intersectRect` (unit-tested; production merge-after-flood
   uses `mergeCoplanarSplitFrontier`).
+- `WorldGeometry.java`: adapter over the `ColumnBoxes` port — Minecraft
+  block/fluid state → domain `WorldBox` / `FluidKind` (`levelColumnBoxes`,
+  `fluidSurfaceHeight`, `visibleTop` memo).
 - `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
   BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via

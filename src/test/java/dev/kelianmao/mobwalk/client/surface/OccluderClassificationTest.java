@@ -8,9 +8,9 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColumnBoxes;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.FluidKind;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.FluidKind;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
  * Stage A1: the pure occluder-edge classification ({@code occluderSpansForRect} /
@@ -27,8 +27,8 @@ final class OccluderClassificationTest {
     return new WorldBox(x, y, z, x, z, x + 1, z + 1, y, y + 1);
   }
 
-  // Non-occluding swim plate (same shape as FluidClipContractTest.plate).
-  private static WorldBox plate(int bx, int by, int bz, double height, FluidKind kind) {
+  // Non-occluding fluid surface (same shape as FluidClipContractTest.fluidSurface).
+  private static WorldBox fluidSurface(int bx, int by, int bz, double height, FluidKind kind) {
     double top = by + height;
     return new WorldBox(bx, by, bz, bx, bz, bx + 1, bz + 1, by, top, top, top, kind, false);
   }
@@ -105,18 +105,19 @@ final class OccluderClassificationTest {
   }
 
   @Test
-  void fluidPlateAcrossEdgeEmitsNoUpSpan() {
-    // A non-occluding water plate abutting the +X edge rises above T the same way a
-    // wall would, but occlusion is a volume property — plates must not mark up-skirts.
+  void fluidSurfaceAcrossEdgeEmitsNoUpSpan() {
+    // A non-occluding water fluid surface abutting the +X edge rises above T the same
+    // way a wall would, but occlusion is a volume property — fluid surfaces must not
+    // mark up-skirts.
     StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
-    WorldBox water = plate(1, 64, 0, 8.0 / 9.0, FluidKind.WATER);
+    WorldBox water = fluidSurface(1, 64, 0, 8.0 / 9.0, FluidKind.WATER);
     List<SkirtSpan> spans = classify(floor, 0.0, 0.0, water);
     assertTrue(spans.isEmpty());
   }
 
   @Test
-  void computeOccludersFromMarksWallNotFluidPlate() {
-    // Port-level: wall column marks an up-skirt; water plate column marks none.
+  void computeOccludersFromMarksWallNotFluidSurface() {
+    // Port-level: wall column marks an up-skirt; water fluid-surface column marks none.
     StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
     EntityProfile point = EntityProfile.POINT;
     ColumnBoxes wallWorld = (x, y, z) -> {
@@ -132,7 +133,7 @@ final class OccluderClassificationTest {
 
     ColumnBoxes waterWorld = (x, y, z) -> {
       if (x == 1 && z == 0 && y == 64) {
-        return List.of(plate(1, 64, 0, 8.0 / 9.0, FluidKind.WATER));
+        return List.of(fluidSurface(1, 64, 0, 8.0 / 9.0, FluidKind.WATER));
       }
       return List.of();
     };

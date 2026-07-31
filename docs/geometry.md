@@ -7,6 +7,13 @@ block-hitbox overlay; how those surfaces are *drawn* lives in
 space**, never a pixel raster (a raster rewrite was prototyped and rejected — see
 [Appendix A](#appendix-a-rejected-pixel-raster)).
 
+**World read vs flood math.** `WorldGeometry` is the adapter over the
+`ColumnBoxes` port: it translates Minecraft block/fluid state into domain
+`WorldBox` / `FluidKind` (including fluid-surface emission via
+`fluidSurfaceHeight`). `SurfaceSelection` holds the pure flood, merge, skirts,
+and holes, and reaches the world only through that port (`WorldSurfaceIndex`,
+`gatherLedgesFrom`, `computeOccludersFrom`).
+
 ## Representation: rect/double space
 
 A standable surface is a
@@ -137,35 +144,35 @@ exactly (dilation is a no-op, tops only abut).
 ## Fluid surfaces
 
 Water and lava are **non-occluding support surfaces**: each fluid cell can emit a
-standable plate that travels the same path as a solid top (dilation, clip, flood,
+standable surface that travels the same path as a solid top (dilation, clip, flood,
 merge, skirts, holes), while contributing no collision volume to occlusion.
 
 - **Occlusion is a volume property.** Burial and headroom ask which boxes span
   above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
-  fluid plates set `occludes=false`, so every solid top under fluid survives, and
+  fluid surfaces set `occludes=false`, so every solid top under fluid survives, and
   solids still clip a fluid top the same way they clip any other top. The same
   rule gates up-skirts: `wallOccluder` requires `occludes`, and `computeOccluders`
-  reads through the shared `ColumnBoxes` port (`levelColumnBoxes`) so a plate the
-  flood emits cannot mark a false wall face.
-- **Emission (`levelColumnBoxes`).** When Generic `swimmableFluids` is on, a cell
-  whose fluid state is in `FluidTags.WATER` or `FluidTags.LAVA` emits one
-  full-footprint plate (`yMin = y`, `yMax = y + plateHeight`). Height is
-  `FluidState.getHeight` when that value is above `0.4` (vanilla fluid-jump
+  reads through the shared `ColumnBoxes` port (`WorldGeometry.levelColumnBoxes`) so
+  only occluding boxes mark wall faces.
+- **Emission (`WorldGeometry.levelColumnBoxes`).** When Generic `swimmableFluids` is
+  on, a cell whose fluid state is in `FluidTags.WATER` or `FluidTags.LAVA` emits one
+  full-footprint fluid surface (`yMin = y`, `yMax = y + fluidSurfaceHeight`). Height
+  is `FluidState.getHeight` when that value is above `0.4` (vanilla fluid-jump
   threshold), otherwise `0` (thin sheet seated on the cell floor, coplanar with
   the solid underfoot). Falling fluid uses the same path as still fluid
-  (`getHeight == 1.0`). The plate carries a `FluidKind` stamp (`WATER` / `LAVA`)
-  for later merge / seating / draw; solids stay `NONE`. Geometry today only
+  (`getHeight == 1.0`). The fluid surface carries a `FluidKind` stamp (`WATER` /
+  `LAVA`) for later merge / seating / draw; solids stay `NONE`. Geometry today only
   needs “emit or not.”
-- **Column continuity.** Because a fluid plate never occludes, every cell's plate
-  in a fluid column survives exposure. Consecutive tops differ by at most `1.0`
-  (plane to plane exactly `1.0`; lowest plate one block above the floor), so the
-  ordinary climb test connects surface, intermediates, and floor — including a
-  waterfall column — with no fluid-specific hop rule.
+- **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
+  fluid surface in a fluid column survives exposure. Consecutive tops differ by at
+  most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
+  floor), so the ordinary climb test connects surface, intermediates, and floor —
+  including a waterfall column.
 - **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
   the fluid top is clipped by that solid the same amount. At a flush pond rim the
   surviving fluid edge meets the shore's dilated footprint, so the drop classifier
-  finds the kept floor (or the plane one cell down) as a landing rather than a
-  hole. Edge marking stays with the occluder / drop passes.
+  finds the kept floor (or the plane one cell down) as a landing. Edge marking stays
+  with the occluder / drop passes.
 
 Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing),
 `FluidClipContractTest` (standable top, no clip from fluid, shore complementarity).
@@ -395,8 +402,9 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
   Occluder and ledge scans never raise: both read through
-  `levelColumnBoxes(level, false, …)` so both tops collapse to the collision top. The
-  flood's own scan producer (`levelColumnBoxes(level, computeVisualTop, …)`, feeding
+  `WorldGeometry.levelColumnBoxes(level, false, …)` so both tops collapse to the
+  collision top. The flood's own scan producer
+  (`WorldGeometry.levelColumnBoxes(level, computeVisualTop, …)`, feeding
   `WorldSurfaceIndex`) computes both tops at the node-producing site.
 - **The raise rule (`exposeBox`).**
   `visualTopY = (|collisionTopY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > collisionTopY) ?

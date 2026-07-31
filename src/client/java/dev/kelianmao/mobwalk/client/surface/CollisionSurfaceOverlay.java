@@ -41,7 +41,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * tops (and their skirts/beams) draw on each block's
  * <b>visible face</b> ({@code visualTopY}); Appearance {@code drawOnVisibleFace}
  * switches to the collision height, which re-floods since the visible top is
- * gathered compute-side (gated on the flag; see {@code SurfaceSelection.visibleTop}).
+ * gathered compute-side (gated on the flag; see {@code WorldGeometry.visibleTop}).
  *
  * <p>The selection is published into a {@code volatile} snapshot on every wand
  * action ({@link #publish}); {@link #extract} does no per-frame geometry work

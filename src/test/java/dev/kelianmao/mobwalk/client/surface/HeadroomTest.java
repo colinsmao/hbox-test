@@ -11,7 +11,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
  * Stage B2: the headroom occlusion predicate in {@code exposeBox} — a box top at

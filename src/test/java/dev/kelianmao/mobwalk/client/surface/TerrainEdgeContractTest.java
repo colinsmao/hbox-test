@@ -12,7 +12,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
  * Black-box geometry oracle for a Player-width soul-sand -> path -> full-block row.

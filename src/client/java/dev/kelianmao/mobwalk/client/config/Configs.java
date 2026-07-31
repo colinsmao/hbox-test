@@ -403,7 +403,7 @@ public final class Configs implements IConfigHandler {
       }
     });
     // drawOnVisibleFace gates the visible-top read compute-side (see
-    // SurfaceSelection.visibleTop), so flipping it must re-flood from the last seed.
+    // WorldGeometry.visibleTop), so flipping it must re-flood from the last seed.
     Appearance.DRAW_ON_VISIBLE_FACE.setValueChangeCallback(cfg -> {
       CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
       if (collision != null) {

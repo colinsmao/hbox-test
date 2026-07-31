@@ -8,7 +8,7 @@ Durable knowledge lives in `docs/`, so this file is cleared once the plan lands.
 
 # M9 hazards — water and lava as swimmable hazard surfaces
 
-Give water and lava standable swim planes (behind a manual toggle per fluid) so pools
+Give water and lava standable fluid surfaces (behind a manual toggle per fluid) so pools
 stop reading as false holes, seated at an effective standing height so the existing
 reach reproduces the measured escape, with hazard-colored fill plus perimeter beams
 marking it.
@@ -16,7 +16,7 @@ marking it.
 ## The model
 
 A fluid cell contributes **a standable surface and no collision volume**; hazard
-identity lives on that plate alone. Everything else follows from the existing
+identity lives on that fluid surface alone. Everything else follows from the existing
 rect/flood machinery.
 
 - **Surfaces without volume — the governing rule.** Occlusion here is a property of
@@ -52,31 +52,33 @@ rect/flood machinery.
   `FluidTags.LAVA` tags, one shared `swimmableFluids` toggle. Fluids outside those tags keep today's
   behavior, so modded fluids are out of scope (a modded fluid that opts into a vanilla
   tag comes along for free).
-- **One box per fluid cell.** Enabled tag → full-footprint plate, `yMin = y`,
-  `yMax = y + plateHeight` — `getHeight` when above `0.4`, else `0`; tagged `WATER` or
-  `LAVA`; `occludes=false`. Falling included.
-- **The `0.4` rule seats thin fluid at the cell floor.** Above `0.4` the plate sits at
-  `getHeight`; at or below it the plate sits at relative height `0` (coplanar with the
-  solid underfoot). Hazard priority over that solid at the same `collisionTopY` is Step 2.
-- **Hazard identity lives on the plate.** Only the fluid box carries `FluidKind`; solids
-  stay `NONE`. Thin sheets get a floor-height plate so they are not false-safe stone.
+- **One box per fluid cell.** Enabled tag → full-footprint fluid surface, `yMin = y`,
+  `yMax = y + fluidSurfaceHeight` — `getHeight` when above `0.4`, else `0`; tagged `WATER`
+  or `LAVA`; `occludes=false`. Falling included.
+- **The `0.4` rule seats thin fluid at the cell floor.** Above `0.4` the fluid surface
+  sits at `getHeight`; at or below it the fluid surface sits at relative height `0`
+  (coplanar with the solid underfoot). Hazard priority over that solid at the same
+  `collisionTopY` is Step 2.
+- **Hazard identity lives on the fluid surface.** Only the fluid box carries `FluidKind`;
+  solids stay `NONE`. Thin sheets get a floor-height fluid surface so they carry the
+  fluid hazard over the solid underfoot.
 - **Escape lives in the surface plane's height.** For a surface cell the plane's
   `collisionTopY` is an **effective standing height** (Step 3):
   `clamp(blockTop + escape - reach, y, y + fluidHeight)`. Water `escape = 0.875`.
 - **Draw stays on the fluid surface.** `visualTopY = y + fluidHeight` via the existing
-  raise when seating lowers `collisionTopY` (Step 3). Thin plates at `0` keep both tops
-  at the cell floor until seating.
+  raise when seating lowers `collisionTopY` (Step 3). Thin fluid surfaces at `0` keep
+  both tops at the cell floor until seating.
 - **Fluids connect** across rivers. Cost tracks water volume inside the hop budget —
   Step 1 gates on measurement; deferred knob is a fluid-hop cap.
 - **Fluid identity through the merge.** Ownership `(radiusTier, hazardPriority, visualTopY)`
-  — hazard priority separates water/lava and lets a thin plate claim over solid.
+  — hazard priority separates water/lava and lets a thin fluid surface claim over solid.
 - **One fluid enum is the extension point.** `FluidKind { NONE, WATER, LAVA }` owns
   escape, color, and merge priority.
 - **Marking.** Hazard fill color + perimeter `HazardSpan` beams.
 
 ```mermaid
 flowchart TD
-  levelColumnBoxes["levelColumnBoxes (world read)"] -->|"collision boxes + fluid plates"| index[WorldSurfaceIndex]
+  levelColumnBoxes["levelColumnBoxes (world read)"] -->|"collision boxes + fluid surfaces"| index[WorldSurfaceIndex]
   index --> exposeBox["exposeBox: dilate, clip by occluding volumes only"]
   exposeBox --> flood["LazyFlood: unchanged, one climb test"]
   flood --> merge["mergeCoplanarSplitFrontier: (tier, hazard, visualTopY)"]
@@ -91,8 +93,8 @@ flowchart TD
 Most of `500b3b7` stands: `FluidKind`, `boolean swimmableFluids` threaded through
 `select` → `LazyFlood` / `computeHoles` / `gatherLedges`, `fluidKind()`,
 `FLUID_JUMP_THRESHOLD`, the `WorldBox` fluid fields with their convenience constructors,
-box emission in `levelColumnBoxes`, the pure
-`plateHeight(kind, fluidHeight, reach)` predicate, the Generic toggle in
+box emission in `WorldGeometry.levelColumnBoxes`, the pure
+`fluidSurfaceHeight(kind, fluidHeight, reach)` predicate, the Generic toggle in
 [Configs.java](src/client/java/dev/kelianmao/mobwalk/client/config/Configs.java)
 (`swimmableFluids` on) with its re-flood callback and
 `Configs.swimmableFluids()`, the three `select` call sites in
@@ -101,22 +103,23 @@ and the `comment.*` keys in
 [en_us.json](src/client/resources/assets/mobwalk/lang/en_us.json).
 
 The corrections:
-1. `WorldBox.occludes` (renamed from fluidPlate): solids occlude; fluid plates do not.
-   `exposeBox` skips clip when `!occludes`. Zero-thickness alone still headroom-occludes.
-2. Drop solid-under-fluid tainting — only the plate carries `FluidKind`.
-3. Thin fluid (`<= 0.4`) emits a plate at relative height `0` instead of emitting nothing.
+1. `WorldBox.occludes` (renamed from fluidPlate): solids set `occludes=true`; fluid
+   surfaces set `occludes=false`. `exposeBox` skips clip when `!occludes`.
+   Zero-thickness alone still headroom-occludes.
+2. Drop solid-under-fluid tainting — only the fluid surface carries `FluidKind`.
+3. Thin fluid (`<= 0.4`) emits a fluid surface at relative height `0`.
 4. Invert clip-contract tests that assumed burial; add shore complementarity; thin-at-0
-   plate tests.
+   fluid-surface tests.
 
 Keeps the plane **at the fluid surface** for tall fluid (`yMax = y + fluidHeight`), or at
 the cell floor for thin fluid; Step 3 seats escape. A pond paints multiple layers
 (surface, intermediates, floor).
 
-In-game checklist (unit tests cover plate heights, clip role, column continuity):
+In-game checklist (unit tests cover fluid-surface heights, clip role, column continuity):
 1. Deep pond with a flush shore, click the shore → water surface paints across the pond,
    floor/intermediate planes are reached, rim is a plain down-skirt (no red hole beams).
 2. Thin flowing sheet (water far from source, or Overworld lava's last ring) → a
-   floor-height plate paints coplanar with the stone underfoot.
+   floor-height fluid surface paints coplanar with the stone underfoot.
 3. Configure → General → `swimmableFluids` Off → pond re-floods as hole beams; On → water
    paints again.
 4. Dry-terrain selection unchanged from before this step.
@@ -124,7 +127,7 @@ In-game checklist (unit tests cover plate heights, clip role, column continuity)
 
 ## Step 2 — Carry fluid identity through the merge
 
-`fluid` and `plate` fields on
+a `fluid` field on
 [StandableRect.java](src/client/java/dev/kelianmao/mobwalk/client/surface/StandableRect.java)
 (defaulted in the convenience constructors), set from the source box in `exposeBox`, and
 `OwnershipClass` / `ownershipLayers` / `stripMergeEqualOwnership` in
@@ -142,12 +145,12 @@ In-game checklist (unit tests cover merge ownership / partition invariants):
 
 ## Step 3 — Seat the surface plane at the effective standing height
 
-A pure helper `swimPlaneY(blockY, fluidHeight, kind, reach)` returns
+A pure helper `fluidSurfaceY(blockY, fluidHeight, kind, reach)` returns
 `clamp(blockY + 1 + escape - reach, blockY, blockY + fluidHeight)`, used for the
-`yMax` of a **surface** cell's box in `levelColumnBoxes` (a submerged cell keeps
-`y + 1`), with `blockOutlineTop = blockY + fluidHeight` so the existing raise puts
+`yMax` of a **surface** cell's box in `WorldGeometry.levelColumnBoxes` (a submerged cell
+keeps `y + 1`), with `blockOutlineTop = blockY + fluidHeight` so the existing raise puts
 `visualTopY` back on the visible surface. Escape constants (`WATER_ESCAPE = 0.875`, lava
-measured below) live next to `EntityProfile.DEFAULT_JUMP_REACH`. New `SwimEscapeTest`
+measured below) live next to `EntityProfile.DEFAULT_JUMP_REACH`. New `FluidEscapeTest`
 covers the seating arithmetic, the 14/16 pass, the full-block reject, both clamp ends,
 `visualTopY` staying on the surface, and the seated plane staying at or above the plane
 one cell down.
@@ -200,7 +203,7 @@ within a step); the concrete case tables are written during the step.
 
 1. **Surface existence** (Step 1, `FluidPlaneTest`). A cell emits at most one fluid
    box when its kind is enabled; top is `y + getHeight` when height `> 0.4`, else `y + 0`
-   (thin sheet). Pure `plateHeight(...)`.
+   (thin sheet). Pure `fluidSurfaceHeight(...)`.
 2. **Fluid role** (Step 1, `FluidClipContractTest`). A fluid box supplies a standable top
    and clips nothing (`occludes=false`): neighbouring lower solid keeps full dilated area
    under Ravager, solid beneath keeps full area, floor keeps headroom. Solid shore clips
@@ -214,10 +217,10 @@ within a step); the concrete case tables are written during the step.
    merge invariants hold unchanged, plus: each output rect's tag equals those of the
    nodes it covers, and mixed-identity nodes at one collision height still emit disjoint
    rects.
-5. **Tag coverage** (Step 2, `FluidPlaneTest`). The fluid plate carries the kind; solids
-   stay `NONE`. Thin sheets use a height-0 plate (hazard priority claims over solid in
-   Step 2).
-6. **Effective-plane identity** (Step 3, `SwimEscapeTest`). Unclamped,
+5. **Tag coverage** (Step 2, `FluidPlaneTest`). The fluid surface carries the kind; solids
+   stay `NONE`. Thin sheets use a height-0 fluid surface (hazard priority claims over
+   solid in Step 2).
+6. **Effective-plane identity** (Step 3, `FluidEscapeTest`). Unclamped,
    `collisionTopY + profile.reach() == blockTop + escape(kind)`; always
    `collisionTopY <= visualTopY`, with `visualTopY` the physical fluid surface, and
    always at or above the plane one cell down. The second half is what the existing

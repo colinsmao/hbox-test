@@ -8,8 +8,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColumnBoxes;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
  * The gather-exposure == flood-exposure contract for {@code gatherLedges}
