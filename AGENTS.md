@@ -7,8 +7,10 @@ roadmap) live in **[`docs/project.md`](docs/project.md)**; subsystem depth lives
 in **[`docs/rendering.md`](docs/rendering.md)**,
 **[`docs/geometry.md`](docs/geometry.md)**, and
 **[`docs/settings.md`](docs/settings.md)** (read the relevant one before working
-in that area); the *current short-term plan* lives in **[`PLAN.md`](PLAN.md)**
-(transient, often empty between tasks — never durable knowledge).
+in that area); the *current long-term plan* lives in **[`PLAN.md`](PLAN.md)** — a whole
+milestone's steps with their in-game checklists, decisions, and backlog. Commit it to
+hand a plan between agents and machines through git (a cloud agent to a local dev
+agent); clear it once that plan lands, since durable knowledge lives in `docs/`.
 
 > **The core workflow:** work proceeds one plan step at a time, and **each step is
 > its own commit.** A step is not done until its enumerated in-game checklist has
@@ -197,8 +199,8 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   (build/test + in-game) → fix bugs and re-check (loop) → checks pass → write/update the
   docs → human approval → commit (code + docs together).** So a step in flight is
   expected to have finished, validated code with its docs still unwritten right up until
-  the commit; capture learnings in the plan scratch (`PLAN.md` / `.cursor/plans`)
-  meanwhile so nothing is lost.
+  the commit; capture learnings in `PLAN.md` meanwhile so nothing is lost — they ride
+  along in that step's commit.
 - **Commit granularity is judgment — avoid commit noise.** Group by concept, not by
   file. A tiny tangential tweak (a small rule/prompt/doc-wording fix) may ride along
   with a related commit rather than getting its own; reserve a standalone commit for a
@@ -250,6 +252,7 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 - **Where knowledge goes (keep `AGENTS.md` lean):** place it by scope —
   - a project-wide *rule/instruction* that applies to any task → **`AGENTS.md`**;
   - a project *fact* (status, layout, versions, roadmap) → **`docs/project.md`**;
+  - the *current plan* (steps, in-game checklists, decisions, backlog) → **`PLAN.md`**;
   - subsystem implementation detail → that subsystem's guide under **`docs/`**;
   - specific to one file/widget → a **code comment** next to the code.
 
