@@ -36,7 +36,8 @@ default shape of every task.
 1. **Design the plan as committable steps.** Each step should be a self-contained,
    independently verifiable unit of work — the thing that becomes one commit. Prefer
    more small steps over a few large ones. If a step can't be validated and committed
-   on its own, it's too big; split it.
+   on its own, it's too big; split it. Put a short docs-quality TODO on the plan
+   (intent in Documentation & conventions) so mid-work doc edits stay honest.
 2. **Every step has its own enumerated in-game checklist.** Not a summary, not
    "verify it works": a numbered list of concrete `action → exact expected on-screen
    result` items (e.g. "right-click a slab → its half-height top face is drawn, and
@@ -83,7 +84,8 @@ as a substitute for actually validating in-game, and keep them working if you to
   **ask** carrying the checklist reminder — a hook can't verify you ran `runClient`,
   only force the pause, so the confirmation is on you.
 - `plan-checklist-nudge.js` (`postToolUse`) reminds, on each `PLAN.md` edit, that
-  every step needs its own enumerated in-game checklist.
+  every step needs its own enumerated in-game checklist (and to keep a docs-quality
+  TODO on the plan — see Documentation & conventions).
 - `stop-ingame-reminder.js` (`stop`) nudges once when a turn ends with uncommitted
   `src/`/`docs/` changes. Caveat: `stop` hooks don't run on cloud agents and have a
   known Windows stdout-capture quirk, so this one is best-effort — the commit gate is
@@ -198,24 +200,25 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   (build/test + in-game) → fix bugs and re-check (loop) → checks pass → write/update the
   docs → human approval → commit (code + docs together).**
 - **Commit granularity is judgment — avoid commit noise.** Group by concept, not by
-  file. A tiny tangential tweak (a small rule/prompt/doc-wording fix) may ride along
-  with a related commit rather than getting its own; reserve a standalone commit for a
-  change substantial enough to stand alone. Prefer fewer coherent commits over many
-  trivial ones (while still keeping genuinely distinct plan steps in their own commits).
-- **Never commit without explicit human approval.** This is absolute: the agent may
-  not `git commit` on its own initiative, self-approve the commit-gate hook, retry to
-  bypass it, or treat a green build/test as approval. Stage the change, surface the
-  checklist, and **wait for the human to say commit.**
+  file. Prefer fewer coherent commits over many trivial ones; keep distinct plan steps
+  in their own commits. A tiny tangential tweak (hook, prompt, wording) may ride along.
+  When the human says commit, stage the intentional working-tree changes for that step
+  and commit — do not spend a turn auditing which dirty files “belong” unless something
+  looks like secrets, generated build output, or clearly unrelated large dirt.
+- **Never commit without explicit human approval.** Absolute: do not `git commit` on
+  your own initiative, self-approve the commit-gate hook, retry to bypass it, or treat
+  a green build/test as approval. Wait for the human to say commit.
 - **Don't commit until the step is confirmed in-game.** A green `./gradlew build` is
   not sufficient — behavior here is runtime/visual. Make the edits, run the gates,
   then **wait until the step's in-game checklist passes** (user confirms, or you run
   `runClient` and verify) before committing that step. (The `git commit` hook in
   `.cursor/hooks.json` will pause each commit to reconfirm this — but the hook is
   a backstop, not a substitute for approval.)
-- **Sole-agent assumption.** Unless told otherwise, assume you are the only
-  agent/person in this repo; no need to defensively re-check remote/branch state for
-  concurrent changes before each action. Amend/force-push on your own feature branch
-  is low-risk when it makes history clearer — but **do not force-push or amend unless asked.**
+- **Sole-agent assumption.** Unless told otherwise, you are the only agent in this
+  repo: skip defensive remote/branch concurrency checks, and treat dirty files from
+  this session as yours to include under the commit-granularity judgment above.
+  Amend/force-push on your own feature branch is low-risk when it clarifies history —
+  but **do not force-push or amend unless asked.**
 - **Never open, update, close, or otherwise touch a PR unless the human
   explicitly asks.** Pushing a branch is fine when asked to push; creating or
   editing a PR is a separate action that requires its own explicit instruction.
@@ -224,27 +227,17 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 ## Documentation & conventions
 
 - **Indentation is two spaces** (Java, Gradle, JSON under `src/`).
-- **Describe what something *is* / *does*, never what it isn't / doesn't.** This is
-  a hard style rule for `docs/*.md` prose and code comments: write the
-  positive fact only. Do **not** pad with negations of alternatives or absences
-  ("no keybind", "no HUD", "never spam", "does not touch X", "not a Y"). Readers
-  learn the system from what exists; listing what was rejected or omitted is noise
-  and goes stale. Prefer "Client chat command `/mobwalk dump`" over "chat command
-  only (no keybind, no HUD)". Prefer "Armed by `/mobwalk dump`" over "normal
-  selects never log". **Exceptions (narrow):** (1) an in-game checklist item that
-  must assert a regression absence (`action → expected: no [flood-debug] lines`);
-  (2) a hard safety/correctness invariant the reader must rely on ("must never load
-  on a dedicated server"); (3) contrasting two real behaviours the reader needs to
-  tell apart ("upward skirt, not a downward drop"). When in doubt, delete the
-  negative clause — if the positive sentence still stands, the negation was filler.
-- **Keep the docs current — per commit, but written after the step's checks pass.**
-  Whenever a change alters behavior, architecture, status, constraints, versions, or
-  adds a non-obvious gotcha, update the relevant docs **in that same commit** so the
-  next agent inherits accurate knowledge — docs are never deferred to a later commit.
-  Within the step, though, write them **only once the code has passed its checks**
-  (build/test + in-game), not during the bug-fix loop (see the Git/workflow "docs come
-  last" rule): `code → checks → fix (loop) → docs → approval → commit`. Reviewing docs
-  for staleness is a normal step before opening a PR.
+- **Prose: positive facts; keep corrections honest.** Write what something *is* /
+  *does*, not what it isn't. Prefer "Client chat command `/mobwalk dump`" over
+  "chat command only (no keybind)". The failure mode to avoid: fixing a wrong claim
+  by *appending* hedges until the paragraph is longer but still muddy — replace the
+  stale sentence instead. New material may lengthen the docs. Leave a short TODO on
+  each plan that keeps that intent visible while you work. **Exceptions (narrow):**
+  checklist regression absences; hard safety invariants; contrasting two real
+  behaviours ("upward skirt, not a downward drop").
+- **Keep the docs current — per commit, written after checks pass.** Update the
+  relevant docs in the same commit as the change. Within a step: `code → checks →
+  fix (loop) → docs → approval → commit` (see Git/workflow).
 - **Where knowledge goes (keep `AGENTS.md` lean):** place it by scope —
   - a project-wide *rule/instruction* that applies to any task → **`AGENTS.md`**;
   - a project *fact* (status, layout, versions, roadmap) → **`docs/project.md`**;
@@ -254,5 +247,5 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
   Do **not** put subsystem detail or project background into `AGENTS.md`; an agent
   working in an unrelated area shouldn't have to read it.
-- **Comments explain intent, not narration.** Don't add comments that merely
-  restate what the code does; explain non-obvious intent, trade-offs, or constraints.
+- **Comments explain intent, not narration.** Don't restate what the code does;
+  explain non-obvious intent, trade-offs, or constraints.

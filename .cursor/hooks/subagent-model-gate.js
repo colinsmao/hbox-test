@@ -38,6 +38,16 @@ function allow() {
   process.exit(0);
 }
 
+function isFastSuffixed(model) {
+  return String(model).endsWith("-fast");
+}
+
+if (isFastSuffixed(subagentModel)) {
+  deny(
+    "Subagent model gate (AGENTS.md -> Subagents): `-fast` models are not allowed for subagents. Omit `model` to inherit the parent, or use `composer-2.5` / `cursor-grok-4.5-high`."
+  );
+}
+
 // Inherit parent when the Task call omits `model`.
 if (!subagentModel) {
   allow();

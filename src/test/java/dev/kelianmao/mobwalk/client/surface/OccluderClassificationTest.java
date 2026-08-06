@@ -4,10 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
 import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
 import dev.kelianmao.mobwalk.client.surface.HazardClass;
 import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
@@ -35,7 +38,7 @@ final class OccluderClassificationTest {
 
   private static List<SkirtSpan> classify(StandableRect r, double halfW, double height, WorldBox... boxes) {
     List<SkirtSpan> out = new ArrayList<>();
-    SurfaceSelection.occluderSpansForRect(r, List.of(boxes), halfW, height, out);
+    SurfaceSelection.occluderSpansForRect(r, List.of(boxes), halfW, height, false, out);
     return out;
   }
 
@@ -113,6 +116,107 @@ final class OccluderClassificationTest {
     WorldBox water = fluidSurface(1, 64, 0, 8.0 / 9.0, HazardClass.WATER);
     List<SkirtSpan> spans = classify(floor, 0.0, 0.0, water);
     assertTrue(spans.isEmpty());
+  }
+
+  @Test
+  void pathBesideRaisedSoulIsWallOnlyOnCollisionRim() {
+    // Soul sand draw rim 65.0, collision 64.875; path top 64.9375 abuts +X.
+    // Collision rim: path rises above soul collision → UP extent 1/16.
+    // Visual rim: path sits below the paint → not a wall, no UP (and no negative extent).
+    StandableRect soul = new StandableRect(0, 0, 1, 1, 64.875, 65.0);
+    WorldBox path = new WorldBox(1, 0, 0, 1, 0, 2, 1, 0.0, 64.9375);
+    List<SkirtSpan> collision = new ArrayList<>();
+    SurfaceSelection.occluderSpansForRect(soul, List.of(path), 0.0, 0.0, false, collision);
+    assertEquals(1, collision.size());
+    assertTrue(collision.get(0).isUp());
+    assertEquals(64.9375 - 64.875, collision.get(0).maxExtent(), EPS);
+
+    List<SkirtSpan> visual = new ArrayList<>();
+    SurfaceSelection.occluderSpansForRect(soul, List.of(path), 0.0, 0.0, true, visual);
+    assertTrue(visual.isEmpty(), "path below paint rim must not emit a visual UP");
+  }
+
+  @Test
+  void dualRimOrchestrationKeepsCollisionClaimAndVisualWingDown() {
+    // select()-shaped: collision claims soul→path; visual omits that UP, keeps wing DOWNs.
+    double halfW = 0.3;
+    double height = 1.8;
+    double soulTop = 14.0 / 16.0;
+    double pathTop = 15.0 / 16.0;
+    double fullTop = 1.0;
+    WorldBox soul = new WorldBox(0, 0, 0, 0, 0, 1, 1, 0.0, soulTop, soulTop, fullTop);
+    WorldBox path = new WorldBox(1, 0, 0, 1, 0, 2, 1, 0.0, pathTop, pathTop, pathTop);
+    Map<ColKey, List<WorldBox>> index = new HashMap<>();
+    index.put(new ColKey(0, 0), List.of(soul));
+    index.put(new ColKey(1, 0), List.of(path));
+    List<WorldBox> boxes = List.of(soul, path);
+    List<StandableRect> raw = new ArrayList<>();
+    SurfaceSelection.exposeBox(soul, index, halfW, height, raw);
+    SurfaceSelection.exposeBox(path, index, halfW, height, raw);
+    List<StandableRect> merged = RectMath.mergeAll(raw);
+
+    List<SkirtSpan> collisionOcc = new ArrayList<>();
+    for (StandableRect r : merged) {
+      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, false, collisionOcc);
+    }
+    collisionOcc = SurfaceSelection.mergeOccluderSpans(collisionOcc);
+    List<SkirtSpan> dropEdges =
+      SurfaceSelection.computeDownSkirts(merged, collisionOcc, false);
+
+    List<SkirtSpan> visualOcc = new ArrayList<>();
+    for (StandableRect r : merged) {
+      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, true, visualOcc);
+    }
+    visualOcc = SurfaceSelection.mergeOccluderSpans(visualOcc);
+    List<SkirtSpan> visualDowns =
+      SurfaceSelection.computeDownSkirts(merged, visualOcc, true);
+
+    // Soul remnant +X at the set-back x=0.7: collision UP claims it; no collision drop.
+    boolean collisionUpAtSetback = false;
+    for (SkirtSpan s : collisionOcc) {
+      if (!s.alongX() && s.maxSide() && Math.abs(s.line() - 0.7) < EPS
+          && Math.abs(s.baseY() - soulTop) < EPS) {
+        collisionUpAtSetback = true;
+        assertTrue(s.maxExtent() > 0.0, "collision UP extent must be positive");
+      }
+    }
+    assertTrue(collisionUpAtSetback, "collision rim must mark soul→path as UP");
+    for (SkirtSpan s : dropEdges) {
+      if (!s.alongX() && s.maxSide() && Math.abs(s.line() - 0.7) < EPS
+          && Math.abs(s.baseY() - soulTop) < EPS) {
+        assertTrue(false, "collision drop must not remain on soul→path set-back");
+      }
+    }
+
+    // Visual: no UP from soul at that set-back; wing DOWNs at v=[-0.3,0] and [1,1.3].
+    for (SkirtSpan s : visualOcc) {
+      if (!s.alongX() && s.maxSide() && Math.abs(s.line() - 0.7) < EPS
+          && Math.abs(s.baseY() - soulTop) < EPS) {
+        assertTrue(false, "visual rim must not mark path-below-paint as UP");
+      }
+      assertTrue(s.maxExtent() > 0.0, "no non-positive visual UP extents");
+    }
+    double pixel = 1.0 / 16.0;
+    boolean wingLo = false;
+    boolean wingHi = false;
+    for (SkirtSpan s : visualDowns) {
+      // Soul +X set-back: fixed X, varying Z → alongX=false, maxSide=true.
+      if (s.alongX() || !s.maxSide() || Math.abs(s.line() - 0.7) > EPS) {
+        continue;
+      }
+      if (Math.abs(s.baseY() - soulTop) > EPS) {
+        continue;
+      }
+      if (Math.abs(s.lo() - (-0.3)) < EPS && Math.abs(s.hi() - 0.0) < EPS) {
+        wingLo = true;
+        assertEquals(pixel, s.maxExtent(), EPS);
+      }
+      if (Math.abs(s.lo() - 1.0) < EPS && Math.abs(s.hi() - 1.3) < EPS) {
+        wingHi = true;
+        assertEquals(pixel, s.maxExtent(), EPS);
+      }
+    }
+    assertTrue(wingLo && wingHi, "visual downs must include both flush-path wing skirts");
   }
 
   @Test

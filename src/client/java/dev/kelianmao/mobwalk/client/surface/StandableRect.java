@@ -9,13 +9,11 @@ package dev.kelianmao.mobwalk.client.surface;
  * {@code BlockPos} already folded in); see {@code docs/geometry.md} Appendix A
  * for why we skip a 1/16-pixel integer model.
  *
- * <p>{@code collisionTopY} is the <b>collision</b> top — the height all walkability math
- * (flood reachability, occlusion, holes) is keyed on. {@code visualTopY} is a
- * <b>draw-only</b> raise: for a block that collides lower than it renders (soul
- * sand, mud), it is the block's visible/outline top so the marker can be drawn on
- * the face you actually see instead of buried inside the block; for every other
- * block it equals {@code collisionTopY}. Nothing but rendering reads it (see
- * {@code docs/geometry.md} "Visible-face top vs collision top").
+ * <p>{@code collisionTopY} is the collision top all walkability is keyed on.
+ * {@code visualTopY} is the visible/outline top when that sits above collision
+ * (soul sand, mud); otherwise it equals {@code collisionTopY}. Walkability stays
+ * on collision; merge ownership and paint-side skirts/occluders may key on
+ * {@code visualTopY} (see {@code docs/geometry.md} "Visible-face top vs collision top").
  *
  * <p>{@code hazard} is the surface's hazard identity ({@link HazardClass}): stamped
  * from the source {@code WorldBox} in {@code exposeBox}, carried through the merge

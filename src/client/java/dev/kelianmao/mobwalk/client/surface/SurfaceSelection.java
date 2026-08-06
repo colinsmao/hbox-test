@@ -261,10 +261,10 @@ public final class SurfaceSelection {
     if (dump) {
       debugReachedPreMerge = lazy.preMergeReached();
     }
-    occluders = computeOccluders(level, result, profile, swimmableFluids);
-    List<SkirtSpan> dropEdges = computeDownSkirts(result, occluders, false);
-    // Visual-keyed down-skirts when any rect draws above its collision top;
-    // otherwise dropEdges already match the render heights.
+    List<SkirtSpan> collisionOccluders =
+      computeOccluders(level, result, profile, swimmableFluids, false);
+    List<SkirtSpan> dropEdges = computeDownSkirts(result, collisionOccluders, false);
+    // Dual rim (same as downs): collision for holes; visual for paint when raised.
     boolean raisedVisual = false;
     if (computeVisualTop) {
       for (StandableRect r : result) {
@@ -274,31 +274,37 @@ public final class SurfaceSelection {
         }
       }
     }
-    downSkirts = raisedVisual
-      ? computeDownSkirts(result, occluders, true)
-      : dropEdges;
+    if (raisedVisual) {
+      List<SkirtSpan> visualOccluders =
+        computeOccluders(level, result, profile, swimmableFluids, true);
+      downSkirts = computeDownSkirts(result, visualOccluders, true);
+      occluders = visualOccluders;
+    } else {
+      downSkirts = dropEdges;
+      occluders = collisionOccluders;
+    }
     holes = computeHoles(level, result, dropEdges, profile, swimmableFluids);
     if (dump) {
-      logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape);
+      logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape,
+        raisedVisual ? collisionOccluders : null);
       debugDumpOnce = false;
       debugReachedPreMerge = List.of();
     }
   }
 
   private void logFloodDebug(EntityProfile profile, BlockPos start, int radius,
-      boolean computeVisualTop, double fluidEscape) {
+      boolean computeVisualTop, double fluidEscape, List<SkirtSpan> collisionOccluders) {
     MobWalk.LOGGER.info(
       "[flood-debug] profile={} W={} H={} reach={} fluidEscape={} seed={} radius={} visualTop={}",
       profile.name(), profile.width(), profile.height(), profile.reach(), fluidEscape,
       start, radius, computeVisualTop);
     logFloodDebugRects("reached", debugReachedPreMerge);
     logFloodDebugRects("merged", result);
-    MobWalk.LOGGER.info("[flood-debug] occluders={}", occluders.size());
-    for (SkirtSpan s : occluders) {
-      MobWalk.LOGGER.info(
-        "[flood-debug]   occ alongX={} side={} line={} [{},{}] baseY={} visualBaseY={} maxExtent={}",
-        s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(),
-        s.baseY(), s.visualBaseY(), s.maxExtent());
+    if (collisionOccluders != null) {
+      logFloodDebugOccluders("occluders-collision", collisionOccluders);
+      logFloodDebugOccluders("occluders-paint", occluders);
+    } else {
+      logFloodDebugOccluders("occluders", occluders);
     }
     MobWalk.LOGGER.info("[flood-debug] downskirts={}", downSkirts.size());
     for (SkirtSpan s : downSkirts) {
@@ -313,6 +319,16 @@ public final class SurfaceSelection {
         "[flood-debug]   hole alongX={} maxSide={} line={} [{},{}] baseY={} visualBaseY={} fall={}",
         s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(),
         s.baseY(), s.visualBaseY(), s.fallDistance());
+    }
+  }
+
+  private static void logFloodDebugOccluders(String label, List<SkirtSpan> spans) {
+    MobWalk.LOGGER.info("[flood-debug] {}={}", label, spans.size());
+    for (SkirtSpan s : spans) {
+      MobWalk.LOGGER.info(
+        "[flood-debug]   occ alongX={} side={} line={} [{},{}] baseY={} visualBaseY={} maxExtent={}",
+        s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(),
+        s.baseY(), s.visualBaseY(), s.maxExtent());
     }
   }
 
@@ -340,7 +356,7 @@ public final class SurfaceSelection {
     return result;
   }
 
-  /** Immutable snapshot of the upward (occluder) skirt spans for the reached set. */
+  /** Published UP skirts (paint rim when raises are active). */
   public List<SkirtSpan> allOccluders() {
     return occluders;
   }
@@ -447,12 +463,9 @@ public final class SurfaceSelection {
   static void exposeBox(WorldBox target, Map<ColKey, List<WorldBox>> index, double halfW,
       double height, List<StandableRect> out) {
     double collisionTopY = target.yMax();
-    // Draw-only raise (Milestone 6): if this box IS the source block's topmost
-    // collision surface and the block renders taller than it collides (soul sand,
-    // mud), expose the visible/outline top so the marker is drawn on the face you
-    // see rather than buried. Gating on "topmost collision surface" leaves stair
-    // treads / bottom slabs / fence tops untouched; everything else keeps
-    // visualTopY == collisionTopY. Nothing but rendering reads visualTopY.
+    // Visible-face raise: topmost collision surface with a taller outline (soul
+    // sand, mud) exposes that outline; stair treads / bottom slabs / fences stay
+    // at collisionTopY. Walkability stays on collisionTopY.
     double visualTopY = (Math.abs(collisionTopY - target.blockCollisionTop()) <= EPS
         && target.blockOutlineTop() > collisionTopY + EPS)
       ? target.blockOutlineTop()
@@ -589,58 +602,47 @@ public final class SurfaceSelection {
   private record SpanGroupKey(boolean alongX, boolean maxSide, long line, long baseY) {
   }
 
-  // True iff box is an occluder/wall for a surface at height T given the entity
-  // headroom: it participates in volume occlusion ({@code occludes}), its top rises
-  // strictly above T, AND its base sits at or below the top of the standing column
-  // T+height. Non-occluding support surfaces (fluid surfaces) supply a standable
-  // top and no volume, so they never mark up-skirts — same rule as exposeBox.
-  // height == 0 (Part A / Point) is the pure wall test (a box rising above T whose
-  // base is at or below T); height > 0 also admits ceilings/overhangs hanging within
-  // the standing column (Part B headroom). The {@code <=} on the lower bound (vs the
-  // strict {@code <} the exposeBox cut uses) is deliberate: occluder spans are only
-  // emitted where a dilated occluder ABUTS a surface edge (occluderSpansForRect),
-  // and that abutment gate — not the predicate — rejects the boundary/own-floor
-  // cases, while keeping Point's at-floor walls (yMin == T) marked.
-  static boolean wallOccluder(WorldBox b, double collisionTopY, double height) {
+  // True iff box is a wall/ceiling for rim: occludes, yMax > rim, and
+  // yMin <= rim+height. Fluids never mark up-skirts. height==0 is walls only;
+  // height>0 also admits ceilings in the standing column. <= on the lower bound
+  // (vs exposeBox's strict <) keeps Point's at-floor walls; abutment in
+  // occluderSpansForRect rejects own-floor cases. rim is collisionTopY or
+  // visualTopY (same dual key as computeDownSkirts).
+  static boolean wallOccluder(WorldBox b, double rim, double height) {
     return b.occludes()
-      && b.yMax() > collisionTopY + EPS
-      && b.yMin() <= collisionTopY + height + EPS;
+      && b.yMax() > rim + EPS
+      && b.yMin() <= rim + height + EPS;
   }
 
-  // Append the upward (occluder) skirt spans for one surface rect: for every
-  // candidate box that is a {@link #wallOccluder} of this surface, dilate its
-  // footprint by halfW and, where the dilated footprint ABUTS one of the rect's
-  // four edges (sharing the edge line with positive overlap along it), emit a span
-  // over the overlap — the wall/ceiling face sits at the dilated (set-back) edge,
-  // not the real block face. Pure: no world access (candidates are pre-gathered).
+  // Upward skirt spans where a wallOccluder abuts a dilated edge. visual selects
+  // the rim (collision vs paint); maxExtent = top − rim. Pure (candidates given).
   static void occluderSpansForRect(StandableRect r, List<WorldBox> candidates,
-      double halfW, double height, List<SkirtSpan> out) {
+      double halfW, double height, boolean visual, List<SkirtSpan> out) {
     double collisionTopY = r.collisionTopY();
     double visualTopY = r.visualTopY();
-    // The occluder skirt inherits its surface's flood-depth and frontier flag so
-    // draw shares the surface's color / cutoff band (see StandableRect).
+    double rim = visual ? visualTopY : collisionTopY;
     int depth = r.depth();
     boolean frontier = r.frontier();
     for (WorldBox b : candidates) {
-      if (!wallOccluder(b, collisionTopY, height)) {
+      if (!wallOccluder(b, rim, height)) {
         continue;
       }
       double oMinX = b.minX() - halfW;
       double oMinZ = b.minZ() - halfW;
       double oMaxX = b.maxX() + halfW;
       double oMaxZ = b.maxZ() + halfW;
-      double top = b.yMax();
+      double extent = b.yMax() - rim;
 
       double zLo = Math.max(oMinZ, r.minZ());
       double zHi = Math.min(oMaxZ, r.maxZ());
       if (zHi - zLo > EPS) {
         if (Math.abs(oMinX - r.maxX()) < EPS) {
           out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier));
         }
         if (Math.abs(oMaxX - r.minX()) < EPS) {
           out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier));
         }
       }
       double xLo = Math.max(oMinX, r.minX());
@@ -648,11 +650,11 @@ public final class SurfaceSelection {
       if (xHi - xLo > EPS) {
         if (Math.abs(oMinZ - r.maxZ()) < EPS) {
           out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier));
         }
         if (Math.abs(oMaxZ - r.minZ()) < EPS) {
           out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, top - visualTopY, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier));
         }
       }
     }
@@ -678,7 +680,7 @@ public final class SurfaceSelection {
       SkirtSpan head = group.get(0);
       double lo = head.lo();
       double hi = head.hi();
-      // Absolute wall stop (former collisionTopY); coalesce takes the max.
+      // Absolute wall stop (visualBase + extent); coalesce takes the max.
       double stop = head.visualBaseY() + head.maxExtent();
       // baseY is fixed per group (grouped on it); the visible base can differ
       // when a raised block abuts a flush one, so take the max like stop.
@@ -1149,21 +1151,14 @@ public final class SurfaceSelection {
     }
   }
 
-  // World-reading wrapper (client thread): for each reached surface, gather the
-  // collision boxes near its dilated edges (and, with headroom, above its interior)
-  // and classify the upward (occluder) skirt spans via the pure
-  // {@link #occluderSpansForRect}. Runs once per stick action, not per frame, so the
-  // small per-rect window scan is cheap. height comes from the profile: 0 (Point)
-  // marks only walls (boxes rising above T whose base is at/below T); height > 0
-  // also marks overhangs/ceilings within the standing column (T, T+height], the same
-  // occluders exposeBox tests, so the skirts visualize the headroom being applied.
-  // Reads the world only through ColumnBoxes (same port as the flood / ledge gather),
-  // so fluid surfaces emitted by WorldGeometry.levelColumnBoxes cannot mark false up-skirts.
+  // World-reading wrapper: near each reached surface, gather boxes and classify
+  // UP skirts via occluderSpansForRect. Once per stick action. visual picks the
+  // rim (collision vs paint). ColumnBoxes only — fluid surfaces cannot mark UPs.
   private List<SkirtSpan> computeOccluders(Level level, List<StandableRect> rects,
-      EntityProfile profile, boolean swimmableFluids) {
+      EntityProfile profile, boolean swimmableFluids, boolean visual) {
     return computeOccludersFrom(
       WorldGeometry.levelColumnBoxes(level, false, swimmableFluids),
-      level.getMinY(), level.getMaxY(), rects, profile);
+      level.getMinY(), level.getMaxY(), rects, profile, visual);
   }
 
   // Pure kernel of computeOccluders: reads the world only through the ColumnBoxes
@@ -1172,6 +1167,11 @@ public final class SurfaceSelection {
   // band and undilated-box window would silently drop occluders here.
   static List<SkirtSpan> computeOccludersFrom(ColumnBoxes source, int worldMinY, int worldMaxY,
       List<StandableRect> rects, EntityProfile profile) {
+    return computeOccludersFrom(source, worldMinY, worldMaxY, rects, profile, false);
+  }
+
+  static List<SkirtSpan> computeOccludersFrom(ColumnBoxes source, int worldMinY, int worldMaxY,
+      List<StandableRect> rects, EntityProfile profile, boolean visual) {
     if (rects.isEmpty()) {
       return List.of();
     }
@@ -1180,13 +1180,13 @@ public final class SurfaceSelection {
     List<SkirtSpan> out = new ArrayList<>();
     List<WorldBox> candidates = new ArrayList<>();
     for (StandableRect r : rects) {
-      double collisionTopY = r.collisionTopY();
+      double rim = visual ? r.visualTopY() : r.collisionTopY();
       int xLo = (int) Math.floor(r.minX() - halfW) - 1;
       int xHi = (int) Math.ceil(r.maxX() + halfW);
       int zLo = (int) Math.floor(r.minZ() - halfW) - 1;
       int zHi = (int) Math.ceil(r.maxZ() + halfW);
-      int yLo = Math.max((int) Math.floor(collisionTopY) - 1, worldMinY);
-      int yHi = Math.min((int) Math.floor(collisionTopY + height) + 1, worldMaxY);
+      int yLo = Math.max((int) Math.floor(rim) - 1, worldMinY);
+      int yHi = Math.min((int) Math.floor(rim + height) + 1, worldMaxY);
       candidates.clear();
       for (int x = xLo; x <= xHi; x++) {
         for (int z = zLo; z <= zHi; z++) {
@@ -1195,7 +1195,7 @@ public final class SurfaceSelection {
           }
         }
       }
-      occluderSpansForRect(r, candidates, halfW, height, out);
+      occluderSpansForRect(r, candidates, halfW, height, visual, out);
     }
     return mergeOccluderSpans(out);
   }

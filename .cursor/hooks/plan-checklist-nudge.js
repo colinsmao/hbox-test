@@ -30,7 +30,7 @@ if (isEditTool && touchesPlan) {
   process.stdout.write(
     JSON.stringify({
       additional_context:
-        "Stage-gating reminder (PLAN.md changed): every step in PLAN.md MUST carry its own enumerated in-game checklist (action -> exact on-screen result, plus a regression line), and each step MUST be validated in-game via ./gradlew runClient before the next step or any commit. A plan lacking a per-step in-game checklist is incomplete (AGENTS.md -> Stage-gating).",
+        "Stage-gating reminder (PLAN.md changed): every step needs its own enumerated in-game checklist (action -> exact on-screen result), validated in-game via ./gradlew runClient before the next step or commit. Keep a short docs-quality TODO on the plan: when correcting docs/comments, replace stale claims rather than padding them — new content may grow (AGENTS.md -> Documentation).",
     })
   );
   process.exit(0);

@@ -116,12 +116,13 @@ final class TerrainEdgeContractTest {
     double pixel = 1.0 / 16.0;
     return List.of(
       /*
-       * Soul -> path at the set-back u=.7: collision rises by 1/16, so this is
-       * an UP edge owned by soul sand. Both visible tops are 1, so there is no
-       * DOWN edge at this visually flush junction.
+       * Soul→path at u=.7 (visual rim): no UP; no DOWN vs raised lip; DOWN 1/16 on
+       * flush-path wings v=[-.3,0] and [1,1.3].
        */
-      edge(direction, SpanKind.UP, 0.7, -0.3, 1.3, true,
-        SOUL_TOP, FULL_TOP, PATH_TOP, FULL_TOP, PATH_TOP - FULL_TOP),
+      edge(direction, SpanKind.DOWN, 0.7, -0.3, 0.0, true,
+        SOUL_TOP, FULL_TOP, PATH_TOP, PATH_TOP, pixel),
+      edge(direction, SpanKind.DOWN, 0.7, 1.0, 1.3, true,
+        SOUL_TOP, FULL_TOP, PATH_TOP, PATH_TOP, pixel),
 
       /*
        * Raised path patch -> ordinary path at u=1: collision is continuous but
@@ -229,7 +230,8 @@ final class TerrainEdgeContractTest {
 
     List<SkirtSpan> occluders = new ArrayList<>();
     for (StandableRect r : merged) {
-      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, occluders);
+    // Visual rim for painted UPs / visual downs.
+      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, true, occluders);
     }
     occluders = SurfaceSelection.mergeOccluderSpans(occluders);
 

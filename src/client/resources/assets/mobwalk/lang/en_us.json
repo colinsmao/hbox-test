@@ -22,7 +22,7 @@
 
   "mobwalk.config.generic.comment.swimmableFluids": "If enabled, water and lava are treated as walkable to approximate swimming.",
 
-  "mobwalk.config.generic.comment.fluidEscapeHeight": "The max height a mob can escape from a water or lava source block. From empirical testing:\n6/16 = 0.375 seems to match mob pathfinding.\n14/16 = 0.875 (soul sand) seems to be the player's max escape height from water.",
+  "mobwalk.config.generic.comment.fluidEscapeHeight": "The max height a mob can escape from a water or lava source block. From empirical testing:\n 6/16 = 0.375 seems to match mob pathfinding.\n14/16 = 0.875 (soul sand) seems to be the player's max escape height from water.",
 
   "mobwalk.gui.text_field.invalid_item_id": "Unknown or invalid item id",
 

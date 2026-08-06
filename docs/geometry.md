@@ -28,11 +28,11 @@ and holes, and reaches the world only through that port (`WorldSurfaceIndex`,
 
 A standable surface is a
 `StandableRect(double minX, minZ, maxX, maxZ, collisionTopY, visualTopY)` in absolute world
-coordinates (the owning `BlockPos` folded in). `collisionTopY` is the **collision** top that
-all math below is keyed on; `visualTopY` is a **draw-only** raise for blocks that
-render taller than they collide (see [Visible-face top vs collision
-top](#visible-face-top-vs-collision-top)) and equals `collisionTopY` for
-everything else — nothing in the geometry layer reads it. Coordinates are
+coordinates (the owning `BlockPos` folded in). `collisionTopY` is the **collision** top
+walkability is keyed on; `visualTopY` is the visible/outline top when that sits above
+collision (see [Visible-face top vs collision
+top](#visible-face-top-vs-collision-top)), else equals `collisionTopY`. Merge ownership
+and paint-side skirts/occluders may key on `visualTopY`. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
 epsilon-tolerant (`RectMath.EPS = 1e-6`, shared with `SurfaceSelection`). Quantizing is skipped on purpose: width dilation
 (below) expands surfaces by entity-dependent amounts that are not `1/16`-aligned,
@@ -449,10 +449,9 @@ Everything above derives from `getCollisionShape`, so `StandableRect.collisionTo
 collision `yMax`. A handful of blocks **render taller than they collide** — soul
 sand collides at `14/16` (`0.875`) but outlines as a full cube, mud at ~`0.9` — so a
 marker drawn at the collision top sits **buried inside the visible block**. The fix
-is a **draw-only** second height, `StandableRect.visualTopY`, carried alongside the
-collision top; the renderer can draw on the face you actually see while **all
-walkability math stays on `collisionTopY`** (reach, occlusion, holes are
-unchanged — a mob really does stand at `0.875`, we just don't want the paint hidden).
+is a second height, `StandableRect.visualTopY`, so paint can sit on the visible face
+while **walkability stays on `collisionTopY`**. Merge ownership and paint-side
+skirts/occluders may also key on `visualTopY`.
 
 - **Source data (paid once per state, no heuristic).** `WorldBox` carries the source
   block's whole-shape `blockCollisionTop` (`y + collisionShape.max(Y)`) and
@@ -489,25 +488,17 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   raised paint therefore keeps its own height and the flush-only region stays flush.
   Up and down `SkirtSpan`s and `HoleSpan` each carry a
   `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
-- **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
-  the merged rects keyed on a chosen height: **`collisionTopY`** (`dropEdges`, the
-  hole-classifier substrate — an equal-`collisionTopY` abutting neighbour is a merge seam, not a
-  drop) or **`visualTopY`** (the rendered down-skirts). On the visual pass, an abutting
-  neighbour with **equal or higher** `visualTopY` covers the edge: equal is a flush
-  continuation, higher is a taller face the lower side must not hang a reverse
-  down-skirt into. A **lower** abutting neighbour is a **land stop**: leftover drop
-  intervals get `maxExtent = rimKey − neighbourKey` so the curtain stops at that
-  surface (open drops stay unlimited). Adjacent leftover pieces with the same
-  `maxExtent` coalesce into one span. A visible step between two rects at the same
-  `collisionTopY` but different `visualTopY` (a path lip on a soul-sand cube top)
-  therefore gets a down skirt **only from the raised/high side**, clamped to the
-  lower face; soul sand's own remnant abutting that lip at the same `visualTopY` gets
-  none. `select` computes `dropEdges` once and, when the Appearance toggle enables
-  raise and some rect has `visualTopY != collisionTopY`, runs the second
-  `visualTopY` pass — otherwise the single pass feeds both holes and skirts. Both
-  heights on a span are **load-bearing**: collision `baseY` for the hole/geometry
-  pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs every
-  skirt/beam from `visualBaseY` and colors at draw).
+- **Skirts are a render pass, holes a geometry pass.** Downs and occluder (UP) skirts
+  share a dual rim: **`collisionTopY`** for hole / collision-drop coverage, **`visualTopY`**
+  for paint. `computeDownSkirts` / `wallOccluder` take that key; `maxExtent` for UPs is
+  `wallTop − rim` (positive when emitted). On the visual pass, an abutting neighbour with
+  **equal or higher** `visualTopY` covers the edge; a **lower** neighbour is a land stop
+  (`maxExtent = rimKey − neighbourKey`; open drops unlimited). A visible step at the same
+  `collisionTopY` but different `visualTopY` (path lip on soul sand) skirts only from the
+  high side; flush remnant↔lip gets none, remnant↔flush-path wings get a short DOWN.
+  `select` always builds collision-rim occluders + `dropEdges`; when any rect is raised it
+  also builds the visual-rim occluder/downskirt pair and publishes that UP list. Both
+  heights on a span are load-bearing: collision `baseY` for holes, `visualBaseY` for draw.
 - **Neighbour-overlap raise (a priority-class split).** A dilated rect owned by block A
   can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
   reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine

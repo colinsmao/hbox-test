@@ -237,25 +237,16 @@ the published snapshots into `SurfaceEmitter.emit`.
   shared drop-edge pass the hole classifier plugs into (a drop span is a hole
   candidate).
 - **Upward (occluder) skirts — wall-vs-drop classification.** A
-  surface edge bordering a **wall** (a box rising above the surface) or a **ceiling**
-  (an overhang within the entity's headroom) is *not* a drop, so a downward skirt
-  there reads wrongly. Such edges instead draw an **upward** skirt — a wall face
-  rising from the surface top — solid at the base `T` and fading to transparent at the
-  marker top (every height fades out at the top). Because the wall/drop split needs
-  collision-box data the render thread may not query, the classification is done
-  **compute-side** (`SurfaceSelection.computeOccluders`, once per wand action) and
-  published as up `SkirtSpan`s in the snapshot. The *downward* skirts are computed
-  compute-side too (`computeDownSkirts`, above) with the occluder sub-spans already
-  subtracted, so an edge is never double-skirted; `emit` draws both lists through
-  `emitSkirts` (`length = min(Appearance height, maxExtent)`). Each span carries its
-  orientation, **side** (so the skirt is nudged toward the surface interior to dodge
-  z-fighting the wall face, and opposite-side edges at one coordinate aren't merged),
-  the dilated edge line, the `[lo,hi]` interval, the base height `T`, and `maxExtent`
-  (wall stop above for UP; land gap or unlimited for DOWN). The marker sits at the
-  **dilated (set-back) edge** — pulled `~W/2` off the real block face (for Point,
-  `W = 0`, at the face). This per-edge wall-vs-drop classification is the
-  **prerequisite for hole detection**: the drop-classified edges are the
-  hole candidates.
+  surface edge bordering a **wall** (box rising above the rim) or **ceiling**
+  (overhang in headroom) is not a drop, so it gets an **upward** skirt instead.
+  Occluders use the same dual rim as downs (collision for holes, visual for paint;
+  `maxExtent = wallTop − rim`). Compute-side once per wand (`computeOccluders`);
+  published UPs are the visual-rim list when raises are active. Downs subtract the
+  matching-rim occluder spans so an edge is never double-skirted; `emit` draws both
+  via `emitSkirts` (`length = min(Appearance height, maxExtent)`). Spans carry
+  orientation, **side**, dilated edge line, `[lo,hi]`, base `T`, and `maxExtent`.
+  Markers sit at the **dilated (set-back) edge**. This wall-vs-drop split is the
+  **prerequisite for hole detection**.
 - **Upward (occluder) skirts.** Drawn from published up `SkirtSpan`s at Appearance
   `upwardSkirtHeight` (default `0.25`; `0` skips draw), clamped to `maxExtent` (wall
   available above the surface). Same single-quad fade as down skirts (peak =
@@ -266,7 +257,8 @@ the published snapshots into `SurfaceEmitter.emit`.
   selection active it re-runs `select` once with a one-shot flag, writes a single
   `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
   downskirts → holes), and posts a short chat summary (`merged=… occluders=…
-  skirts=… holes=… (see latest.log)`). With an empty selection: chat
+  skirts=… holes=… (see latest.log)`). Raised selections log `occluders-collision`
+  and `occluders-paint`; otherwise one `occluders` list. Empty selection: chat
   `flood-debug: no selection`. Armed by `/mobwalk dump`.
 - **Surface-height toggle (Appearance `drawOnVisibleFace`, default on).** Blocks that
   render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
