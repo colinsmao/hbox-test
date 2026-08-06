@@ -41,7 +41,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * tops (and their skirts/beams) draw on each block's
  * <b>visible face</b> ({@code visualTopY}); Appearance {@code drawOnVisibleFace}
  * switches to the collision height, which re-floods since the visible top is
- * gathered compute-side (gated on the flag; see {@code SurfaceSelection.visibleTop}).
+ * gathered compute-side (gated on the flag; see {@code WorldGeometry.visibleTop}).
  *
  * <p>The selection is published into a {@code volatile} snapshot on every wand
  * action ({@link #publish}); {@link #extract} does no per-frame geometry work
@@ -83,16 +83,18 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   private volatile boolean crouching = false;
   private volatile List<StandableRect> snapshot = List.of();
   // Upward (occluder) skirt spans, published with the snapshot (compute-side, since
-  // they read collision boxes). Read per-frame in emit. See SurfaceSelection.
+  // they read collision boxes). Read per-frame in emit. See OccluderSkirts.compute.
   private volatile List<SkirtSpan> occluderSnapshot = List.of();
   // Downward drop-skirt spans, published with the snapshot (compute-side, once per
   // select — was a per-frame openSpans scan). Read per-frame in emit. See
-  // SurfaceSelection.computeDownSkirts.
+  // DownSkirts.compute.
   private volatile List<SkirtSpan> downSkirtSnapshot = List.of();
   // Hole spans (through-walls beam markers), published with the snapshot
   // (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
-  // See SurfaceSelection.computeHoles.
-  private volatile List<HoleSpan> holeSnapshot = List.of();
+  // See HoleBeams.compute.
+  private volatile List<BeamSpan> holeSnapshot = List.of();
+  // Hazard perimeter beams (WATER/LAVA). See HazardBeams.compute.
+  private volatile List<BeamSpan> hazardSnapshot = List.of();
 
   @Override
   public String id() {
@@ -116,6 +118,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       occluderSnapshot = List.of();
       downSkirtSnapshot = List.of();
       holeSnapshot = List.of();
+      hazardSnapshot = List.of();
     }
 
     Item wand = Configs.wandItem();
@@ -140,6 +143,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     occluderSnapshot = cache.allOccluders();
     downSkirtSnapshot = cache.allDownSkirts();
     holeSnapshot = cache.allHoles();
+    hazardSnapshot = cache.allHazards();
   }
 
   // Walk down from the targeted block until a non-empty collision shape is
@@ -170,7 +174,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     Level level = Minecraft.getInstance().level;
     var profile = Configs.mobProfile();
     if (level != null && lastSeed != null && profile.isPresent()) {
-      cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
+      cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
+        Configs.swimmableFluids(), Configs.fluidEscapeHeight());
       publish();
     }
   }
@@ -221,7 +226,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       } else {
         var profile = Configs.mobProfile();
         if (profile.isPresent()) {
-          cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
+          cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
+            Configs.swimmableFluids(), Configs.fluidEscapeHeight());
           lastSeed = start;
         }
       }
@@ -288,23 +294,25 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       return null;
     }
     cache.requestDebugDump();
-    cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace());
+    cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
+      Configs.swimmableFluids(), Configs.fluidEscapeHeight());
     publish();
     return new FloodDebugCounts(
       cache.allRects().size(),
       cache.allOccluders().size(),
       cache.allDownSkirts().size(),
-      cache.allHoles().size());
+      cache.allHoles().size(),
+      cache.allHazards().size());
   }
 
   /** Counts returned by {@link #dumpFloodDebug} for the chat status line. */
-  public record FloodDebugCounts(int merged, int occluders, int skirts, int holes) {
+  public record FloodDebugCounts(int merged, int occluders, int skirts, int holes, int hazards) {
   }
 
   @Override
   public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
       BufferBuilder beamBuffer) {
     SurfaceEmitter.emit(positionMatrix, fillBuffer, skirtBuffer, beamBuffer,
-      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, crouching);
+      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, hazardSnapshot, crouching);
   }
 }

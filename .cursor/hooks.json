@@ -4,7 +4,7 @@
     "beforeShellExecution": [
       {
         "command": "node .cursor/hooks/commit-gate.js",
-        "matcher": "git(\\S*)?[\\s\\S]*\\bcommit\\b",
+        "matcher": "\\bgit\\b[\\s\\S]*\\bcommit\\b",
         "failClosed": true
       }
     ],
@@ -14,15 +14,12 @@
         "failClosed": true
       }
     ],
-    "postToolUse": [
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/prose-positive-nudge.js"
+      },
       {
         "command": "node .cursor/hooks/plan-checklist-nudge.js"
-      }
-    ],
-    "stop": [
-      {
-        "command": "node .cursor/hooks/stop-ingame-reminder.js",
-        "loop_limit": 1
       }
     ]
   }

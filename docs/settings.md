@@ -54,9 +54,11 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
+| `swimmableFluids` | `ConfigBoolean` | `true` | When on, vanilla water and lava (`FluidTags`) emit non-occluding fluid surfaces in the flood (see [geometry.md](geometry.md) → Fluid surfaces). Off restores pre-fluid hole beams on pools. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
+| `fluidEscapeHeight` | `ConfigDouble` | `0.375` (min `0`, max `2`, slider) | Rim height above the fluid **block** top that a fluid→non-fluid climb may clear (`ClimbRule`; see [geometry.md](geometry.md) Escape cap). Default matches mob pathing (`6/16`); `0.875` reaches soul sand. At or above the active profile's vertical reach, leaving fluid matches jumping on land. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
 
 Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
-`Configs.setFloodRadius()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
+`Configs.setFloodRadius()`, `Configs.swimmableFluids()`, `Configs.fluidEscapeHeight()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
@@ -148,15 +150,20 @@ category name: `"Appearance"`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `walkableColor` | `ConfigColor` | `#B055AA55` (green, ~69% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill and skirt peak. Read live in `SurfaceEmitter` / `Palette`. |
-| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
-| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter.emitHoles` draws beams at hole rims. When off: beams are skipped. |
+| `walkableColor` | `ConfigColor` | `#B055AA55` (green, ~69% alpha) | Default RGB+alpha for tops/skirts when no higher precedence applies (see [rendering.md](rendering.md) fill precedence). Read live in `SurfaceEmitter` / `Palette.FillColors`. |
+| `showWaterHazard` | `ConfigBoolean` | `true` | When on: water tops/skirts and water perimeter beams use `waterHazardColor`. When off: water fill uses `walkableColor` and water beams are skipped (`HazardClass` unchanged). |
+| `waterHazardColor` | `ConfigColor` | `#B03A9AE0` (blue, ~69% alpha) | RGB+alpha for water hazard fill and water perimeter beams when `showWaterHazard` is on. |
+| `showLavaHazard` | `ConfigBoolean` | `true` | When on: lava tops/skirts and lava perimeter beams use `lavaHazardColor`. When off: lava fill uses `walkableColor` and lava beams are skipped. |
+| `lavaHazardColor` | `ConfigColor` | `#B0E07020` (orange, ~69% alpha) | RGB+alpha for lava hazard fill and lava perimeter beams when `showLavaHazard` is on. |
+| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types (`HOLE`, water, lava). |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter` draws hole (`HazardClass.HOLE`) beams at trap rims via `emitBeam`. When off: hole beams are skipped; hazard perimeter beams still follow their own show flags. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 | `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `drawOnVisibleFace` | `ConfigBoolean` | `true` | When on: standable tops of taller-than-collision blocks (soul sand, mud) draw on the visible block face; when off, at the collision height. **Compute-side** — passed into `select` as `computeVisualTop`, so a value-change callback re-floods (the one Appearance option that touches compute). See `[geometry.md](geometry.md)` / `[rendering.md](rendering.md)`. |
 
-Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
+Helpers: `Configs.walkableColor()`, `Configs.waterHazardColor()`, `Configs.lavaHazardColor()`,
+`Configs.holeBeamColor()` → `Color4f`; `Configs.showWaterHazard()`, `Configs.showLavaHazard()`,
 `Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`,
 `Configs.downSkirtHeight()`, `Configs.upwardSkirtHeight()`,
 `Configs.drawOnVisibleFace()`.
@@ -171,7 +178,7 @@ name: `"Debug"`.
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
 | `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll` → `Configs.setFloodRadius`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
-| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorAtDepth`. |
+| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: fill precedence continues to hazard color / `walkableColor`. Cutoff ring (when shown) still greys via frontier greying. |
 | `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the merge frontier band fully grey (`Palette.colorAtDepth` when `frontier`). When off: frontier tops are not drawn. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,

@@ -8,8 +8,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColumnBoxes;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
  * The gather-exposure == flood-exposure contract for {@code gatherLedges}
@@ -50,7 +50,7 @@ final class LedgeExposureContractTest {
 
   private static List<StandableRect> gather(ColumnBoxes world) {
     List<StandableRect> out = new ArrayList<>();
-    SurfaceSelection.gatherLedgesFrom(world, FALL, T, FLOOR, HALF_W, HEIGHT, out);
+    HoleBeams.gatherLedgesFrom(world, FALL, T, FLOOR, HALF_W, HEIGHT, out);
     return out;
   }
 

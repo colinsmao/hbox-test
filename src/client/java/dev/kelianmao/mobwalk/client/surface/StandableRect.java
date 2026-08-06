@@ -9,13 +9,16 @@ package dev.kelianmao.mobwalk.client.surface;
  * {@code BlockPos} already folded in); see {@code docs/geometry.md} Appendix A
  * for why we skip a 1/16-pixel integer model.
  *
- * <p>{@code collisionTopY} is the <b>collision</b> top — the height all walkability math
- * (flood reachability, occlusion, holes) is keyed on. {@code visualTopY} is a
- * <b>draw-only</b> raise: for a block that collides lower than it renders (soul
- * sand, mud), it is the block's visible/outline top so the marker can be drawn on
- * the face you actually see instead of buried inside the block; for every other
- * block it equals {@code collisionTopY}. Nothing but rendering reads it (see
- * {@code docs/geometry.md} "Visible-face top vs collision top").
+ * <p>{@code collisionTopY} is the collision top all walkability is keyed on.
+ * {@code visualTopY} is the visible/outline top when that sits above collision
+ * (soul sand, mud); otherwise it equals {@code collisionTopY}. Walkability stays
+ * on collision; merge ownership and paint-side skirts/occluders may key on
+ * {@code visualTopY} (see {@code docs/geometry.md} "Visible-face top vs collision top").
+ *
+ * <p>{@code hazard} is the surface's hazard identity ({@link HazardClass}): stamped
+ * from the source {@code WorldBox} in {@code exposeBox}, carried through the merge
+ * as an ownership axis ({@code hazardPriority}), and printed by {@code /mobwalk dump}.
+ * Ordinary solids are {@link HazardClass#NONE}.
  *
  * <p>{@code depth} is flood-distance metadata: the BFS hop-count from the seed at
  * which this surface was reached (0 = seed), aggregated by min over the raw nodes
@@ -27,15 +30,21 @@ package dev.kelianmao.mobwalk.client.surface;
  * suppression key on this flag; exact {@code depth} is not an ownership axis.
  */
 public record StandableRect(double minX, double minZ, double maxX, double maxZ,
-    double collisionTopY, double visualTopY, int depth, boolean frontier) {
-  /** A rect with an explicit visible top but no flood metadata. */
+    double collisionTopY, double visualTopY, HazardClass hazard, int depth, boolean frontier) {
+  /** A rect with an explicit visible top and hazard identity but no flood metadata. */
+  public StandableRect(double minX, double minZ, double maxX, double maxZ,
+      double collisionTopY, double visualTopY, HazardClass hazard) {
+    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, hazard, -1, false);
+  }
+
+  /** A rect with an explicit visible top but no flood metadata ({@code NONE} hazard). */
   public StandableRect(double minX, double minZ, double maxX, double maxZ,
       double collisionTopY, double visualTopY) {
-    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, -1, false);
+    this(minX, minZ, maxX, maxZ, collisionTopY, visualTopY, HazardClass.NONE, -1, false);
   }
 
   /** A rect whose visible top coincides with its collision top (the common case). */
   public StandableRect(double minX, double minZ, double maxX, double maxZ, double collisionTopY) {
-    this(minX, minZ, maxX, maxZ, collisionTopY, collisionTopY, -1, false);
+    this(minX, minZ, maxX, maxZ, collisionTopY, collisionTopY, HazardClass.NONE, -1, false);
   }
 }

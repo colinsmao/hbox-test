@@ -1,8 +1,5 @@
 #!/usr/bin/env node
-// postToolUse hook: when the agent edits PLAN.md, inject a reminder that every
-// step needs its own enumerated in-game checklist. No matcher is used (the tool
-// name for edits varies); we filter in-script by tool name + path so the nudge
-// only fires on an actual PLAN.md edit, not on reads/searches.
+// preToolUse: before plan edits, remind checklist + docs-quality TODO.
 "use strict";
 
 function readStdin() {
@@ -24,13 +21,18 @@ const toolName = String(input.tool_name || "");
 const toolInput = JSON.stringify(input.tool_input || {});
 
 const isEditTool = /^(Write|StrReplace|MultiEdit|Edit|EditNotebook)$/i.test(toolName);
-const touchesPlan = /PLAN\.md/i.test(toolInput);
+const touchesTempPlan = /\.plan\.md/i.test(toolInput);
+const touchesRepoPlan = /PLAN\.md/.test(toolInput);
 
-if (isEditTool && touchesPlan) {
+if (isEditTool && (touchesRepoPlan || touchesTempPlan)) {
+  let reminder =
+    "Stage-gating reminder: every step needs its own enumerated in-game checklist (action -> exact on-screen result). Put docs-quality on the tracked TODO list.";
+  if (touchesRepoPlan) {
+    reminder += " Avoid PLAN.md churn — significant design shifts only, or a short note.";
+  }
   process.stdout.write(
     JSON.stringify({
-      additional_context:
-        "Stage-gating reminder (PLAN.md changed): every step in PLAN.md MUST carry its own enumerated in-game checklist (action -> exact on-screen result, plus a regression line), and each step MUST be validated in-game via ./gradlew runClient before the next step or any commit. A plan lacking a per-step in-game checklist is incomplete (AGENTS.md -> Stage-gating).",
+      additional_context: reminder,
     })
   );
   process.exit(0);

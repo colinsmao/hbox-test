@@ -1,21 +1,39 @@
 # Surface / collision geometry
 
 How standable surfaces are represented, made entity-size aware (width dilation),
-and computed (the output-sensitive flood). This is the **math layer** under the
+connected (reachability), and computed (the output-sensitive flood). This is the
+**math layer** under the
 block-hitbox overlay; how those surfaces are *drawn* lives in
 [`rendering.md`](rendering.md). Surface/collision geometry stays in **rect/double
 space**, never a pixel raster (a raster rewrite was prototyped and rejected — see
 [Appendix A](#appendix-a-rejected-pixel-raster)).
 
+**The core model, in one paragraph.** A standable surface is a rect at a collision
+height. Two surfaces are **connected** when their footprints touch and the **lower one
+can climb to the higher** under `ClimbRule` (land budget `reach`, with a fluid→non-fluid
+escape cap — see [Reachability model](#reachability-model)): a climb test over an
+*unordered* pair yielding **one undirected edge**. The selection is everything connected to the
+clicked seed, so **reachable is escapable** — every edge is climbable in the up direction,
+therefore every path is walkable backwards. Falling is a separate subject with its own
+home, [hole classification](#hole-classification), and is unbounded there.
+
+**World read vs flood math.** `WorldGeometry` is the adapter over the
+`ColumnBoxes` port: it translates Minecraft block/fluid state into domain
+`WorldBox` / `HazardClass` (including fluid-surface emission via
+`fluidSurfaceHeight`). `SurfaceSelection` holds the flood, merge, and publish;
+`DownSkirts`, `OccluderSkirts`, and `HoleBeams` are the peer compute passes.
+World access stays on that port (`WorldSurfaceIndex`, `HoleBeams.gatherLedgesFrom`,
+`OccluderSkirts.computeFrom`).
+
 ## Representation: rect/double space
 
 A standable surface is a
 `StandableRect(double minX, minZ, maxX, maxZ, collisionTopY, visualTopY)` in absolute world
-coordinates (the owning `BlockPos` folded in). `collisionTopY` is the **collision** top that
-all math below is keyed on; `visualTopY` is a **draw-only** raise for blocks that
-render taller than they collide (see [Visible-face top vs collision
-top](#visible-face-top-vs-collision-top)) and equals `collisionTopY` for
-everything else — nothing in the geometry layer reads it. Coordinates are
+coordinates (the owning `BlockPos` folded in). `collisionTopY` is the **collision** top
+walkability is keyed on; `visualTopY` is the visible/outline top when that sits above
+collision (see [Visible-face top vs collision
+top](#visible-face-top-vs-collision-top)), else equals `collisionTopY`. Merge ownership
+and paint-side skirts/occluders may key on `visualTopY`. Coordinates are
 **doubles**, not quantized to a `1/16` grid; edge/overlap compares are
 epsilon-tolerant (`RectMath.EPS = 1e-6`, shared with `SurfaceSelection`). Quantizing is skipped on purpose: width dilation
 (below) expands surfaces by entity-dependent amounts that are not `1/16`-aligned,
@@ -56,13 +74,12 @@ already claimed by higher classes before emitting that class. Different ownershi
 classes that abut remain separate; equal-class neighbours may strip-merge. The
 full ownership class is therefore also the post-resolution homogeneity rule.
 
-Today the surface class is `visualTopY`, with the highest visible shell first, so
-an overlap within one radius tier draws on the face the player sees while
-flush-only remnants stay flush. The hazard milestone extends the surface class to
-an ordered tuple such as `(hazardPriority, visualTopY)`: a hazardous class claims
+Today the surface class is `(hazardPriority, visualTopY)`, ordered by
+`HazardClass.priority()` then highest visible shell: a hazardous class claims
 overlap from a benign class in the same radius tier, then visual height orders
-otherwise equal hazard classes. The priority-partition algorithm and the durable
-invariants stay unchanged.
+otherwise equal hazard classes. Water and lava arrive as `HazardClass` values from
+vanilla fluid tags at world read; later hazards add constants on the same enum.
+The priority-partition algorithm and the durable invariants stay unchanged.
 
 **Aggregate metadata.** Exact `depth` is traversal metadata rather than an ownership
 axis. An inner winner's depth aggregates by minimum over every covering inner node,
@@ -111,13 +128,14 @@ defined by four rules:
    minimal partition, but a missed merge only costs an extra interior skirt,
    **never reachability**.
 4. **Flood / reachability.** The click defines a **non-emitted origin**: the raw
-   pre-occlusion dilated footprints of the clicked block's collision boxes. An
-   exposed top is in the initial wave when it is footprint-adjacent to that origin
-   within `reach` — depth **0** when its source is the clicked block, depth **1**
-   otherwise. From there a surface is reached iff it connects to an already-reached
-   surface by **one geometric adjacency rule**: the footprints share an edge with
-   positive overlap (or overlap with positive area), `footprintAdjacent`, **and**
-   `|dTopY| <= reach` (the profile's single step threshold). This subsumes the old
+   pre-occlusion dilated footprints of the clicked block's collision boxes (carrying
+   `HazardClass`). An exposed top is in the initial wave when it is footprint-adjacent
+   to that origin and `ClimbRule.climbs` — depth **0** when its source is the clicked
+   block, depth **1** otherwise. From there a surface is reached iff it connects to an
+   already-reached surface by **one geometric adjacency rule**: the footprints share an
+   edge with positive overlap (or overlap with positive area), `footprintAdjacent`,
+   **and** `ClimbRule.climbs` — the lower of the two can climb to the higher, one
+   undirected edge (see [Reachability model](#reachability-model)). This subsumes the old
    same-block / own-column / neighbour-column special cases: a glass pane on a block
    connects to that block's exposed ring because their footprints abut at the hole
    edges — no special case. Only exposed tops are painted; a fully occluded click
@@ -157,6 +175,128 @@ Treat the entity as a point and pre-grow the world by its half-width `W/2`:
 Locality is bounded (growth is `< 1` block even for the Ravager), which is what
 makes the output-sensitive flood possible.
 
+## Reachability model
+
+Reach is a **climb test over an unordered pair**, implemented as
+`ClimbRule.climbs(a, b)`: of two surfaces, it asks whether the **lower can climb
+to the higher**. The land budget is `lower.collisionTopY() + profile.reach()`
+(`reach` = `max(jump, step)`). When the lower `HazardClass.isFluid()` and the
+higher is not, that budget is further capped at
+`lower.collisionTopY() + FLUID_SURFACE_DROP + fluidEscape`
+(`FLUID_SURFACE_DROP = 1/9`; `fluidEscape` from Generic `fluidEscapeHeight`) so
+leaving fluid onto a non-fluid rim is never easier than jumping on land. The pair
+is unordered — same verdict either argument order — and one passing pair yields
+**one undirected edge** that the flood walks in either direction. A rim whose
+rise exceeds the budget yields no edge at all: the ground under it enters the
+reached set only by another route (a staircase, a slope), if at all.
+
+The collect window stays `[h - reach, h + reach]` (a valid **superset** of the
+climb predicate); `ClimbRule` is the real edge filter.
+
+That single property carries the model's central guarantee. Every edge is climbable in the
+up direction, so every path is walkable backwards, and **membership in the reached set
+means the entity can be there *and get back out*** — reachable is escapable. This is the
+guarantee [hole classification](#hole-classification) spends: asking "is a reached surface
+below this rim?" is asking "can it climb out again?", and the answer holds only because
+the edge is mutual.
+
+Falling belongs to [hole classification](#hole-classification), and is unbounded there:
+`classifyDrop` accepts the topmost reached surface below the rim at **any** depth. So the
+two vertical questions in this codebase have separate homes — connectivity is gated by the
+climb, and the physics of descent live in the drop classifier.
+
+**Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
+the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
+**`1.0`**. That value is the profile’s fixed vertical threshold only — the flood
+does not model horizontal jump distance (parkour), and it does not apply block or
+effect modifiers to jump height (honey, slime-block bounce, Jump Boost, and
+similar). Reachability is plain yes/no — a location is reachable from the seed or it is not —
+so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
+the radius budget, which can cut off a very long winding path. So a shallow
+(`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
+the width rule you need a gap that is **deeper than `reach` or over the void**.
+**Entity-height headroom** is
+modelled (rule 1: a top survives only where `(T, T+H]` is clear),
+so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
+classification builds on this (below): the flood still only paints
+*coverage*, and a separate predicate reads that coverage to label each drop edge.
+
+## Entity profiles (size + headroom)
+
+`EntityProfile(name, width, height, reach)` selects the entity the flood is computed
+for. The profile is chosen live via the `mobProfile` setting (see
+[`settings.md`](settings.md)); the shipped builtin sizes live on `EntityProfile`
+constants, with enables/order in `ProfileRoster`.
+
+Each field drives one part of the math: `W` drives dilation (above), `H` drives
+headroom (rule 1), and `reach` is the climb threshold — `max(jump, step)`, applied as
+the [climb test](#reachability-model) above. Skirt
+*draw* heights are Appearance `downSkirtHeight` / `upwardSkirtHeight` (not `reach`).
+Widths and heights are the
+vanilla hitbox sizes: doubles, not `1/16`-aligned, consistent with the rect-space
+model. Two examples anchor the range:
+
+- **Player** — `W = 0.6`, `H = 1.8`, `reach = 1.2522` (the documented living-entity
+  jump peak, shared by the larger Ravager).
+- **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
+  zero height reduces headroom to the buried test, so Point stays the pure
+  point-walker and geometric baseline.
+
+## Fluid surfaces
+
+Water and lava are **non-occluding support surfaces**: each fluid cell can emit a
+standable surface that travels the same path as a solid top (dilation, clip, flood,
+merge, skirts, holes), while contributing no collision volume to occlusion.
+
+- **Occlusion is a volume property.** Burial and headroom ask which boxes span
+  above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
+  fluid surfaces set `occludes=false`, so every solid top under fluid survives, and
+  solids still clip a fluid top the same way they clip any other top. The same
+  rule gates up-skirts: `OccluderSkirts.wallOccluder` requires `occludes`, and
+  `OccluderSkirts.compute` reads through the shared `ColumnBoxes` port
+  (`WorldGeometry.levelColumnBoxes`) so only occluding boxes mark wall faces.
+- **Emission (`WorldGeometry.levelColumnBoxes`).** When Generic `swimmableFluids` is
+  on, a cell whose fluid state is in `FluidTags.WATER` or `FluidTags.LAVA` emits one
+  full-footprint fluid surface (`yMin = y`, `yMax = y + fluidSurfaceHeight`). Height
+  is `FluidState.getHeight` when that value is above `0.4` (vanilla fluid-jump
+  threshold), otherwise `0` (thin sheet seated on the cell floor, coplanar with
+  the solid underfoot). Falling fluid uses the same path as still fluid
+  (`getHeight == 1.0`). The fluid surface carries a `HazardClass` stamp (`WATER` /
+  `LAVA`) for merge ownership / seating / draw; solids stay `NONE`. Geometry today only
+  needs “emit or not.” Thin sheets at height `0` share `collisionTopY` with the solid
+  underfoot; merge ownership lets the fluid's higher `HazardClass.priority()` claim
+  that overlap.
+- **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
+  fluid surface in a fluid column survives exposure. Consecutive tops differ by at
+  most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
+  floor), so the [climb test](#reachability-model) connects surface, intermediates,
+  and floor — including a waterfall column. Fluid→fluid pairs use plain
+  `profile.reach()` (the escape cap does not bind), so the column stays connected
+  at every `fluidEscapeHeight` setting.
+- **Escape cap.** Leaving fluid onto a non-fluid rim uses Generic
+  `fluidEscapeHeight`: a rim height measured from the fluid **block** top, converted
+  to a height above the plane by `+ 1/9` (`ClimbRule.FLUID_SURFACE_DROP`). The
+  predicate keys on `HazardClass.isFluid()` (water/lava only), so later non-fluid
+  hazards do not inherit the cap. Contract: `FluidEscapeTest`.
+- **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
+  the fluid top is clipped by that solid the same amount. At a flush pond rim the
+  surviving fluid edge meets the shore's dilated footprint, so the drop classifier
+  finds the kept floor (or the plane one cell down) as a landing. Edge marking stays
+  with the occluder / drop passes.
+- **Perimeter beams (`HazardBeams`).** Each non-frontier fluid rect edge minus
+  sub-spans covered by an abutting neighbour with the same `HazardClass` and equal
+  `collisionTopY` (interior pool seams) publishes a `BeamSpan` stamped `WATER` /
+  `LAVA`. No occluder subtract — water|lava abutting edges keep both kinds.
+  `HazardClass.HOLE` is beam-marker identity only (trap drops from `HoleBeams`);
+  it is never stamped on standable surfaces or world boxes. Draw path:
+  [`rendering.md`](rendering.md) beams.
+
+Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
+coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
+complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
+disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder),
+`HazardBeamsTest` (perimeter seams, water|lava abut, frontier skip).
+
 ## How it is computed: the output-sensitive (lazy) flood
 
 `select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
@@ -191,11 +331,13 @@ milestones).
   `select`, so the memo key is unchanged). A `BitSet` per column records
   scanned rows so each `(column,row)` is queried at most once. The flood boots from
   **non-emitted origin probes** — each clicked-block box's raw dilated footprint at
-  its `collisionTopY` — then assigns initial depths via `assignOriginWave` (depth 0
-  on the seed block's exposed tops, depth 1 on other tops adjacent to a probe within
-  `reach`). Later hops use the same `|dTopY| <= reach` + footprint adjacency on
-  exposed tops only. The flood front moves `<= reach` per hop, so by induction
-  everything reachable is found near an already-reached height. This drops the
+  its `collisionTopY` (with `HazardClass`) — then assigns initial depths via
+  `assignOriginWave` (depth 0 on the seed block's exposed tops, depth 1 on other
+  tops adjacent to a probe and climbable under `ClimbRule`). Later hops use the
+  same `ClimbRule.climbs` + footprint adjacency on exposed tops only (candidates
+  still gathered in `[h-reach, h+reach]`). The flood front moves `<= reach` per
+  hop, so by induction everything reachable is found near an already-reached
+  height. This drops the
   per-column vertical factor from `O(radius)` to `O(heights the flood actually
   traverses there)`, so open ground goes `~radius³ → ~radius²`.
 - **`occluderColumns` (the occluder shell).** For `exposeBox` to trim a box's
@@ -212,32 +354,12 @@ milestones).
 Net cost ≈ `columns × rows-per-column`. The XZ laziness + `occluderColumns` trim the
 first factor; lazy-Y trims the second — orthogonal, and they compose.
 
-## Reachability model
-
-Reach is a **single threshold** (`profile.reach()` = `max(jump, step)`): two surfaces
-connect when their height difference is `<= reach`, anything deeper does not.
-**Player** and **Ravager** use **`1.2522`** (documented living-entity jump peak from
-the discrete tick loop on impulse `0.42` / gravity / drag). **Point** uses
-**`1.0`**. That value is the profile’s fixed vertical threshold only — the flood
-does not model horizontal jump distance (parkour), and it does not apply block or
-effect modifiers to jump height (honey, slime-block bounce, Jump Boost, and
-similar). Reachability is plain yes/no — a location is reachable from the seed or it is not —
-so anything not connected to the seed is simply **unreachable** (a hole/gap), modulo
-the radius budget, which can cut off a very long winding path. So a shallow
-(`<= reach` deep) trench is reachable and its floor *is* painted (not a hole); to see
-the width rule you need a gap that is **deeper than `reach` or over the void**.
-**Entity-height headroom** is
-modelled (rule 1: a top survives only where `(T, T+H]` is clear),
-so a floor under a low ceiling drops out for a tall profile. Explicit hole detection /
-classification builds on this (below): the flood still only paints
-*coverage*, and a separate predicate reads that coverage to label each drop edge.
-
 ## Hole classification
 
 Hole classification **reads the flood output** to label the
 **drop edges** of the selection (the `openSpans` edges that are neither equal-height
 merge seams nor wall/ceiling up-skirts). One pure predicate,
-`SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
+`HoleBeams.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
 `BENIGN` in two steps:
 
 1. **Is there a reached surface strictly below the edge, across the fall column?** If
@@ -252,7 +374,7 @@ merge seams nor wall/ceiling up-skirts). One pure predicate,
    distance `T − landY`.
 
 Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
-world read: `gatherLedges` finds candidate boxes with tops in `(landY, T)` in the columns
+world read: `HoleBeams.gatherLedges` finds candidate boxes with tops in `(landY, T)` in the columns
 around the fall column and exposes each through **`WorldSurfaceIndex.tops`, the same
 per-box primitive the flood uses** (dilate by `W/2`, cut by the box's occluder shell) —
 so only flood-standable fragments count as ledges, and a wide hitbox is handled the same
@@ -278,7 +400,7 @@ the line" test would turn every drop into a step-up). Ground that sits *beside* 
 — is passed on the way down, so such a rim stays a hole.
 
 **Exposure-agreement contract.** The invariant step 2 relies on: **a candidate ledge is
-exposed by `gatherLedges` iff the flood would expose it.** It holds **by construction**:
+exposed by `HoleBeams.gatherLedges` iff the flood would expose it.** It holds **by construction**:
 both callers sit on one `WorldSurfaceIndex` (the shared lazy box index + memoized
 `tops()`), so the occluder shell has a single definition and cannot drift between them.
 `exposeBox` subtracts only occluders present in the index, and `tops()` populates that
@@ -307,16 +429,18 @@ a hole beam in the grey ring is blended toward grey by the same distance falloff
 greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
 The candidate drop spans are the compute-side down `SkirtSpan`s (every genuine drop
-edge). `computeHoles` walks them once per select: for each it takes the **fall column**,
+edge). `HoleBeams.compute` walks them once per select: for each it takes the **fall column**,
 gathers ledges, and classifies. Because **one edge can span reached and unreached
-ground**, `holeSubSpans` subdivides the edge at the `[lo,hi]` of the reached rects that
+ground**, `HoleBeams.holeSubSpans` subdivides the edge at the `[lo,hi]` of the reached rects that
 cross the line (`spanBreakpoints`) into homogeneous sub-spans — so a hole span's bounds
-are the geometry justifying it — classifies each via `classifyDrop`, and publishes
-the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
-ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
-(a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
+are the geometry justifying it — classifies each via `HoleBeams.classifyDrop`, and publishes
+the contiguous `HOLE` pieces (coalesced) as `BeamSpan`s with `hazard = HOLE`.
+`BENIGN` sub-spans keep their ordinary down-skirt. Each `BeamSpan` is drawn as its
+own through-walls beam at the rim (a long dangerous rim reads as a row of beams
+clearly marking every unsafe edge). Hazard pool perimeters use the same `BeamSpan`
+type via `HazardBeams` (see [Fluid surfaces](#fluid-surfaces)).
 
-**Ledge gather occluders from below.** `gatherLedges` exposes each candidate box (top in
+**Ledge gather occluders from below.** `HoleBeams.gatherLedges` exposes each candidate box (top in
 `(landY, collisionTopY)`) via `WorldSurfaceIndex.tops`, whose occluder shell starts one
 row below the candidate top (`floor(L) - 1`), so collision that *lives in the block row
 below* `L` and rises into the standing column (vanilla walls/fences at height 1.5) still
@@ -336,10 +460,9 @@ Everything above derives from `getCollisionShape`, so `StandableRect.collisionTo
 collision `yMax`. A handful of blocks **render taller than they collide** — soul
 sand collides at `14/16` (`0.875`) but outlines as a full cube, mud at ~`0.9` — so a
 marker drawn at the collision top sits **buried inside the visible block**. The fix
-is a **draw-only** second height, `StandableRect.visualTopY`, carried alongside the
-collision top; the renderer can draw on the face you actually see while **all
-walkability math stays on `collisionTopY`** (reach, occlusion, holes are
-unchanged — a mob really does stand at `0.875`, we just don't want the paint hidden).
+is a second height, `StandableRect.visualTopY`, so paint can sit on the visible face
+while **walkability stays on `collisionTopY`**. Merge ownership and paint-side
+skirts/occluders may also key on `visualTopY`.
 
 - **Source data (paid once per state, no heuristic).** `WorldBox` carries the source
   block's whole-shape `blockCollisionTop` (`y + collisionShape.max(Y)`) and
@@ -358,10 +481,10 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   joins `floodRadius` / profile changes, which already re-flood). The memo treats the
   property as position-independent (keyed by state only); the few context-dependent
   blocks never have a neighbour-varying *top* raise, so the first-seen value is safe.
-  Occluder and ledge scans never raise: the occluder scan leaves the
-  auxiliary-constructor default (`= yMax`), and the ledge scan reads through
-  `levelColumnBoxes(level, false)` so both tops collapse to the collision top. The
-  flood's own scan producer (`levelColumnBoxes(level, computeVisualTop)`, feeding
+  Occluder and ledge scans never raise: both read through
+  `WorldGeometry.levelColumnBoxes(level, false, …)` so both tops collapse to the
+  collision top. The flood's own scan producer
+  (`WorldGeometry.levelColumnBoxes(level, computeVisualTop, …)`, feeding
   `WorldSurfaceIndex`) computes both tops at the node-producing site.
 - **The raise rule (`exposeBox`).**
   `visualTopY = (|collisionTopY − blockCollisionTop| ≤ EPS ∧ blockOutlineTop > collisionTopY) ?
@@ -374,27 +497,20 @@ unchanged — a mob really does stand at `0.875`, we just don't want the paint h
   class](#representation-rectdouble-space): raised geometry claims any overlap with
   flush geometry, while abutting raised and flush regions stay separate rects. The
   raised paint therefore keeps its own height and the flush-only region stays flush.
-  Up and down `SkirtSpan`s and `HoleSpan` each carry a
-  `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
-- **Skirts are a render pass, holes a geometry pass.** `computeDownSkirts` runs over
-  the merged rects keyed on a chosen height: **`collisionTopY`** (`dropEdges`, the
-  hole-classifier substrate — an equal-`collisionTopY` abutting neighbour is a merge seam, not a
-  drop) or **`visualTopY`** (the rendered down-skirts). On the visual pass, an abutting
-  neighbour with **equal or higher** `visualTopY` covers the edge: equal is a flush
-  continuation, higher is a taller face the lower side must not hang a reverse
-  down-skirt into. A **lower** abutting neighbour is a **land stop**: leftover drop
-  intervals get `maxExtent = rimKey − neighbourKey` so the curtain stops at that
-  surface (open drops stay unlimited). Adjacent leftover pieces with the same
-  `maxExtent` coalesce into one span. A visible step between two rects at the same
-  `collisionTopY` but different `visualTopY` (a path lip on a soul-sand cube top)
-  therefore gets a down skirt **only from the raised/high side**, clamped to the
-  lower face; soul sand's own remnant abutting that lip at the same `visualTopY` gets
-  none. `select` computes `dropEdges` once and, when the Appearance toggle enables
-  raise and some rect has `visualTopY != collisionTopY`, runs the second
-  `visualTopY` pass — otherwise the single pass feeds both holes and skirts. Both
-  heights on a span are **load-bearing**: collision `baseY` for the hole/geometry
-  pass, render `visualBaseY` for the skirt/beam draw (the renderer hangs every
-  skirt/beam from `visualBaseY` and colors at draw).
+  Up and down `SkirtSpan`s carry a `visualBaseY` (the source rect's `visualTopY`)
+  alongside the collision `baseY`. Published `BeamSpan`s carry only the draw foot
+  (`visualBaseY`) plus the rim interval.
+- **Skirts are a render pass, holes a geometry pass.** Downs and occluder (UP) skirts
+  share a dual rim: **`collisionTopY`** for hole / collision-drop coverage, **`visualTopY`**
+  for paint. `DownSkirts.compute` / `OccluderSkirts.wallOccluder` take that key; `maxExtent` for UPs is
+  `wallTop − rim` (positive when emitted). On the visual pass, an abutting neighbour with
+  **equal or higher** `visualTopY` covers the edge; a **lower** neighbour is a land stop
+  (`maxExtent = rimKey − neighbourKey`; open drops unlimited). A visible step at the same
+  `collisionTopY` but different `visualTopY` (path lip on soul sand) skirts only from the
+  high side; flush remnant↔lip gets none, remnant↔flush-path wings get a short DOWN.
+  `select` always builds collision-rim occluders + `dropEdges`; when any rect is raised it
+  also builds the visual-rim occluder/downskirt pair and publishes that UP list. Both
+  heights on a span are load-bearing: collision `baseY` for holes, `visualBaseY` for draw.
 - **Neighbour-overlap raise (a priority-class split).** A dilated rect owned by block A
   can extend across the top of a touching raised-outline block B — a path lip (`15/16`)
   reaching over soul sand (`14/16` collision, full-cube outline). The rect is a genuine
@@ -431,26 +547,6 @@ The zero-width **Point** profile (debug) has a few other edge-case
 draw bugs that do not show up on the shipped dilated profiles. Left unfixed on
 purpose due to low ROI. Is a zero-width point supposed to fit through a zero
 size gap? Because a 4.0 wide ghast fits into a 4 block gap.
-
-## Entity profiles (size + headroom)
-
-`EntityProfile(name, width, height, reach)` selects the entity the flood is computed
-for. The profile is chosen live via the `mobProfile` setting (see
-[`settings.md`](settings.md)); the shipped builtin sizes live on `EntityProfile`
-constants, with enables/order in `ProfileRoster`.
-
-Each field drives one part of the math: `W` drives dilation (above), `H` drives
-headroom (rule 1), and `reach` is the step threshold — `max(jump, step)`. Skirt
-*draw* heights are Appearance `downSkirtHeight` / `upwardSkirtHeight` (not `reach`).
-Widths and heights are the
-vanilla hitbox sizes: doubles, not `1/16`-aligned, consistent with the rect-space
-model. Two examples anchor the range:
-
-- **Player** — `W = 0.6`, `H = 1.8`, `reach = 1.2522` (the documented living-entity
-  jump peak, shared by the larger Ravager).
-- **Point** — `W = 0`, `H = 0`, `reach = 1.0`: zero width makes dilation a no-op and
-  zero height reduces headroom to the buried test, so Point stays the pure
-  point-walker and geometric baseline.
 
 ## Appendix A: rejected pixel raster
 

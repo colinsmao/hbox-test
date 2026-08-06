@@ -6,8 +6,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.DropClass;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.DropClassification;
+import dev.kelianmao.mobwalk.client.surface.HoleBeams.DropClass;
+import dev.kelianmao.mobwalk.client.surface.HoleBeams.DropClassification;
 
 /**
  * The pure drop-edge classifier. A mob leaves a surface at {@code T = 64} down the
@@ -22,7 +22,7 @@ final class DropClassificationTest {
   private static final FallColumn FALL = new FallColumn(false, true, 1.0, 0.0, 1.0);
 
   private static DropClassification classify(List<StandableRect> reached, List<StandableRect> ledges) {
-    return SurfaceSelection.classifyDrop(FALL, T, reached, ledges);
+    return HoleBeams.classifyDrop(FALL, T, reached, ledges);
   }
 
   private static DropClassification classify(List<StandableRect> reached) {

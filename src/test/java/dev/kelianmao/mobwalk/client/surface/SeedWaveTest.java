@@ -18,12 +18,14 @@ import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.SeedWaveEntry;
  */
 final class SeedWaveTest {
   private static final double REACH = 1.2522;
+  private static final ClimbRule CLIMB = new ClimbRule(REACH, 0.375);
   // Ravager half-width: a unit box dilates to [-0.975, 1.975].
   private static final double HALF_W = 1.95 / 2.0;
 
   private static OriginProbe probe(double minX, double minZ, double maxX, double maxZ,
       double topY) {
-    return new OriginProbe(minX - HALF_W, minZ - HALF_W, maxX + HALF_W, maxZ + HALF_W, topY);
+    return new OriginProbe(minX - HALF_W, minZ - HALF_W, maxX + HALF_W, maxZ + HALF_W, topY,
+      HazardClass.NONE);
   }
 
   private static OriginCandidate cand(StandableRect r, int cx, int cz, boolean seed) {
@@ -54,7 +56,7 @@ final class SeedWaveTest {
       List.of(
         cand(east, 1, 0, false),
         cand(west, -1, 0, false)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertEquals(2, wave.size());
     assertEquals(1, find(wave, 1, 0).depth());
@@ -72,7 +74,7 @@ final class SeedWaveTest {
       List.of(
         cand(seed, 0, 0, true),
         cand(east, 1, 0, false)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertEquals(2, wave.size());
     assertEquals(0, find(wave, 0, 0).depth());
@@ -93,7 +95,7 @@ final class SeedWaveTest {
       List.of(
         cand(remnant, 0, 0, true),
         cand(east, 1, 0, false)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertEquals(0, find(wave, 0, 0).depth());
     assertEquals(1, find(wave, 1, 0).depth());
@@ -106,7 +108,7 @@ final class SeedWaveTest {
     List<SeedWaveEntry> wave = SurfaceSelection.assignOriginWave(
       List.of(origin),
       List.of(cand(east, 1, 0, false)),
-      REACH, 0);
+      CLIMB, 0);
 
     assertTrue(wave.isEmpty());
   }
@@ -121,7 +123,7 @@ final class SeedWaveTest {
       List.of(
         cand(seed, 0, 0, true),
         cand(east, 1, 0, false)),
-      REACH, 0);
+      CLIMB, 0);
 
     assertEquals(1, wave.size());
     assertEquals(0, wave.get(0).depth());
@@ -136,7 +138,7 @@ final class SeedWaveTest {
     List<SeedWaveEntry> wave = SurfaceSelection.assignOriginWave(
       List.of(origin),
       List.of(cand(high, 1, 0, false)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertTrue(wave.isEmpty());
   }
@@ -149,7 +151,7 @@ final class SeedWaveTest {
     List<SeedWaveEntry> wave = SurfaceSelection.assignOriginWave(
       List.of(origin),
       List.of(cand(diagonal, 2, 2, false)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertTrue(wave.isEmpty());
   }
@@ -163,7 +165,7 @@ final class SeedWaveTest {
       List.of(
         cand(same, 0, 0, false),
         cand(same, 0, 0, true)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertEquals(1, wave.size());
     assertEquals(0, wave.get(0).depth());
@@ -177,7 +179,7 @@ final class SeedWaveTest {
     List<SeedWaveEntry> wave = SurfaceSelection.assignOriginWave(
       List.of(origin),
       List.of(cand(far, 10, 10, false)),
-      REACH, 3);
+      CLIMB, 3);
 
     assertTrue(wave.isEmpty());
   }

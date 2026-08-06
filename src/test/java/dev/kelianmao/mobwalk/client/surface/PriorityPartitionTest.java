@@ -49,6 +49,27 @@ final class PriorityPartitionTest {
       && r.rect().maxZ() <= 1.0 + EPS));
   }
 
+  // Mirrors the merge surface-class product (hazardPriority, visualTopY): a new
+  // kind slots in by ordering alone — the partition algorithm stays untouched.
+  @Test
+  void orderedHazardThenVisualLayersClaimHighestFirst() {
+    record SurfaceClass(int hazardPriority, double visualTopY) {
+    }
+    List<PriorityLayer<SurfaceClass>> layers = List.of(
+      new PriorityLayer<>(new SurfaceClass(2, 1.0), List.of(new Rect(1, 0, 3, 1))),
+      new PriorityLayer<>(new SurfaceClass(1, 1.25), List.of(new Rect(0, 0, 2, 1))),
+      new PriorityLayer<>(new SurfaceClass(0, 1.5), List.of(new Rect(0, 0, 4, 1))));
+
+    List<ClassifiedRect<SurfaceClass>> out = RectMath.priorityPartition(layers);
+
+    assertNonOverlapping(out);
+    assertEquals(0, soleOwner(out, 3.5, 0.5).priorityClass().hazardPriority());
+    assertEquals(1, soleOwner(out, 0.5, 0.5).priorityClass().hazardPriority());
+    assertEquals(2, soleOwner(out, 1.5, 0.5).priorityClass().hazardPriority(),
+      "higher hazardPriority claims overlap before lower visual height matters");
+    assertEquals(1.5, soleOwner(out, 3.5, 0.5).priorityClass().visualTopY(), EPS);
+  }
+
   private static <C> ClassifiedRect<C> soleOwner(
       List<ClassifiedRect<C>> rects, double x, double z) {
     List<ClassifiedRect<C>> owners = rects.stream()

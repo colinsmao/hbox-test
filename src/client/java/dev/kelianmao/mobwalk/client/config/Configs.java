@@ -3,6 +3,7 @@ package dev.kelianmao.mobwalk.client.config;
 import dev.kelianmao.mobwalk.client.overlay.WorldOverlayManager;
 import dev.kelianmao.mobwalk.client.surface.CollisionSurfaceOverlay;
 import dev.kelianmao.mobwalk.client.surface.EntityProfile;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -134,6 +135,10 @@ public final class Configs implements IConfigHandler {
     public static final ConfigTable CUSTOM_PROFILES = Profiles.CUSTOM_PROFILES;
     public static final ConfigInteger FLOOD_RADIUS =
       new ConfigInteger("floodRadius", 20, 0, 30, true).apply(GENERIC_KEY);
+    public static final ConfigBoolean SWIMMABLE_FLUIDS =
+      new ConfigBoolean("swimmableFluids", true).apply(GENERIC_KEY);
+    public static final ConfigDouble FLUID_ESCAPE_HEIGHT =
+      new ConfigDouble("fluidEscapeHeight", 0.375, 0.0, 2.0, true).apply(GENERIC_KEY);
 
     /** GUI order (includes tables). File I/O uses {@link #FILE_OPTIONS}. */
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
@@ -142,7 +147,9 @@ public final class Configs implements IConfigHandler {
       MOB_PROFILE,
       BUILTIN_PROFILES,
       CUSTOM_PROFILES,
-      FLOOD_RADIUS
+      FLOOD_RADIUS,
+      SWIMMABLE_FLUIDS,
+      FLUID_ESCAPE_HEIGHT
     );
 
     /** Generic JSON category — profile tables live under Profiles. */
@@ -150,7 +157,9 @@ public final class Configs implements IConfigHandler {
       SHOW_SURFACES,
       WAND_ITEM,
       MOB_PROFILE,
-      FLOOD_RADIUS
+      FLOOD_RADIUS,
+      SWIMMABLE_FLUIDS,
+      FLUID_ESCAPE_HEIGHT
     );
 
     private Generic() {}
@@ -248,6 +257,14 @@ public final class Configs implements IConfigHandler {
   public static final class Appearance {
     public static final ConfigColor WALKABLE_COLOR =
       new ConfigColor("walkableColor", "#B055AA55").apply(APPEARANCE_KEY);
+    public static final ConfigBoolean SHOW_WATER_HAZARD =
+      new ConfigBoolean("showWaterHazard", true).apply(APPEARANCE_KEY);
+    public static final ConfigColor WATER_HAZARD_COLOR =
+      new ConfigColor("waterHazardColor", "#B03A9AE0").apply(APPEARANCE_KEY);
+    public static final ConfigBoolean SHOW_LAVA_HAZARD =
+      new ConfigBoolean("showLavaHazard", true).apply(APPEARANCE_KEY);
+    public static final ConfigColor LAVA_HAZARD_COLOR =
+      new ConfigColor("lavaHazardColor", "#B0E07020").apply(APPEARANCE_KEY);
     public static final ConfigBoolean DRAW_ON_VISIBLE_FACE =
       new ConfigBoolean("drawOnVisibleFace", true).apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
@@ -263,6 +280,10 @@ public final class Configs implements IConfigHandler {
 
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
       WALKABLE_COLOR,
+      SHOW_WATER_HAZARD,
+      WATER_HAZARD_COLOR,
+      SHOW_LAVA_HAZARD,
+      LAVA_HAZARD_COLOR,
       SHOW_BEAMS_THROUGH_WALLS,
       SHOW_HOLE_BEAMS,
       HOLE_BEAM_COLOR,
@@ -398,8 +419,20 @@ public final class Configs implements IConfigHandler {
       }
     });
     // drawOnVisibleFace gates the visible-top read compute-side (see
-    // SurfaceSelection.visibleTop), so flipping it must re-flood from the last seed.
+    // WorldGeometry.visibleTop), so flipping it must re-flood from the last seed.
     Appearance.DRAW_ON_VISIBLE_FACE.setValueChangeCallback(cfg -> {
+      CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+      if (collision != null) {
+        collision.reselectWithMobProfile();
+      }
+    });
+    Generic.SWIMMABLE_FLUIDS.setValueChangeCallback(cfg -> {
+      CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+      if (collision != null) {
+        collision.reselectWithMobProfile();
+      }
+    });
+    Generic.FLUID_ESCAPE_HEIGHT.setValueChangeCallback(cfg -> {
       CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
       if (collision != null) {
         collision.reselectWithMobProfile();
@@ -570,8 +603,38 @@ public final class Configs implements IConfigHandler {
     return Appearance.WALKABLE_COLOR.getColor();
   }
 
+  public static boolean showWaterHazard() {
+    return Appearance.SHOW_WATER_HAZARD.getBooleanValue();
+  }
+
+  public static Color4f waterHazardColor() {
+    return Appearance.WATER_HAZARD_COLOR.getColor();
+  }
+
+  public static boolean showLavaHazard() {
+    return Appearance.SHOW_LAVA_HAZARD.getBooleanValue();
+  }
+
+  public static Color4f lavaHazardColor() {
+    return Appearance.LAVA_HAZARD_COLOR.getColor();
+  }
+
   public static boolean drawOnVisibleFace() {
     return Appearance.DRAW_ON_VISIBLE_FACE.getBooleanValue();
+  }
+
+  /** Whether water/lava emit swim planes for {@link SurfaceSelection#select}. */
+  public static boolean swimmableFluids() {
+    return Generic.SWIMMABLE_FLUIDS.getBooleanValue();
+  }
+
+  /**
+   * Rim height above the fluid block top that a fluid→solid climb may clear
+   * (Generic {@code fluidEscapeHeight}; fed into
+   * {@link dev.kelianmao.mobwalk.client.surface.ClimbRule}).
+   */
+  public static double fluidEscapeHeight() {
+    return Generic.FLUID_ESCAPE_HEIGHT.getDoubleValue();
   }
 
   public static boolean showBeamsThroughWalls() {

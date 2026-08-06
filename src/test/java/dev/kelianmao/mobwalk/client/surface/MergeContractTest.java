@@ -23,6 +23,10 @@ import org.junit.jupiter.api.Test;
  *   <li>{@code collisionTopY} fidelity — output heights come from the inputs.
  * </ol>
  *
+ * <p>Hazard identity is an ownership axis only ({@code hazardPriority}), not a
+ * partition key: mixed-identity nodes at one collision height still emit disjoint
+ * rects, and each output rect's {@code hazard} tag equals the nodes it covers.
+ *
  * <p>The fixture reproduces the dump's cross-block overlap: two blocks at one
  * {@code collisionTopY} whose dilated tops overlap, one flush and one raised to a
  * taller visible shell by a neighbour. Grouping the merge on {@code visualTopY}
@@ -161,6 +165,60 @@ final class MergeContractTest {
     assertTrue(frontierLowOnly.frontier());
   }
 
+  @Test
+  void hazardPriorityClaimsOverlapFromSolidAtSameCollisionHeight() {
+    // Thin fluid at height 0 shares collisionTopY with the solid underfoot;
+    // hazard identity is ownership only, so the durable invariants still hold
+    // and the higher hazardPriority claims the overlap.
+    StandableRect solid = new StandableRect(0, 0, 2, 1, 1.0, 1.0, HazardClass.NONE);
+    StandableRect water = new StandableRect(1, 0, 3, 1, 1.0, 1.0, HazardClass.WATER);
+    List<StandableRect> input = List.of(solid, water);
+    List<StandableRect> out = RectMath.mergeAll(input);
+
+    assertNonOverlappingPerCollision(out);
+    assertSameCoverage(input, out);
+    assertHazardFidelity(input, out);
+    assertEquals(HazardClass.NONE, soleOwner(out, 0.5, 0.5).hazard());
+    assertEquals(HazardClass.WATER, soleOwner(out, 1.5, 0.5).hazard());
+    assertEquals(HazardClass.WATER, soleOwner(out, 2.5, 0.5).hazard());
+  }
+
+  @Test
+  void mixedHazardIdentitiesAtSameHeightEmitDisjointRects() {
+    StandableRect water = new StandableRect(0, 0, 2, 1, 1.0, 1.0, HazardClass.WATER);
+    StandableRect lava = new StandableRect(1, 0, 3, 1, 1.0, 1.0, HazardClass.LAVA);
+    List<StandableRect> input = List.of(water, lava);
+    List<StandableRect> out = RectMath.mergeAll(input);
+
+    assertNonOverlappingPerCollision(out);
+    assertSameCoverage(input, out);
+    assertHazardFidelity(input, out);
+    assertEquals(HazardClass.WATER, soleOwner(out, 0.5, 0.5).hazard());
+    assertEquals(HazardClass.LAVA, soleOwner(out, 1.5, 0.5).hazard(),
+      "higher HazardClass.priority() (lava) claims the overlap");
+    assertEquals(HazardClass.LAVA, soleOwner(out, 2.5, 0.5).hazard());
+  }
+
+  @Test
+  void abuttingSameHazardCoalescesWhileDifferentHazardsStaySeparate() {
+    StandableRect waterA = new StandableRect(0, 0, 1, 1, 1.0, 1.0, HazardClass.WATER);
+    StandableRect waterB = new StandableRect(1, 0, 2, 1, 1.0, 1.0, HazardClass.WATER);
+    StandableRect lava = new StandableRect(2, 0, 3, 1, 1.0, 1.0, HazardClass.LAVA);
+    List<StandableRect> input = List.of(waterA, waterB, lava);
+    List<StandableRect> out = RectMath.mergeAll(input);
+
+    assertNonOverlappingPerCollision(out);
+    assertSameCoverage(input, out);
+    assertHazardFidelity(input, out);
+    long waterRuns = out.stream().filter(r -> r.hazard() == HazardClass.WATER).count();
+    long lavaRuns = out.stream().filter(r -> r.hazard() == HazardClass.LAVA).count();
+    assertEquals(1, waterRuns, "abutting equal-ownership water should strip-merge");
+    assertEquals(1, lavaRuns);
+    assertEquals(HazardClass.WATER, soleOwner(out, 0.5, 0.5).hazard());
+    assertEquals(HazardClass.WATER, soleOwner(out, 1.5, 0.5).hazard());
+    assertEquals(HazardClass.LAVA, soleOwner(out, 2.5, 0.5).hazard());
+  }
+
   private static StandableRect soleOwner(
       List<StandableRect> rects, double x, double z) {
     List<StandableRect> owners = rects.stream()
@@ -170,6 +228,21 @@ final class MergeContractTest {
     assertEquals(1, owners.size(),
       "expected one owner at " + x + "," + z + " but found " + owners);
     return owners.get(0);
+  }
+
+  // Every output rect's hazard tag must match at least one covering input node
+  // (ownership fidelity — the merge never invents a tag).
+  private static void assertHazardFidelity(
+      List<StandableRect> input, List<StandableRect> output) {
+    for (StandableRect out : output) {
+      boolean matched = input.stream().anyMatch(in ->
+        in.hazard() == out.hazard()
+          && Math.abs(in.collisionTopY() - out.collisionTopY()) <= EPS
+          && Math.min(in.maxX(), out.maxX()) - Math.max(in.minX(), out.minX()) > EPS
+          && Math.min(in.maxZ(), out.maxZ()) - Math.max(in.minZ(), out.minZ()) > EPS);
+      assertTrue(matched,
+        () -> "output hazard " + out.hazard() + " has no covering input node: " + out);
+    }
   }
 
   private static void assertNonOverlappingPerCollision(List<StandableRect> rects) {

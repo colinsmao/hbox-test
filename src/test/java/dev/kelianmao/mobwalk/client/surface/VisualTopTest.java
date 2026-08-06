@@ -10,7 +10,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.WorldBox;
+import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
  * Milestone 6 Step 2a: the draw-only {@code visualTopY} raise in {@code exposeBox}.
