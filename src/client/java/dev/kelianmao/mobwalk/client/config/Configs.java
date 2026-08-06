@@ -265,6 +265,14 @@ public final class Configs implements IConfigHandler {
       new ConfigBoolean("showLavaHazard", true).apply(APPEARANCE_KEY);
     public static final ConfigColor LAVA_HAZARD_COLOR =
       new ConfigColor("lavaHazardColor", "#B0E07020").apply(APPEARANCE_KEY);
+    public static final ConfigBoolean SHOW_SOUL_SAND_HAZARD =
+      new ConfigBoolean("showSoulSandHazard", true).apply(APPEARANCE_KEY);
+    public static final ConfigColor SOUL_SAND_HAZARD_COLOR =
+      new ConfigColor("soulSandHazardColor", "#B08B5A2B").apply(APPEARANCE_KEY);
+    public static final ConfigBoolean SHOW_MAGMA_HAZARD =
+      new ConfigBoolean("showMagmaHazard", true).apply(APPEARANCE_KEY);
+    public static final ConfigColor MAGMA_HAZARD_COLOR =
+      new ConfigColor("magmaHazardColor", "#B0E0C028").apply(APPEARANCE_KEY);
     public static final ConfigBoolean DRAW_ON_VISIBLE_FACE =
       new ConfigBoolean("drawOnVisibleFace", true).apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
@@ -284,6 +292,10 @@ public final class Configs implements IConfigHandler {
       WATER_HAZARD_COLOR,
       SHOW_LAVA_HAZARD,
       LAVA_HAZARD_COLOR,
+      SHOW_SOUL_SAND_HAZARD,
+      SOUL_SAND_HAZARD_COLOR,
+      SHOW_MAGMA_HAZARD,
+      MAGMA_HAZARD_COLOR,
       SHOW_BEAMS_THROUGH_WALLS,
       SHOW_HOLE_BEAMS,
       HOLE_BEAM_COLOR,
@@ -617,6 +629,22 @@ public final class Configs implements IConfigHandler {
 
   public static Color4f lavaHazardColor() {
     return Appearance.LAVA_HAZARD_COLOR.getColor();
+  }
+
+  public static boolean showSoulSandHazard() {
+    return Appearance.SHOW_SOUL_SAND_HAZARD.getBooleanValue();
+  }
+
+  public static Color4f soulSandHazardColor() {
+    return Appearance.SOUL_SAND_HAZARD_COLOR.getColor();
+  }
+
+  public static boolean showMagmaHazard() {
+    return Appearance.SHOW_MAGMA_HAZARD.getBooleanValue();
+  }
+
+  public static Color4f magmaHazardColor() {
+    return Appearance.MAGMA_HAZARD_COLOR.getColor();
   }
 
   public static boolean drawOnVisibleFace() {

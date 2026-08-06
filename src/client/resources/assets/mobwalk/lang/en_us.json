@@ -48,11 +48,19 @@
 
   "mobwalk.config.appearance.comment.showWaterHazard": "If enabled, marks water as a hazard.",
 
-  "mobwalk.config.appearance.comment.waterHazardColor": "Color and transparency of water hazards.",
+  "mobwalk.config.appearance.comment.waterHazardColor": "Color and transparency of water hazard markers.",
 
   "mobwalk.config.appearance.comment.showLavaHazard": "If enabled, marks lava as a hazard.",
 
-  "mobwalk.config.appearance.comment.lavaHazardColor": "Color and transparency of lava hazards.",
+  "mobwalk.config.appearance.comment.lavaHazardColor": "Color and transparency of lava hazard markers.",
+
+  "mobwalk.config.appearance.comment.showSoulSandHazard": "If enabled, marks soul sand as a hazard.",
+
+  "mobwalk.config.appearance.comment.soulSandHazardColor": "Color and transparency of soul sand hazard markers.",
+
+  "mobwalk.config.appearance.comment.showMagmaHazard": "If enabled, marks magma blocks as a hazard.",
+
+  "mobwalk.config.appearance.comment.magmaHazardColor": "Color and transparency of magma hazard markers.",
 
   "mobwalk.config.appearance.comment.downSkirtHeight": "How far downward drop skirts hang from walkable edges, in blocks. 0 hides them.",
 

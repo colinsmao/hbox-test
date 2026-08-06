@@ -15,10 +15,11 @@ import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.ColKey;
 import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 
 /**
- * Coplanar-punch contract for solid hazards (soul sand / magma): after dilated
- * expose, undilated footprints of coplanar competing supports punch out hazard
- * paint (docs/geometry.md; PLAN M10 Step 1). Must fail under (a) full dilated
- * like fluids on magma|stone, or (b) pure undilated that clears void overhangs.
+ * Coplanar solid-hazard paint: face midplane + conservative corner square
+ * (docs/geometry.md). Must fail under (a) full dilated like fluids on
+ * magma|stone, (b) pure undilated that clears void overhangs, or (c) MAGMA
+ * merge priority claiming a whole air-gap overlap instead of midplane split.
+ * Corner punches under-approximate stone (true magma never becomes stone).
  */
 final class SolidHazardPunchTest {
   private static final double EPS = RectMath.EPS;
@@ -89,6 +90,105 @@ final class SolidHazardPunchTest {
     }
     // Outer void lip may dilate past the 2x2.
     assertEquals(HazardClass.MAGMA, soleOwner(out, 2.15, 0.5).hazard());
+  }
+
+  @Test
+  void stoneAirMagmaRavagerSplitsContestedAirAtMidplane() {
+    // Stone [0,1] | air [1,2] | magma [2,3]. Ravager halfW covers the air; closer
+    // split is at x=1.5 — not MAGMA priority claiming the whole dilated overlap.
+    double halfW = EntityProfile.RAVAGER.width() / 2.0;
+    double height = EntityProfile.RAVAGER.height();
+    WorldBox stone = solid(0, 0, 0, 0.0, 1.0, HazardClass.NONE);
+    WorldBox magma = solid(2, 0, 0, 0.0, 1.0, HazardClass.MAGMA);
+    List<StandableRect> out = exposeAndMerge(halfW, height, stone, magma);
+    assertEquals(HazardClass.NONE, soleOwner(out, 1.25, 0.5).hazard(),
+      "stone-closer half of air gap must not be MAGMA");
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.75, 0.5).hazard(),
+      "magma-closer half of air gap stays MAGMA");
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 2.5, 0.5).hazard());
+    assertEquals(HazardClass.NONE, soleOwner(out, 0.5, 0.5).hazard());
+  }
+
+  @Test
+  void stoneAboveMagmaStripRavagerFaceAndCornerBite() {
+    // . S .
+    // . . .
+    // M M M  — center air face midplane; side magmas also lose conservative
+    // corner squares near stone (flush-X + gap-Z still gets a square).
+    double halfW = EntityProfile.RAVAGER.width() / 2.0;
+    double height = EntityProfile.RAVAGER.height();
+    double s = Math.sqrt(2.0) - 1.0;
+    WorldBox stone = solid(1, 0, 2, 0.0, 1.0, HazardClass.NONE);
+    WorldBox m0 = solid(0, 0, 0, 0.0, 1.0, HazardClass.MAGMA);
+    WorldBox m1 = solid(1, 0, 0, 0.0, 1.0, HazardClass.MAGMA);
+    WorldBox m2 = solid(2, 0, 0, 0.0, 1.0, HazardClass.MAGMA);
+    List<StandableRect> out = exposeAndMerge(halfW, height, stone, m0, m1, m2);
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.5, 1.25).hazard(),
+      "center air, magma side of gap midplane");
+    assertEquals(HazardClass.NONE, soleOwner(out, 1.5, 1.75).hazard(),
+      "center air, stone side of gap midplane");
+    // Stone SW corner (1,2): square into SW of side [1-s,1]×[2-s,2]
+    assertEquals(HazardClass.NONE, soleOwner(out, 1.0 - s * 0.5, 2.0 - s * 0.5).hazard(),
+      "conservative corner square vs side magma");
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 0.5, 1.5).hazard(),
+      "side middle outside square stays MAGMA");
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 2.5, 1.5).hazard());
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 0.5, 0.5).hazard());
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.5, 0.5).hazard());
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 2.5, 0.5).hazard());
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.5, -halfW * 0.5).hazard(),
+      "south void lip stays MAGMA");
+  }
+
+  @Test
+  void stoneInMagmaRingCornerSquareNotRefilledByFaceMagma() {
+    // Stone [0,1]²; magma ring at Chebyshev dist 2 (the raster layout). Face
+    // magmas must not keep the NE corner square after the diagonal magma punches
+    // it — real failure mode of the isolated-diagonal-only test.
+    double halfW = EntityProfile.RAVAGER.width() / 2.0;
+    double height = EntityProfile.RAVAGER.height();
+    double s = Math.sqrt(2.0) - 1.0;
+    WorldBox stone = solid(0, 0, 0, 0.0, 1.0, HazardClass.NONE);
+    List<WorldBox> boxes = new ArrayList<>();
+    boxes.add(stone);
+    for (int ix = -2; ix <= 2; ix++) {
+      for (int iz = -2; iz <= 2; iz++) {
+        if (Math.max(Math.abs(ix), Math.abs(iz)) != 2) {
+          continue;
+        }
+        boxes.add(solid(ix, 0, iz, 0.0, 1.0, HazardClass.MAGMA));
+      }
+    }
+    List<StandableRect> out = exposeAndMerge(halfW, height, boxes.toArray(WorldBox[]::new));
+    assertEquals(HazardClass.NONE, soleOwner(out, 1.0 + s * 0.5, 1.0 + s * 0.5).hazard(),
+      "NE corner square must not stay MAGMA (face magmas must punch it too)");
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.7, 1.7).hazard(),
+      "crescent toward magma stays MAGMA (conservative)");
+    assertEquals(HazardClass.NONE, soleOwner(out, 0.5, 0.5).hazard());
+  }
+
+  @Test
+  void checkerboardDoesNotOverCarveMagmaViaDiagonalMidplanes() {
+    // (s)(m)
+    // (m)(s) — edge midplanes only; diagonal stones must not quadrant-carve magma
+    // down to a skinny strip (dump failure under Ravager).
+    double halfW = EntityProfile.RAVAGER.width() / 2.0;
+    double height = EntityProfile.RAVAGER.height();
+    WorldBox s00 = solid(0, 0, 0, 0.0, 1.0, HazardClass.NONE);
+    WorldBox m10 = solid(1, 0, 0, 0.0, 1.0, HazardClass.MAGMA);
+    WorldBox m01 = solid(0, 0, 1, 0.0, 1.0, HazardClass.MAGMA);
+    WorldBox s11 = solid(1, 0, 1, 0.0, 1.0, HazardClass.NONE);
+    List<StandableRect> out = exposeAndMerge(halfW, height, s00, m10, m01, s11);
+    // Magma cell center and an edge lip toward void/open side stay MAGMA.
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.5, 0.5).hazard());
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 0.5, 1.5).hazard());
+    // Eastern lip of m10 south of the NE diagonal stone — still closer to magma;
+    // must not be removed by a diagonal dual midplane carve.
+    assertEquals(HazardClass.MAGMA, soleOwner(out, 1.5 + halfW * 0.5, 0.5).hazard(),
+      "edge lip must survive diagonal neighbors");
+    // Stone cells remain NONE.
+    assertEquals(HazardClass.NONE, soleOwner(out, 0.5, 0.5).hazard());
+    assertEquals(HazardClass.NONE, soleOwner(out, 1.5, 1.5).hazard());
   }
 
   private static WorldBox solid(int bx, int by, int bz, double yMin, double yMax,

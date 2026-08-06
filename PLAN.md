@@ -10,6 +10,8 @@ Durable knowledge lives in `docs/`, so this file is cleared once the plan lands.
 **Status:** Milestone 10
 
 
+
+
 # Solid hazards: coplanar center attribution (soul sand + magma)
 
 ## Concept (read this first)
@@ -23,30 +25,20 @@ Vanilla solid block effects (soul sand slow, magma damage), checked in-game:
 1. **Several coplanar walkable supports** (magma flush with stone) → effect follows the **center**: center over stone ⇒ no magma, even if the hitbox still overlaps magma.
 2. **Only one supporting collision** (standing on magma at a cliff, center overhanging void) → hazard **still applies**. The center is outside the block, but there is no coplanar rival under the center, so the block you are standing on keeps the effect.
 
-So solid-hazard paint is **not** “undilated core only” and **not** “full dilated expose like fluids.” It is:
-
-**`hazard_paint = dilated_hazard − ∪(undilated footprints of coplanar competing supports)`**
-
-- Lip over a coplanar neighbor’s cell → punched out (`NONE` / neighbor).
-- Lip over void / no coplanar support under that point → **stays hazard** (non-compete).
-- Occlusion still runs first (soul sand beside a taller full block): buried neighbor clips standable before this punch.
-
-**Chosen wiring: explicit coplanar punch, then ordinary merge.** After dilated expose, guillotine-subtract undilated coplanar competitor footprints from each solid-hazard top; keep remainder rects tagged `SOUL_SAND` / `MAGMA`; discard subtracted pieces. Coverage of that XZ stays with the competitor’s dilated standable. Then normal `SOUL_SAND` / `MAGMA` / fluid / `NONE` merge.
-
-Do **not** add `UNDILATED_NONE` or a new merge ownership axis to encode the abstract stack — same paint, worse merge coalescing. Merge-only stacks are fine as intuition; implement the punch. **Do not micro-optimize locality/cost up front** — column-local gather is the natural fit next to `exposeBox`, but chase further only if in-game lag shows up.
-
-Fluids stay fully dilated: standing on the fluid top *is* the condition.
+So solid-hazard paint is **not** “undilated core only” and **not** “full
+dilated expose like fluids.” It is a **rect-native nearer-edge heuristic**: after
+dilated expose, each solid-hazard piece punches coplanar rivals (face midplane +
+conservative corner squares; see `docs/geometry.md`). Occlusion still runs first.
 
 Fluids stay fully dilated: standing on the fluid top *is* the condition.
 
 ```mermaid
 flowchart TD
   Dilated["Dilated solid-hazard expose"]
-  Punch["Subtract undilated coplanar competitors"]
+  Punch["Face midplane / corner square punch"]
   Paint["Hazard paint / beams"]
   Dilated --> Punch --> Paint
   VoidLip["Void overhang lip"] --> Paint
-  StoneCell["Coplanar stone undilated cell"] -->|"punches out"| Punch
 ```
 
 **Scope lock:** soul sand + magma only. No half-block/carpet “effects through,” powder snow, fire, berry bushes. Soul sand **visible-face** height stays orthogonal to hazard identity.
@@ -99,6 +91,11 @@ Landed: `HazardClass.SOUL_SAND` / `MAGMA`, world-read stamp, post-expose coplana
 punch, `SolidHazardPunchTest`, geometry docs. Crouch borders follow punch; fill
 still walkable-colored until Step 2.
 
+### Step 1b — Conservative corner square — **done**
+
+Landed: coplanar rival punch = face midplane + corner squares on every rival
+(`addCoplanarRivalPunches`); ring test locks face-magma refill; flush+gap still
+gets a square sized by the positive gap.
 ### Step 2 — Fill draw + settings
 
 Wire fill + Appearance show/color + lang keys (soul sand brownish, magma orange-red, show on).

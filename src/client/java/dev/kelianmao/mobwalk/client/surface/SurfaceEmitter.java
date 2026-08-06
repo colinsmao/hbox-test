@@ -70,6 +70,8 @@ public final class SurfaceEmitter {
       Configs.walkableColor(),
       Configs.showWaterHazard(), Configs.waterHazardColor(),
       Configs.showLavaHazard(), Configs.lavaHazardColor(),
+      Configs.showSoulSandHazard(), Configs.soulSandHazardColor(),
+      Configs.showMagmaHazard(), Configs.magmaHazardColor(),
       Configs.showHoleBeams(), Configs.holeBeamColor());
 
     for (StandableRect rect : rects) {
@@ -311,16 +313,27 @@ public final class SurfaceEmitter {
       private final Color4f water;
       private final boolean showLava;
       private final Color4f lava;
+      private final boolean showSoulSand;
+      private final Color4f soulSand;
+      private final boolean showMagma;
+      private final Color4f magma;
       private final boolean showHole;
       private final Color4f hole;
 
       FillColors(Color4f walkable, boolean showWater, Color4f water,
-          boolean showLava, Color4f lava, boolean showHole, Color4f hole) {
+          boolean showLava, Color4f lava,
+          boolean showSoulSand, Color4f soulSand,
+          boolean showMagma, Color4f magma,
+          boolean showHole, Color4f hole) {
         this.walkable = walkable;
         this.showWater = showWater;
         this.water = water;
         this.showLava = showLava;
         this.lava = lava;
+        this.showSoulSand = showSoulSand;
+        this.soulSand = soulSand;
+        this.showMagma = showMagma;
+        this.magma = magma;
         this.showHole = showHole;
         this.hole = hole;
       }
@@ -337,8 +350,9 @@ public final class SurfaceEmitter {
         Color4f base = switch (hazard) {
           case WATER -> showWater ? water : walkable;
           case LAVA -> showLava ? lava : walkable;
-          // Solid hazards use walkable until Appearance show/color lands.
-          case NONE, HOLE, SOUL_SAND, MAGMA -> walkable;
+          case SOUL_SAND -> showSoulSand ? soulSand : walkable;
+          case MAGMA -> showMagma ? magma : walkable;
+          case NONE, HOLE -> walkable;
         };
         return new Resolved(base.r, base.g, base.b, base.a);
       }
@@ -349,7 +363,9 @@ public final class SurfaceEmitter {
           case HOLE -> showHole ? hole : null;
           case WATER -> showWater ? water : null;
           case LAVA -> showLava ? lava : null;
-          case NONE, SOUL_SAND, MAGMA -> null;
+          case SOUL_SAND -> showSoulSand ? soulSand : null;
+          case MAGMA -> showMagma ? magma : null;
+          case NONE -> null;
         };
       }
     }

@@ -82,12 +82,11 @@ as a substitute for actually validating in-game, and keep them working if you to
 - `commit-gate.js` (`beforeShellExecution`) turns every `git commit` into a manual
   **ask** carrying the checklist reminder — a hook can't verify you ran `runClient`,
   only force the pause, so the confirmation is on you.
-- `plan-checklist-nudge.js` (`preToolUse`) reminds, before each `PLAN.md` or
-  `*.plan.md` (CreatePlan temp) edit, that every step needs its own enumerated
-  in-game checklist, and that docs-quality belongs on the tracked TODO list
-  (CreatePlan / TodoWrite).
-- `prose-positive-nudge.js` (`preToolUse`) reminds, before each `.md` edit, to write
-  positive facts and replace stale sentences rather than padding them.
+- `plan-checklist-nudge.js` (`preToolUse`) injects `additional_context` before each
+  `PLAN.md` or `*.plan.md` edit: every step needs its own enumerated in-game
+  checklist, docs-quality belongs on the tracked TODO list, and avoid plan churn.
+- `prose-positive-nudge.js` (`preToolUse`) injects `additional_context` before each
+  `.md` edit: write positive facts and replace stale sentences rather than padding.
 
 ## Bug fixing
 
@@ -125,6 +124,13 @@ A test that only agrees with an incomplete fix is useless.
   an explicit `mappings` line — do **not** add `loom.officialMojangMappings()` (or
   any `mappings ...`) to `build.gradle`, or the build fails with "Cannot use Mojang
   mappings in a non-obfuscated environment".
+- **Flood-debug dump (`/mobwalk dump`).** Human runs the command in-game with a
+  selection active; chat summarizes counts and says `(see latest.log)`. The dump
+  lives in **`run/logs/latest.log`** as a contiguous `[flood-debug]` block. Prefer
+  **`./extract-flood-debug.ps1`** over ad-hoc log searches. If
+  `latest.log` rotated after exit, fall back only to the newest
+  `run/logs/20*.log.gz` still filtering `[flood-debug]` — do not roam the Gradle
+  cache. Format detail: [`docs/rendering.md`](docs/rendering.md).
 
 ## Shell environment (check it first)
 

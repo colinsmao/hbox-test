@@ -303,24 +303,44 @@ disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladde
 ## Solid hazards (soul sand / magma)
 
 Walkability and vanilla solid block effects are different questions. Walkability still
-dilates supports by `W/2`. Solid-hazard paint (soul sand slow, magma damage) follows
-**center attribution among coplanar supports**, not full fluid-style dilation and not
-a pure undilated core:
+dilates supports by `W/2`.
 
-`hazard_paint = dilated_hazard − ∪(undilated footprints of coplanar competing supports)`.
+**Truth (vanilla-shaped):** among coplanar supports that cover a point under the
+entity’s dilated footprint, the effect block is the **Euclidean nearest** undilated
+support to the entity center (cliff with no coplanar rival keeps the support you
+stand on).
+
+**Heuristic (what we paint):** axis-aligned only —
+**perpendicular bisector (face midplane)** between face-separated rivals, plus a
+**conservative square in each contested corner** (side `g(√2−1)`, under-approximates
+stone so true magma is never painted as safe). Not full fluid-style dilation and not
+a pure undilated core.
 
 - **World read.** `WorldGeometry.solidHazardClass` stamps `SOUL_SAND` /
   `MAGMA` on solid collision `WorldBox`es from `Blocks.SOUL_SAND` /
   `Blocks.MAGMA_BLOCK`. Collision, outline, and `occludes=true` are unchanged.
   Priorities: `SOUL_SAND(3)`, `MAGMA(4)`; `isFluid()` stays false; climb ignores them.
-- **Expose then punch.** `exposeBox` dilates and occludes as for any solid top. For
-  solid-hazard targets it then guillotine-subtracts **undilated** footprints of other
-  coplanar supports (same `collisionTopY`, different hazard class — stone/`NONE` and
-  other rivals; same class such as magma|magma do not punch each other). Remainders
-  keep the solid-hazard tag; punched XZ stays with the competitor’s dilated standable.
+- **Expose then coplanar-rival punch.** `exposeBox` dilates and occludes as for any
+  solid top. For each post-occlusion piece `E` of a solid-hazard target, each
+  coplanar rival `B` (same `collisionTopY`, different hazard — stone/`NONE` and
+  other rivals; same class such as magma|magma do not punch each other):
+  - **Face-aligned** (separated on one axis with positive undilated overlap on
+    the other, **or** flush on one axis and gapped on the other): form the
+    contested subspan `E ∩ B+ ∩ faceBand`. Classic face: `faceBand` = undilated
+    perp-overlap ± `halfW`. Flush + gap: `faceBand` = rival’s undilated extent
+    on the flush axis. Punch the rival’s side of the equidistant midplane inside
+    that subspan.
+  - **Corner squares** on each rival corner whose outward orthant reaches the
+    target: punch `E ∩` a square of side `g(√2-1)` (`g` = min of positive axis
+    gaps; flush on one axis still sizes by the other). Runs **in addition to**
+    face midplanes so face magmas cannot refill a bite.
+  - **No separation / nested:** punch `E ∩` undilated(`B`) only when neither face
+    nor corner square applied.
   Occlusion runs first (soul sand beside a taller full block is clipped before punch).
+- **Face seams match the truth midplane; corners are AABB-conservative** (crescent
+  of true stone may stay magma). Ring stress locked by `SolidHazardPunchTest`.
 - **Cliff non-compete.** A void overhang has no coplanar competitor, so the dilated
-  lip over empty space stays hazard. Magma flush with stone punches at the **block**
+  lip over empty space stays hazard. Magma flush with stone seams at the **block**
   edge on the stone side.
 - **No `UNDILATED_NONE`.** Paint is the explicit punch, then ordinary same-`HazardClass`
   merge — not a merge-only ownership axis for undilated cores.
@@ -328,8 +348,8 @@ a pure undilated core:
 - **Draw (this slice).** Fill still resolves solid hazards to walkable color; tint and
   perimeter beams land in later steps. Crouch borders already follow post-punch rects.
 
-Contract: `SolidHazardPunchTest` (magma|stone punch, cliff void lip, Point undilated,
-soul sand|wall occlusion, 2×2 same-class merge).
+Contract: `SolidHazardPunchTest` (magma|stone, cliff, Point, soul sand|wall, 2×2,
+air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner square).
 
 ## How it is computed: the output-sensitive (lazy) flood
 

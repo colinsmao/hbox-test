@@ -471,9 +471,9 @@ public final class SurfaceSelection {
    * search is bounded to the columns the dilated footprint can reach via the
    * per-column {@code index}. {@code halfW == 0} leaves neighbor footprints merely
    * abutting (zero overlap), so Point matches the undilated per-block result.
-   * Solid hazards then subtract undilated footprints of coplanar competing supports
-   * (same collision top, different hazard class) so paint stops at a neighbor block
-   * edge while a void overhang keeps the dilated lip; fluids stay fully dilated.
+   * Solid hazards then coplanar-rival punch (face midplane + conservative
+   * corner squares; see {@link #addCoplanarRivalPunches}); fluids stay fully
+   * dilated.
    */
   static void exposeBox(WorldBox target, Map<ColKey, List<WorldBox>> index, double halfW,
       double height, List<StandableRect> out) {
@@ -498,10 +498,9 @@ public final class SurfaceSelection {
     // collision top is below T, e.g. path 15/16 over soul sand 14/16).
     List<RectMath.Rect> raiseCores = new ArrayList<>();
     List<Double> raiseOutlines = new ArrayList<>();
-    // Coplanar competing supports (same collision top, different hazard class):
-    // their undilated footprints punch solid-hazard paint after occlusion so a
-    // magma|stone lip follows the block edge while a void overhang stays dilated.
-    List<RectMath.Rect> punchCores = new ArrayList<>();
+    // Coplanar rivals for solid-hazard punch (gathered here; applied per
+    // post-occlusion piece so punches stay inside that piece).
+    List<WorldBox> punchRivals = new ArrayList<>();
     boolean solidHazard = target.hazard().isSolidHazard();
     int[] win = occluderColumns(target, halfW);
     for (int cx = win[0]; cx <= win[1]; cx++) {
@@ -542,24 +541,205 @@ public final class SurfaceSelection {
           if (solidHazard
               && Math.abs(other.yMax() - collisionTopY) <= EPS
               && other.hazard() != target.hazard()) {
-            punchCores.add(new RectMath.Rect(
-              other.minX(), other.minZ(), other.maxX(), other.maxZ()));
+            punchRivals.add(other);
           }
         }
       }
     }
 
     for (RectMath.Rect exposed : RectMath.subtractRects(base, clipRects)) {
-      if (punchCores.isEmpty()) {
+      if (punchRivals.isEmpty()) {
         emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, target.hazard(),
           raiseCores, raiseOutlines, out);
         continue;
       }
-      for (RectMath.Rect remnant : RectMath.subtractRects(exposed, punchCores)) {
+      List<RectMath.Rect> punches = new ArrayList<>();
+      for (WorldBox rival : punchRivals) {
+        addCoplanarRivalPunches(exposed, target, rival, halfW, punches);
+      }
+      if (punches.isEmpty()) {
+        emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, target.hazard(),
+          raiseCores, raiseOutlines, out);
+        continue;
+      }
+      for (RectMath.Rect remnant : RectMath.subtractRects(exposed, punches)) {
         emitWithNeighborVisualRaise(remnant, collisionTopY, visualTopY, target.hazard(),
           raiseCores, raiseOutlines, out);
       }
     }
+  }
+
+  // Rect-native coplanar attribution vs one rival:
+  // - Face: equidistant midplane in E ∩ B+ ∩ faceBand (box-sep gaps).
+  // - Corners: conservative squares from rival corners (orthant gaps; see
+  //   punchCornerSquare). Face magmas must punch these too so they cannot refill.
+  // - Else: E ∩ undilated(B). Never an infinite half-space.
+  private static final double CORNER_SQUARE_FACTOR = Math.sqrt(2.0) - 1.0;
+
+  private static void addCoplanarRivalPunches(RectMath.Rect exposed, WorldBox target,
+      WorldBox other, double halfW, List<RectMath.Rect> punches) {
+    RectMath.Rect otherDilated = new RectMath.Rect(
+      other.minX() - halfW, other.minZ() - halfW,
+      other.maxX() + halfW, other.maxZ() + halfW);
+    boolean sepWest = other.maxX() <= target.minX() + EPS;
+    boolean sepEast = other.minX() >= target.maxX() - EPS;
+    boolean sepSouth = other.maxZ() <= target.minZ() + EPS;
+    boolean sepNorth = other.minZ() >= target.maxZ() - EPS;
+    boolean sepX = sepWest || sepEast;
+    boolean sepZ = sepSouth || sepNorth;
+    // Box-separation gaps for face classification (not the same as corner-orthant gaps).
+    double gapX = 0.0;
+    double gapZ = 0.0;
+    if (sepEast) {
+      gapX = other.minX() - target.maxX();
+    } else if (sepWest) {
+      gapX = target.minX() - other.maxX();
+    }
+    if (sepNorth) {
+      gapZ = other.minZ() - target.maxZ();
+    } else if (sepSouth) {
+      gapZ = target.minZ() - other.maxZ();
+    }
+    double ovLoZ = Math.max(other.minZ(), target.minZ());
+    double ovHiZ = Math.min(other.maxZ(), target.maxZ());
+    double ovLoX = Math.max(other.minX(), target.minX());
+    double ovHiX = Math.min(other.maxX(), target.maxX());
+    boolean zOverlap = ovHiZ - ovLoZ > EPS;
+    boolean xOverlap = ovHiX - ovLoX > EPS;
+    // Classic face, or flush on the other axis with a positive gap on this one.
+    boolean faceEW = sepX
+      && ((!sepZ && zOverlap) || (sepZ && gapZ <= EPS && gapX > EPS));
+    boolean faceNS = sepZ
+      && ((!sepX && xOverlap) || (sepX && gapX <= EPS && gapZ > EPS));
+
+    int punchesBefore = punches.size();
+    if (faceEW) {
+      // Flush-Z uses rival undilated Z; classic face uses overlap ± halfW.
+      double bandLoZ = zOverlap ? ovLoZ - halfW : other.minZ();
+      double bandHiZ = zOverlap ? ovHiZ + halfW : other.maxZ();
+      RectMath.Rect band = new RectMath.Rect(
+        Math.min(exposed.minX(), otherDilated.minX()), bandLoZ,
+        Math.max(exposed.maxX(), otherDilated.maxX()), bandHiZ);
+      RectMath.Rect subspan = intersect3(exposed, otherDilated, band);
+      if (subspan != null) {
+        double mid = sepWest
+          ? (other.maxX() + target.minX()) / 2.0
+          : (target.maxX() + other.minX()) / 2.0;
+        punchRivalSideOfMidX(subspan, sepWest, mid, punches);
+      }
+    }
+    if (faceNS) {
+      double bandLoX = xOverlap ? ovLoX - halfW : other.minX();
+      double bandHiX = xOverlap ? ovHiX + halfW : other.maxX();
+      RectMath.Rect band = new RectMath.Rect(
+        bandLoX, Math.min(exposed.minZ(), otherDilated.minZ()),
+        bandHiX, Math.max(exposed.maxZ(), otherDilated.maxZ()));
+      RectMath.Rect subspan = intersect3(exposed, otherDilated, band);
+      if (subspan != null) {
+        double mid = sepSouth
+          ? (other.maxZ() + target.minZ()) / 2.0
+          : (target.maxZ() + other.minZ()) / 2.0;
+        punchRivalSideOfMidZ(subspan, sepSouth, mid, punches);
+      }
+    }
+    if (sepX || sepZ) {
+      addConservativeCornerSquares(exposed, target, other, punches);
+    }
+
+    if (punches.size() == punchesBefore) {
+      RectMath.Rect aabb = RectMath.intersectRect(exposed, new RectMath.Rect(
+        other.minX(), other.minZ(), other.maxX(), other.maxZ()));
+      if (aabb != null) {
+        punches.add(aabb);
+      }
+    }
+  }
+
+  /** Punch the rival's half of a vertical midplane (split on X) inside subspan. */
+  private static void punchRivalSideOfMidX(RectMath.Rect subspan, boolean rivalIsWest,
+      double mid, List<RectMath.Rect> punches) {
+    if (rivalIsWest) {
+      double hiX = Math.min(subspan.maxX(), mid);
+      if (hiX - subspan.minX() > EPS) {
+        punches.add(new RectMath.Rect(
+          subspan.minX(), subspan.minZ(), hiX, subspan.maxZ()));
+      }
+    } else {
+      double loX = Math.max(subspan.minX(), mid);
+      if (subspan.maxX() - loX > EPS) {
+        punches.add(new RectMath.Rect(
+          loX, subspan.minZ(), subspan.maxX(), subspan.maxZ()));
+      }
+    }
+  }
+
+  /** Punch the rival's half of a horizontal midplane (split on Z) inside subspan. */
+  private static void punchRivalSideOfMidZ(RectMath.Rect subspan, boolean rivalIsSouth,
+      double mid, List<RectMath.Rect> punches) {
+    if (rivalIsSouth) {
+      double hiZ = Math.min(subspan.maxZ(), mid);
+      if (hiZ - subspan.minZ() > EPS) {
+        punches.add(new RectMath.Rect(
+          subspan.minX(), subspan.minZ(), subspan.maxX(), hiZ));
+      }
+    } else {
+      double loZ = Math.max(subspan.minZ(), mid);
+      if (subspan.maxZ() - loZ > EPS) {
+        punches.add(new RectMath.Rect(
+          subspan.minX(), loZ, subspan.maxX(), subspan.maxZ()));
+      }
+    }
+  }
+
+  // Punch conservative squares on each rival corner whose outward orthant reaches
+  // the target. g = min of strictly positive gaps; a zero gap on one axis still
+  // allows a square sized by the other (flush + gap).
+  private static void addConservativeCornerSquares(RectMath.Rect exposed, WorldBox target,
+      WorldBox other, List<RectMath.Rect> punches) {
+    punchCornerSquare(exposed, target, other.maxX(), other.maxZ(), 1, 1, punches);
+    punchCornerSquare(exposed, target, other.minX(), other.maxZ(), -1, 1, punches);
+    punchCornerSquare(exposed, target, other.maxX(), other.minZ(), 1, -1, punches);
+    punchCornerSquare(exposed, target, other.minX(), other.minZ(), -1, -1, punches);
+  }
+
+  private static void punchCornerSquare(RectMath.Rect exposed, WorldBox target,
+      double cx, double cz, int dirX, int dirZ, List<RectMath.Rect> punches) {
+    double gx = dirX > 0 ? target.minX() - cx : cx - target.maxX();
+    double gz = dirZ > 0 ? target.minZ() - cz : cz - target.maxZ();
+    if (gx < -EPS || gz < -EPS) {
+      return;
+    }
+    double g = Double.POSITIVE_INFINITY;
+    if (gx > EPS) {
+      g = Math.min(g, gx);
+    }
+    if (gz > EPS) {
+      g = Math.min(g, gz);
+    }
+    if (!(g < Double.POSITIVE_INFINITY)) {
+      return;
+    }
+    double s = g * CORNER_SQUARE_FACTOR;
+    if (s <= EPS) {
+      return;
+    }
+    double x0 = dirX > 0 ? cx : cx - s;
+    double x1 = dirX > 0 ? cx + s : cx;
+    double z0 = dirZ > 0 ? cz : cz - s;
+    double z1 = dirZ > 0 ? cz + s : cz;
+    RectMath.Rect square = RectMath.intersectRect(exposed,
+      new RectMath.Rect(x0, z0, x1, z1));
+    if (square != null) {
+      punches.add(square);
+    }
+  }
+
+  private static RectMath.Rect intersect3(RectMath.Rect a, RectMath.Rect b, RectMath.Rect c) {
+    RectMath.Rect ab = RectMath.intersectRect(a, b);
+    if (ab == null) {
+      return null;
+    }
+    return RectMath.intersectRect(ab, c);
   }
 
   // Split an exposed standable rect so the parts that sit over a raised-outline
