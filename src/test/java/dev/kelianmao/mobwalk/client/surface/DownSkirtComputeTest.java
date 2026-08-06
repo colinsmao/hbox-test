@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Milestone 5 Step 2: the compute-side down-skirt extraction
- * ({@code SurfaceSelection.computeDownSkirts}) reproduces the old render-side
+ * ({@code DownSkirts.compute}) reproduces the old render-side
  * {@code openSpans}-minus-occluders logic on synthetic rects (no world). Behavior
  * must be pixel-identical, so these assert the exact drop sub-spans a rect edge
  * yields: a lone rect skirts all four edges fully; an equal-height merge seam is
@@ -33,7 +33,7 @@ final class DownSkirtComputeTest {
   @Test
   void loneRectSkirtsAllFourEdgesFully() {
     StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(), false);
+    List<SkirtSpan> spans = DownSkirts.compute(List.of(r), List.of(), false);
     assertEquals(4, spans.size());
     // -Z / +Z edges run along X over [0,1]; -X / +X edges run along Z over [0,1].
     SkirtSpan minZ = find(spans, true, false, 0.0);
@@ -55,7 +55,7 @@ final class DownSkirtComputeTest {
     // edge drops no skirt; the four outer edges do.
     StandableRect left = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect right = new StandableRect(1, 0, 2, 1, 64.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(left, right), List.of(), false);
+    List<SkirtSpan> spans = DownSkirts.compute(List.of(left, right), List.of(), false);
     // left's +X edge (x = 1) and right's -X edge (x = 1) are both fully shared.
     assertTrue(find(spans, false, true, 1.0) == null, "left +X seam suppressed");
     assertTrue(find(spans, false, false, 1.0) == null, "right -X seam suppressed");
@@ -70,7 +70,7 @@ final class DownSkirtComputeTest {
     // only z in [0,0.4]: the +X edge drops a skirt only over the unshared z [0.4,1].
     StandableRect big = new StandableRect(0, 0, 2, 1, 64.0);
     StandableRect sliver = new StandableRect(2, 0, 3, 0.4, 64.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(big, sliver), List.of(), false);
+    List<SkirtSpan> spans = DownSkirts.compute(List.of(big, sliver), List.of(), false);
     // Big's +X edge (x = 2) leftover after the [0,0.4] seam -> [0.4,1].
     SkirtSpan remainder = null;
     for (SkirtSpan s : spans) {
@@ -92,7 +92,7 @@ final class DownSkirtComputeTest {
     StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
     SkirtSpan wall = new SkirtSpan(false, true, 1.0, 0.0, 1.0, 64.0, 64.0,
       SkirtSpan.Direction.UP, 1.0);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(r), List.of(wall), false);
+    List<SkirtSpan> spans = DownSkirts.compute(List.of(r), List.of(wall), false);
     assertTrue(find(spans, false, true, 1.0) == null, "+X edge is a wall, no down skirt");
     assertEquals(3, spans.size());
   }
@@ -107,11 +107,11 @@ final class DownSkirtComputeTest {
     StandableRect flush = new StandableRect(0, 0, 1, 1, 64.9375, 64.9375);
     StandableRect raised = new StandableRect(1, 0, 2, 1, 64.9375, 65.0);
     List<SkirtSpan> drop =
-      SurfaceSelection.computeDownSkirts(List.of(flush, raised), List.of(), false);
+      DownSkirts.compute(List.of(flush, raised), List.of(), false);
     assertTrue(find(drop, false, true, 1.0) == null, "collision seam: no drop skirt (flush +X)");
     assertTrue(find(drop, false, false, 1.0) == null, "collision seam: no drop skirt (raised -X)");
     List<SkirtSpan> skirts =
-      SurfaceSelection.computeDownSkirts(List.of(flush, raised), List.of(), true);
+      DownSkirts.compute(List.of(flush, raised), List.of(), true);
     assertTrue(find(skirts, false, true, 1.0) == null, "flush faces taller neighbour: no reverse skirt");
     SkirtSpan step = find(skirts, false, false, 1.0);
     assertTrue(step != null, "visible step: raised -X skirts toward flush");
@@ -128,7 +128,7 @@ final class DownSkirtComputeTest {
       new StandableRect(0, 0, 2, 1, 1.0, 1.0),
       new StandableRect(1, 0, 3, 1, 1.0, 1.25)));
     List<SkirtSpan> drops =
-      SurfaceSelection.computeDownSkirts(merged, List.of(), false);
+      DownSkirts.compute(merged, List.of(), false);
     assertTrue(find(drops, false, true, 1.0) == null,
       "shared rim at x=1 must not be a collision drop after merge");
     assertTrue(find(drops, false, false, 1.0) == null,
@@ -143,7 +143,7 @@ final class DownSkirtComputeTest {
     StandableRect remnant = new StandableRect(0, 0, 1, 1, 64.875, 65.0);
     StandableRect lip = new StandableRect(1, 0, 2, 1, 64.9375, 65.0);
     List<SkirtSpan> skirts =
-      SurfaceSelection.computeDownSkirts(List.of(remnant, lip), List.of(), true);
+      DownSkirts.compute(List.of(remnant, lip), List.of(), true);
     assertTrue(find(skirts, false, true, 1.0) == null, "no visible step -> no skirt (remnant +X)");
     assertTrue(find(skirts, false, false, 1.0) == null, "no visible step -> no skirt (lip -X)");
   }
@@ -155,7 +155,7 @@ final class DownSkirtComputeTest {
     StandableRect low = new StandableRect(0, 0, 1, 1, 64.0);
     StandableRect high = new StandableRect(1, 0, 2, 1, 65.0);
     List<SkirtSpan> skirts =
-      SurfaceSelection.computeDownSkirts(List.of(low, high), List.of(), true);
+      DownSkirts.compute(List.of(low, high), List.of(), true);
     SkirtSpan step = find(skirts, false, false, 1.0);
     assertTrue(step != null, "high -X faces a drop onto low");
     assertEquals(1.0, step.maxExtent(), EPS);
@@ -164,7 +164,7 @@ final class DownSkirtComputeTest {
   @Test
   void waterRectDownSkirtsCarryWaterHazard() {
     StandableRect water = new StandableRect(0, 0, 1, 1, 64.0, 64.0, HazardClass.WATER);
-    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(water), List.of(), false);
+    List<SkirtSpan> spans = DownSkirts.compute(List.of(water), List.of(), false);
     assertEquals(4, spans.size());
     for (SkirtSpan s : spans) {
       assertEquals(HazardClass.WATER, s.hazard());

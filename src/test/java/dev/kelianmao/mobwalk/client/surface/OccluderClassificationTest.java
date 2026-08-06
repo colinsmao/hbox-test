@@ -38,7 +38,7 @@ final class OccluderClassificationTest {
 
   private static List<SkirtSpan> classify(StandableRect r, double halfW, double height, WorldBox... boxes) {
     List<SkirtSpan> out = new ArrayList<>();
-    SurfaceSelection.occluderSpansForRect(r, List.of(boxes), halfW, height, false, out);
+    OccluderSkirts.occluderSpansForRect(r, List.of(boxes), halfW, height, false, out);
     return out;
   }
 
@@ -102,7 +102,7 @@ final class OccluderClassificationTest {
     // taking the taller occluder top.
     StandableRect floor = new StandableRect(0, 0, 1, 1, 64.0);
     List<SkirtSpan> spans = classify(floor, 0.0, 2.0, block(1, 64, 0), block(1, 65, 0));
-    List<SkirtSpan> merged = SurfaceSelection.mergeOccluderSpans(spans);
+    List<SkirtSpan> merged = OccluderSkirts.mergeOccluderSpans(spans);
     assertEquals(1, merged.size());
     assertEquals(2.0, merged.get(0).maxExtent(), EPS); // stop at 66 − base 64
   }
@@ -115,7 +115,7 @@ final class OccluderClassificationTest {
       SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.WATER);
     SkirtSpan lava = new SkirtSpan(false, true, 1.0, 1.0, 2.0, 64.0, 64.0,
       SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.LAVA);
-    List<SkirtSpan> merged = SurfaceSelection.mergeOccluderSpans(List.of(water, lava));
+    List<SkirtSpan> merged = OccluderSkirts.mergeOccluderSpans(List.of(water, lava));
     assertEquals(2, merged.size());
     assertEquals(HazardClass.WATER, merged.get(0).hazard());
     assertEquals(HazardClass.LAVA, merged.get(1).hazard());
@@ -127,7 +127,7 @@ final class OccluderClassificationTest {
       SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.WATER);
     SkirtSpan b = new SkirtSpan(false, true, 1.0, 1.0, 2.0, 64.0, 64.0,
       SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.WATER);
-    List<SkirtSpan> merged = SurfaceSelection.mergeOccluderSpans(List.of(a, b));
+    List<SkirtSpan> merged = OccluderSkirts.mergeOccluderSpans(List.of(a, b));
     assertEquals(1, merged.size());
     assertEquals(0.0, merged.get(0).lo(), EPS);
     assertEquals(2.0, merged.get(0).hi(), EPS);
@@ -153,13 +153,13 @@ final class OccluderClassificationTest {
     StandableRect soul = new StandableRect(0, 0, 1, 1, 64.875, 65.0);
     WorldBox path = new WorldBox(1, 0, 0, 1, 0, 2, 1, 0.0, 64.9375);
     List<SkirtSpan> collision = new ArrayList<>();
-    SurfaceSelection.occluderSpansForRect(soul, List.of(path), 0.0, 0.0, false, collision);
+    OccluderSkirts.occluderSpansForRect(soul, List.of(path), 0.0, 0.0, false, collision);
     assertEquals(1, collision.size());
     assertTrue(collision.get(0).isUp());
     assertEquals(64.9375 - 64.875, collision.get(0).maxExtent(), EPS);
 
     List<SkirtSpan> visual = new ArrayList<>();
-    SurfaceSelection.occluderSpansForRect(soul, List.of(path), 0.0, 0.0, true, visual);
+    OccluderSkirts.occluderSpansForRect(soul, List.of(path), 0.0, 0.0, true, visual);
     assertTrue(visual.isEmpty(), "path below paint rim must not emit a visual UP");
   }
 
@@ -184,19 +184,19 @@ final class OccluderClassificationTest {
 
     List<SkirtSpan> collisionOcc = new ArrayList<>();
     for (StandableRect r : merged) {
-      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, false, collisionOcc);
+      OccluderSkirts.occluderSpansForRect(r, boxes, halfW, height, false, collisionOcc);
     }
-    collisionOcc = SurfaceSelection.mergeOccluderSpans(collisionOcc);
+    collisionOcc = OccluderSkirts.mergeOccluderSpans(collisionOcc);
     List<SkirtSpan> dropEdges =
-      SurfaceSelection.computeDownSkirts(merged, collisionOcc, false);
+      DownSkirts.compute(merged, collisionOcc, false);
 
     List<SkirtSpan> visualOcc = new ArrayList<>();
     for (StandableRect r : merged) {
-      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, true, visualOcc);
+      OccluderSkirts.occluderSpansForRect(r, boxes, halfW, height, true, visualOcc);
     }
-    visualOcc = SurfaceSelection.mergeOccluderSpans(visualOcc);
+    visualOcc = OccluderSkirts.mergeOccluderSpans(visualOcc);
     List<SkirtSpan> visualDowns =
-      SurfaceSelection.computeDownSkirts(merged, visualOcc, true);
+      DownSkirts.compute(merged, visualOcc, true);
 
     // Soul remnant +X at the set-back x=0.7: collision UP claims it; no collision drop.
     boolean collisionUpAtSetback = false;
@@ -257,7 +257,7 @@ final class OccluderClassificationTest {
       }
       return List.of();
     };
-    List<SkirtSpan> wallSpans = SurfaceSelection.computeOccludersFrom(
+    List<SkirtSpan> wallSpans = OccluderSkirts.computeFrom(
       wallWorld, 0, 256, List.of(floor), point);
     assertEquals(1, wallSpans.size());
     assertTrue(wallSpans.get(0).isUp());
@@ -268,7 +268,7 @@ final class OccluderClassificationTest {
       }
       return List.of();
     };
-    List<SkirtSpan> waterSpans = SurfaceSelection.computeOccludersFrom(
+    List<SkirtSpan> waterSpans = OccluderSkirts.computeFrom(
       waterWorld, 0, 256, List.of(floor), point);
     assertTrue(waterSpans.isEmpty());
   }

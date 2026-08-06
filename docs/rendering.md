@@ -223,7 +223,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   square) to dodge z-fighting the coplanar terrain face (`Y_OFFSET` is likewise 0.002).
   *Skirts are square, not splayed: a trapezoidal/dilated skirt clips the block's upper
   edge and re-introduces overlap.*
-- **Skirt-diff, computed compute-side (`computeDownSkirts` / down `SkirtSpan`).** Any
+- **Skirt-diff, computed compute-side (`DownSkirts.compute` / down `SkirtSpan`).** Any
   rectangle partition of a holed / L-shaped level has *internal* edges between
   equal-height pieces; a skirt there is a **false interior wall** (and depth-testing
   can't hide it where it overhangs air near a hole). So each edge is skirted only over
@@ -234,7 +234,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   remainder); true drops / hole outlines / unshared remainders keep their skirts.
   Abutting **lower** reached surfaces set `maxExtent` on those leftovers (gap to the
   lower face); open drops stay unlimited. It is computed **compute-side once per
-  select** (`SurfaceSelection.computeDownSkirts`) and published as down `SkirtSpan`s
+  select** (`DownSkirts.compute`) and published as down `SkirtSpan`s
   (edge orientation, side, line, `[lo,hi]`, base `T`, `maxExtent`), which `emit` just
   draws — one pass per select keeps large/bumpy selections smooth (the alternative, an
   `O(n²)` `openSpans` scan over the merged rects every frame, hitches). This is the
@@ -244,7 +244,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   surface edge bordering a **wall** (box rising above the rim) or **ceiling**
   (overhang in headroom) is not a drop, so it gets an **upward** skirt instead.
   Occluders use the same dual rim as downs (collision for holes, visual for paint;
-  `maxExtent = wallTop − rim`). Compute-side once per wand (`computeOccluders`);
+  `maxExtent = wallTop − rim`). Compute-side once per wand (`OccluderSkirts.compute`);
   published UPs are the visual-rim list when raises are active. Downs subtract the
   matching-rim occluder spans so an edge is never double-skirted; `emit` draws both
   via `emitSkirts` (`length = min(Appearance height, maxExtent)`). Spans carry
@@ -298,11 +298,11 @@ the published snapshots into `SurfaceEmitter.emit`.
   Appearance `holeBeamColor`. Appearance `showHoleBeams` (default on) gates
   drawing; `holeBeamColor` supplies RGB and alpha (uniform along the beam). Benign
   drops keep their ordinary down-skirt and get **no** beam.
-  Drop spans on the **frontier** (`SkirtSpan.frontier()`) are skipped by `computeHoles`
+  Drop spans on the **frontier** (`SkirtSpan.frontier()`) are skipped by `HoleBeams.compute`
   — they are depth-cutoff artifacts, not real geometry (without this, the entire
   perimeter drew a hole-beam wall).
-  The hole spans are classified **compute-side** (`SurfaceSelection.computeHoles` +
-  `holeSubSpans`, published as `HoleSpan`) and `emit` just draws them (`emitHoles`).
+  The hole spans are classified **compute-side** (`HoleBeams.compute` +
+  `holeSubSpans`, published as `BeamSpan`) and `emit` draws them via `emitBeam`.
   Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
   an edge and emits a beam only over the unreached sub-intervals. One beam is drawn per
   hole edge-span, so a long dangerous rim reads as a row of beams clearly marking every
@@ -331,7 +331,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   skirt draw (`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** skirt spans
   (`emitSkirts`, from `SkirtSpan` UP/DOWN lists; length `min(Appearance height,
   maxExtent)`; fade over Appearance height so a clip keeps tip alpha; frontier spans
-  suppressed), and the **hole beams** (`emitHoles`, from `HoleSpan`, into the
+  suppressed), and the **hole beams** (`emitBeam`, from `BeamSpan`, into the
   depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`) —
   emit draws only the published spans — and the double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
@@ -357,19 +357,20 @@ the published snapshots into `SurfaceEmitter.emit`.
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
   `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
   `exposeBox` (the `(T, T+H]` standing-column predicate, calling
-  `RectMath.subtractRects`), the
-  **compute-side skirt classification** (`computeOccluders` /
-  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`, and
-  `computeDownSkirts` / `edgeDownSpans` / land-clamped `maxExtent`, published as
-  up and down `SkirtSpan` lists), the **hole
-  classification** (`classifyDrop` — pure: HOLE unless a reached surface lies
-  strictly below the rim across the `FallColumn`, and then HOLE anyway if a standable
-  **ledge** sits between the rim and that floor; reachability is reached-set membership,
-  the ledge scan reuses `exposeBox` — and `computeHoles` / `gatherLedges` /
-  `holeSubSpans`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
-  the line-crossing reached rects' bounds and published as `HoleSpan`),
-  and the extraction-thread-only (non-thread-safe) contract.
+  `RectMath.subtractRects`), orchestration of the peer passes below, and the
+  extraction-thread-only (non-thread-safe) contract.
   **The geometry/algorithm lives in [`geometry.md`](geometry.md); read it first.**
+- `OccluderSkirts.java`: compute-side UP skirt classification (`compute` /
+  `occluderSpansForRect` / `wallOccluder` / `mergeOccluderSpans`), published as up
+  `SkirtSpan`s.
+- `DownSkirts.java`: compute-side DOWN skirts (`compute` / `edgeDownSpans` /
+  land-clamped `maxExtent`), published as down `SkirtSpan`s.
+- `HoleBeams.java`: hole classification (`classifyDrop` — pure: HOLE unless a reached
+  surface lies strictly below the rim across the `FallColumn`, and then HOLE anyway if
+  a standable **ledge** sits between the rim and that floor; reachability is reached-set
+  membership, the ledge scan reuses `exposeBox` — and `compute` / `gatherLedges` /
+  `holeSubSpans`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
+  the line-crossing reached rects' bounds and published as `BeamSpan`).
 - `WorldOverlayManager.java`: three-layer setup (depth-off `FILLED` tops,
   depth-on `SKIRT`, depth-off `BEAM` last), single draw at `AFTER_TRANSLUCENT_TERRAIN` (ice/honey
   composite; pond bottoms via crouch — see the translucent-phase decision),

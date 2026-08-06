@@ -57,7 +57,7 @@ public final class SurfaceEmitter {
   public static void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer,
       BufferBuilder skirtBuffer, BufferBuilder beamBuffer,
       List<StandableRect> rects, List<SkirtSpan> occluders,
-      List<SkirtSpan> downSkirts, List<HoleSpan> holes,
+      List<SkirtSpan> downSkirts, List<BeamSpan> holes,
       boolean crouching) {
     if (rects.isEmpty()) {
       return;
@@ -109,46 +109,44 @@ public final class SurfaceEmitter {
     emitHoles(holeBuffer, positionMatrix, holes);
   }
 
-  // Draw a vertical beam rising from each hole span's rim (baseY), clamped to a
-  // fixed world height, at holeBeamColor opacity. Caller picks beam vs skirt
-  // buffer (Appearance showBeamsThroughWalls).
+  // Hole beams are only published for non-frontier drops (HoleBeams.compute skips
+  // frontier skirts), so no cutoff suppress is needed here.
   private static void emitHoles(BufferBuilder holeBuffer, Matrix4fc positionMatrix,
-      List<HoleSpan> spans) {
-    if (!Configs.showHoleBeams()) {
-      return;
-    }
-    if (spans.isEmpty()) {
+      List<BeamSpan> holes) {
+    if (!Configs.showHoleBeams() || holes.isEmpty()) {
       return;
     }
     Color4f beam = Configs.holeBeamColor();
-    float r = beam.r;
-    float g = beam.g;
-    float b = beam.b;
-    float a = beam.a;
-    // Hole spans are only published for non-frontier drops (computeHoles skips
-    // frontier skirts), so no cutoff suppress is needed here.
-    for (HoleSpan h : spans) {
-      // Rise from the rim's render height (visualBaseY).
-      float base = (float) h.visualBaseY();
-      float top = base + BEAM_HEIGHT;
-      float xa;
-      float za;
-      float xb;
-      float zb;
-      if (h.alongX()) {
-        xa = (float) h.lo();
-        xb = (float) h.hi();
-        za = (float) h.line();
-        zb = (float) h.line();
-      } else {
-        za = (float) h.lo();
-        zb = (float) h.hi();
-        xa = (float) h.line();
-        xb = (float) h.line();
-      }
-      vQuad(holeBuffer, positionMatrix, xa, za, xb, zb, top, base,
-        r, g, b, a, a);
+    for (BeamSpan h : holes) {
+      emitBeam(holeBuffer, positionMatrix, h.alongX(), h.line(), h.lo(), h.hi(),
+        h.visualBaseY(), beam);
     }
+  }
+
+  // Shared vertical beam drawer for hole (and later hazard) rim markers. Caller
+  // picks buffer (Appearance showBeamsThroughWalls) and color; rise is fixed
+  // BEAM_HEIGHT from visualBaseY.
+  private static void emitBeam(BufferBuilder buffer, Matrix4fc positionMatrix,
+      boolean alongX, double line, double lo, double hi, double visualBaseY, Color4f color) {
+    float base = (float) visualBaseY;
+    float top = base + BEAM_HEIGHT;
+    float xa;
+    float za;
+    float xb;
+    float zb;
+    if (alongX) {
+      xa = (float) lo;
+      xb = (float) hi;
+      za = (float) line;
+      zb = (float) line;
+    } else {
+      za = (float) lo;
+      zb = (float) hi;
+      xa = (float) line;
+      xb = (float) line;
+    }
+    vQuad(buffer, positionMatrix, xa, za, xb, zb, top, base,
+      color.r, color.g, color.b, color.a, color.a);
   }
 
   // Draw published skirts (UP and DOWN) into the depth-tested layer. Length is

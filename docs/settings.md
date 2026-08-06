@@ -156,7 +156,7 @@ category name: `"Appearance"`.
 | `showLavaHazard` | `ConfigBoolean` | `true` | When on: lava surfaces use `lavaHazardColor`. When off: lava still draws but with `walkableColor`. |
 | `lavaHazardColor` | `ConfigColor` | `#B0E07020` (orange, ~69% alpha) | RGB+alpha for lava hazard fill when `showLavaHazard` is on. |
 | `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
-| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter.emitHoles` draws beams at hole rims. When off: beams are skipped. |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter` draws hole beams at trap rims via `emitBeam`. When off: beams are skipped. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 | `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `SurfaceEmitter`. |

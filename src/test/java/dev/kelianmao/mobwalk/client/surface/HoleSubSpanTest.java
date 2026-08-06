@@ -18,14 +18,14 @@ import org.junit.jupiter.api.Test;
 final class HoleSubSpanTest {
   private static final double EPS = 1.0e-6;
 
-  private static List<HoleSpan> run(SkirtSpan sp, List<StandableRect> reached,
+  private static List<BeamSpan> run(SkirtSpan sp, List<StandableRect> reached,
       List<StandableRect> ledges) {
-    List<HoleSpan> out = new ArrayList<>();
-    SurfaceSelection.holeSubSpans(sp, reached, ledges, out);
+    List<BeamSpan> out = new ArrayList<>();
+    HoleBeams.holeSubSpans(sp, reached, ledges, out);
     return out;
   }
 
-  private static List<HoleSpan> run(SkirtSpan sp, List<StandableRect> reached) {
+  private static List<BeamSpan> run(SkirtSpan sp, List<StandableRect> reached) {
     return run(sp, reached, List.of());
   }
 
@@ -35,22 +35,21 @@ final class HoleSubSpanTest {
     // nothing reached below -> exactly one hole sub-span [0,1].
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(1, 1, 2, 2, 60.0);
-    List<HoleSpan> holes = run(sp, List.of(reachedFloor));
+    List<BeamSpan> holes = run(sp, List.of(reachedFloor));
     assertEquals(1, holes.size());
-    HoleSpan h = holes.get(0);
+    BeamSpan h = holes.get(0);
     assertEquals(0.0, h.lo(), EPS);
     assertEquals(1.0, h.hi(), EPS);
     assertEquals(true, h.alongX());
-    assertEquals(true, h.maxSide());
     assertEquals(1.0, h.line(), EPS);
-    assertEquals(64.0, h.baseY(), EPS);
+    assertEquals(64.0, h.visualBaseY(), EPS);
   }
 
   @Test
   void fullyVoidEdgeCoalescesToOneSpan() {
     // Nothing reached below anywhere -> one hole span over the whole edge [0,2].
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
-    List<HoleSpan> holes = run(sp, List.of());
+    List<BeamSpan> holes = run(sp, List.of());
     assertEquals(1, holes.size());
     assertEquals(0.0, holes.get(0).lo(), EPS);
     assertEquals(2.0, holes.get(0).hi(), EPS);
@@ -62,7 +61,7 @@ final class HoleSubSpanTest {
     // void flanks [0,1] and [2,3] are separate holes.
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 3.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(1, 1, 2, 2, 60.0);
-    List<HoleSpan> holes = run(sp, List.of(reachedFloor));
+    List<BeamSpan> holes = run(sp, List.of(reachedFloor));
     assertEquals(2, holes.size());
     assertEquals(0.0, holes.get(0).lo(), EPS);
     assertEquals(1.0, holes.get(0).hi(), EPS);
@@ -75,7 +74,7 @@ final class HoleSubSpanTest {
     // A reached floor covers the entire footprint -> no holes.
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
-    List<HoleSpan> holes = run(sp, List.of(reachedFloor));
+    List<BeamSpan> holes = run(sp, List.of(reachedFloor));
     assertEquals(0, holes.size());
   }
 
@@ -86,7 +85,7 @@ final class HoleSubSpanTest {
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
     StandableRect ledge = new StandableRect(0, 1, 2, 2, 62.0);
-    List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
+    List<BeamSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
     assertEquals(1, holes.size());
     assertEquals(0.0, holes.get(0).lo(), EPS);
     assertEquals(2.0, holes.get(0).hi(), EPS);
@@ -99,7 +98,7 @@ final class HoleSubSpanTest {
     // classification change, so the whole edge stays one hole.
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect beside = new StandableRect(1, 1.5, 2, 2.5, 60.0);
-    List<HoleSpan> holes = run(sp, List.of(beside));
+    List<BeamSpan> holes = run(sp, List.of(beside));
     assertEquals(1, holes.size());
     assertEquals(0.0, holes.get(0).lo(), EPS);
     assertEquals(2.0, holes.get(0).hi(), EPS);
@@ -111,7 +110,7 @@ final class HoleSubSpanTest {
     SkirtSpan sp = new SkirtSpan(true, true, 1.0, 0.0, 2.0, 64.0, 64.0, SkirtSpan.Direction.DOWN, SkirtSpan.UNLIMITED);
     StandableRect reachedFloor = new StandableRect(0, 1, 2, 2, 60.0);
     StandableRect ledge = new StandableRect(3, 1, 4, 2, 62.0);
-    List<HoleSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
+    List<BeamSpan> holes = run(sp, List.of(reachedFloor), List.of(ledge));
     assertEquals(0, holes.size());
   }
 }

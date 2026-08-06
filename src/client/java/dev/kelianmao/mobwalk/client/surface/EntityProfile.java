@@ -19,7 +19,7 @@ package dev.kelianmao.mobwalk.client.surface;
  * climb to the higher, so the test reads {@code |dTopY| <= reach} (the absolute
  * value picks the lower one) and yields one <b>undirected</b> edge. Reachable is
  * therefore escapable, which is the guarantee hole classification spends; descent
- * is unbounded and lives in {@code SurfaceSelection.classifyDrop}. See
+ * is unbounded and lives in {@code HoleBeams.classifyDrop}. See
  * {@code docs/geometry.md} "Reachability model".
  *
  * <p>Living-entity builtins use {@link #DEFAULT_JUMP_REACH}; {@link #POINT} keeps

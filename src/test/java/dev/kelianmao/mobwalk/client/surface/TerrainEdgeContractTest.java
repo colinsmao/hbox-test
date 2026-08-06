@@ -231,12 +231,12 @@ final class TerrainEdgeContractTest {
     List<SkirtSpan> occluders = new ArrayList<>();
     for (StandableRect r : merged) {
     // Visual rim for painted UPs / visual downs.
-      SurfaceSelection.occluderSpansForRect(r, boxes, halfW, height, true, occluders);
+      OccluderSkirts.occluderSpansForRect(r, boxes, halfW, height, true, occluders);
     }
-    occluders = SurfaceSelection.mergeOccluderSpans(occluders);
+    occluders = OccluderSkirts.mergeOccluderSpans(occluders);
 
     List<SkirtSpan> down =
-      SurfaceSelection.computeDownSkirts(merged, occluders, true);
+      DownSkirts.compute(merged, occluders, true);
 
     boolean rowAlongX = fixture.direction() == RowDirection.PLUS_X
       || fixture.direction() == RowDirection.MINUS_X;

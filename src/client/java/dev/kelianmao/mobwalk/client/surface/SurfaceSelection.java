@@ -2,12 +2,9 @@ package dev.kelianmao.mobwalk.client.surface;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -62,8 +59,8 @@ import net.minecraft.world.level.Level;
  *
  * <p>For a gap of width {@code g} flanked by support, each side grows {@code W/2},
  * leaving {@code g - W} uncovered: {@code g <= W} bridges, {@code g > W} leaves a
- * hole — "can't fall into a hole smaller than yourself". (This stage shows only
- * the <em>geometry</em>; explicit hole detection is a later milestone.)
+ * hole — "can't fall into a hole smaller than yourself". Drop edges that trap the
+ * entity are labelled by {@link HoleBeams} after the flood.
  *
  * <p><b>Radius is a BFS depth limit</b> (max hop-count from the click origin), not a
  * spatial X/Z window: horizontal reach is unbounded; termination comes from the
@@ -112,7 +109,7 @@ public final class SurfaceSelection {
 
   // Shared lazy world-surface index: the per-column collision boxes found so far,
   // which block rows have been queried, and the memoized per-box exposure (tops).
-  // Both the flood (LazyFlood) and the ledge gather (gatherLedgesFrom) sit on this,
+  // The flood (LazyFlood) owns this index; HoleBeams.gatherLedgesFrom also uses it
   // so the occluder shell has ONE definition — occluderColumns in XZ, rows
   // floor(yMax)-1 .. floor(yMax+height)+1 in Y (the headroom extension) — and cannot
   // drift between the two callers. Reads the world only through ColumnBoxes.
@@ -218,7 +215,7 @@ public final class SurfaceSelection {
   // Hole spans for the last select: drop sub-spans with no reached surface below
   // (void, or unreached ground). Marked by a through-walls beam at the rim.
   // Replaced wholesale each select.
-  private List<HoleSpan> holes = List.of();
+  private List<BeamSpan> holes = List.of();
 
   // One-shot geometry dump for /mobwalk dump: when set, the next select() logs
   // reached/merged/occluders/skirts/holes then clears the flag. Armed by
@@ -262,8 +259,8 @@ public final class SurfaceSelection {
       debugReachedPreMerge = lazy.preMergeReached();
     }
     List<SkirtSpan> collisionOccluders =
-      computeOccluders(level, result, profile, swimmableFluids, false);
-    List<SkirtSpan> dropEdges = computeDownSkirts(result, collisionOccluders, false);
+      OccluderSkirts.compute(level, result, profile, swimmableFluids, false);
+    List<SkirtSpan> dropEdges = DownSkirts.compute(result, collisionOccluders, false);
     // Dual rim (same as downs): collision for holes; visual for paint when raised.
     boolean raisedVisual = false;
     if (computeVisualTop) {
@@ -276,14 +273,14 @@ public final class SurfaceSelection {
     }
     if (raisedVisual) {
       List<SkirtSpan> visualOccluders =
-        computeOccluders(level, result, profile, swimmableFluids, true);
-      downSkirts = computeDownSkirts(result, visualOccluders, true);
+        OccluderSkirts.compute(level, result, profile, swimmableFluids, true);
+      downSkirts = DownSkirts.compute(result, visualOccluders, true);
       occluders = visualOccluders;
     } else {
       downSkirts = dropEdges;
       occluders = collisionOccluders;
     }
-    holes = computeHoles(level, result, dropEdges, profile, swimmableFluids);
+    holes = HoleBeams.compute(level, result, dropEdges, profile, swimmableFluids);
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape,
         raisedVisual ? collisionOccluders : null);
@@ -314,11 +311,10 @@ public final class SurfaceSelection {
         s.baseY(), s.visualBaseY(), s.maxExtent());
     }
     MobWalk.LOGGER.info("[flood-debug] holes={}", holes.size());
-    for (HoleSpan s : holes) {
+    for (BeamSpan s : holes) {
       MobWalk.LOGGER.info(
-        "[flood-debug]   hole alongX={} maxSide={} line={} [{},{}] baseY={} visualBaseY={} fall={}",
-        s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(),
-        s.baseY(), s.visualBaseY(), s.fallDistance());
+        "[flood-debug]   hole alongX={} line={} [{},{}] visualBaseY={}",
+        s.alongX(), s.line(), s.lo(), s.hi(), s.visualBaseY());
     }
   }
 
@@ -367,7 +363,7 @@ public final class SurfaceSelection {
   }
 
   /** Immutable snapshot of the hole spans (through-walls beam markers) for the reached set. */
-  public List<HoleSpan> allHoles() {
+  public List<BeamSpan> allHoles() {
     return holes;
   }
 
@@ -594,616 +590,6 @@ public final class SurfaceSelection {
       (int) Math.floor(box.minZ() - w),
       (int) Math.ceil(box.maxZ() + w) - 1,
     };
-  }
-
-  // Grouping key for the occluder-span merge: orientation + side + line + base
-  // height + hazard, each double quantized to 1/1024 so collinear spans on the
-  // same edge at one height hash together (opposite sides at one coordinate stay
-  // distinct). Hazard keeps WATER|LAVA from coalescing into one color.
-  private record SpanGroupKey(boolean alongX, boolean maxSide, long line, long baseY,
-      HazardClass hazard) {
-  }
-
-  // True iff box is a wall/ceiling for rim: occludes, yMax > rim, and
-  // yMin <= rim+height. Fluids never mark up-skirts. height==0 is walls only;
-  // height>0 also admits ceilings in the standing column. <= on the lower bound
-  // (vs exposeBox's strict <) keeps Point's at-floor walls; abutment in
-  // occluderSpansForRect rejects own-floor cases. rim is collisionTopY or
-  // visualTopY (same dual key as computeDownSkirts).
-  static boolean wallOccluder(WorldBox b, double rim, double height) {
-    return b.occludes()
-      && b.yMax() > rim + EPS
-      && b.yMin() <= rim + height + EPS;
-  }
-
-  // Upward skirt spans where a wallOccluder abuts a dilated edge. visual selects
-  // the rim (collision vs paint); maxExtent = top − rim. Pure (candidates given).
-  static void occluderSpansForRect(StandableRect r, List<WorldBox> candidates,
-      double halfW, double height, boolean visual, List<SkirtSpan> out) {
-    double collisionTopY = r.collisionTopY();
-    double visualTopY = r.visualTopY();
-    double rim = visual ? visualTopY : collisionTopY;
-    int depth = r.depth();
-    boolean frontier = r.frontier();
-    HazardClass hazard = r.hazard();
-    for (WorldBox b : candidates) {
-      if (!wallOccluder(b, rim, height)) {
-        continue;
-      }
-      double oMinX = b.minX() - halfW;
-      double oMinZ = b.minZ() - halfW;
-      double oMaxX = b.maxX() + halfW;
-      double oMaxZ = b.maxZ() + halfW;
-      double extent = b.yMax() - rim;
-
-      double zLo = Math.max(oMinZ, r.minZ());
-      double zHi = Math.min(oMaxZ, r.maxZ());
-      if (zHi - zLo > EPS) {
-        if (Math.abs(oMinX - r.maxX()) < EPS) {
-          out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
-        }
-        if (Math.abs(oMaxX - r.minX()) < EPS) {
-          out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
-        }
-      }
-      double xLo = Math.max(oMinX, r.minX());
-      double xHi = Math.min(oMaxX, r.maxX());
-      if (xHi - xLo > EPS) {
-        if (Math.abs(oMinZ - r.maxZ()) < EPS) {
-          out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
-        }
-        if (Math.abs(oMaxZ - r.minZ()) < EPS) {
-          out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
-        }
-      }
-    }
-  }
-
-  // Coalesce occluder spans that are collinear (same orientation + edge line +
-  // base height) and overlap/abut along the edge into one span, taking the max
-  // occluder top — so stacked/adjacent occluder boxes don't emit overlapping
-  // double-blending up-skirts.
-  static List<SkirtSpan> mergeOccluderSpans(List<SkirtSpan> spans) {
-    if (spans.size() < 2) {
-      return spans;
-    }
-    Map<SpanGroupKey, List<SkirtSpan>> groups = new LinkedHashMap<>();
-    for (SkirtSpan s : spans) {
-      SpanGroupKey key = new SpanGroupKey(s.alongX(), s.maxSide(),
-        Math.round(s.line() * 1024.0), Math.round(s.baseY() * 1024.0), s.hazard());
-      groups.computeIfAbsent(key, k -> new ArrayList<>()).add(s);
-    }
-    List<SkirtSpan> out = new ArrayList<>();
-    for (List<SkirtSpan> group : groups.values()) {
-      group.sort(Comparator.comparingDouble(SkirtSpan::lo));
-      SkirtSpan head = group.get(0);
-      double lo = head.lo();
-      double hi = head.hi();
-      // Absolute wall stop (visualBase + extent); coalesce takes the max.
-      double stop = head.visualBaseY() + head.maxExtent();
-      // baseY is fixed per group (grouped on it); the visible base can differ
-      // when a raised block abuts a flush one, so take the max like stop.
-      double visualBase = head.visualBaseY();
-      // Coalesced spans can come from different surfaces (same edge line/height,
-      // different depth); take the min so the merged marker reads as the nearest
-      // surface's band (mirrors the max-stop handling above). Frontier only when
-      // every piece is frontier — an inner piece keeps the span drawable.
-      // Hazard is fixed per group (SpanGroupKey).
-      int spanDepth = head.depth();
-      boolean spanFrontier = head.frontier();
-      HazardClass spanHazard = head.hazard();
-      for (int i = 1; i < group.size(); i++) {
-        SkirtSpan s = group.get(i);
-        if (s.lo() <= hi + EPS) {
-          hi = Math.max(hi, s.hi());
-          stop = Math.max(stop, s.visualBaseY() + s.maxExtent());
-          visualBase = Math.max(visualBase, s.visualBaseY());
-          spanDepth = RectMath.minDepth(spanDepth, s.depth());
-          spanFrontier = spanFrontier && s.frontier();
-        } else {
-          out.add(new SkirtSpan(head.alongX(), head.maxSide(),
-            head.line(), lo, hi, head.baseY(), visualBase,
-            SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier, spanHazard));
-          lo = s.lo();
-          hi = s.hi();
-          stop = s.visualBaseY() + s.maxExtent();
-          visualBase = s.visualBaseY();
-          spanDepth = s.depth();
-          spanFrontier = s.frontier();
-          spanHazard = s.hazard();
-        }
-      }
-      out.add(new SkirtSpan(head.alongX(), head.maxSide(),
-        head.line(), lo, hi, head.baseY(), visualBase,
-        SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier, spanHazard));
-    }
-    return out;
-  }
-
-  // --- Milestone 5: drop-edge hole classification (pure) ---
-
-  enum DropClass {
-    HOLE, BENIGN
-  }
-
-  record DropClassification(DropClass kind, double fallDistance) {
-  }
-
-  /**
-   * Classify one drop sub-span. Pure: given the {@link FallColumn} the entity falls
-   * down, the flood's reached set, and any intermediate standable ledges between the
-   * edge and the reached floor, returns HOLE or BENIGN.
-   *
-   * <ol>
-   * <li>Find the topmost reached surface strictly below {@code collisionTopY} that
-   *     crosses the fall column. If none &rarr; HOLE (void / unreached ground).
-   * <li>If a reached floor exists at {@code landY}: check whether any surface in
-   *     {@code ledges} (dilated standable surfaces with top in {@code (landY,
-   *     collisionTopY)}) crosses the column. If yes &rarr; HOLE (entity lands on the
-   *     ledge and is trapped). If no &rarr; BENIGN (fall distance = collisionTopY &minus;
-   *     landY).
-   * </ol>
-   */
-  static DropClassification classifyDrop(FallColumn fall, double collisionTopY,
-      List<StandableRect> reached, List<StandableRect> ledges) {
-    StandableRect landing = null;
-    for (StandableRect r : reached) {
-      if (r.collisionTopY() >= collisionTopY - EPS) {
-        continue;
-      }
-      if (!fall.crosses(r)) {
-        continue;
-      }
-      if (landing == null || r.collisionTopY() > landing.collisionTopY()) {
-        landing = r;
-      }
-    }
-    if (landing == null) {
-      return new DropClassification(DropClass.HOLE, 0.0);
-    }
-    double landY = landing.collisionTopY();
-    for (StandableRect ledge : ledges) {
-      if (ledge.collisionTopY() <= landY + EPS || ledge.collisionTopY() >= collisionTopY - EPS) {
-        continue;
-      }
-      if (!fall.crosses(ledge)) {
-        continue;
-      }
-      return new DropClassification(DropClass.HOLE, collisionTopY - ledge.collisionTopY());
-    }
-    return new DropClassification(DropClass.BENIGN, collisionTopY - landY);
-  }
-
-  // Compute the downward drop-skirt spans of the whole reached set, once per
-  // select. For each merged rect edge: the edge minus the parts covered by an
-  // equal-height neighbour abutting across it (a merge seam, not a drop) minus the
-  // occluder (wall/ceiling) sub-spans on that edge (they get an upward skirt), the
-  // leftover being the genuine drop sub-spans. This replaces the old per-frame
-  // render-side scan (openSpans/upIntervalsOnEdge, O(n^2) every frame) with one
-  // compute-side pass; the result must be pixel-identical. Package-private for unit
-  // tests (synthetic rects, no world).
-  // visual=false keys the seam/occluder-coverage tests on collisionTopY — the
-  // genuine collision drop edges, which are the hole-classifier substrate. visual=true
-  // keys them on visualTopY (the render height), so a visible step between two rects at
-  // the same collisionTopY but different visualTopY (a path lip drawn on a soul-sand
-  // cube top) gets its skirt, while abutting rects at the same visualTopY do not. Two
-  // passes over one merged set: skirts are a rendering pass, holes a geometry pass (see
-  // docs/geometry.md "Visible-face top vs collision top").
-  static List<SkirtSpan> computeDownSkirts(List<StandableRect> rects,
-      List<SkirtSpan> occluders, boolean visual) {
-    List<SkirtSpan> out = new ArrayList<>();
-    for (StandableRect r : rects) {
-      edgeDownSpans(rects, occluders, r, true, false, visual, out);  // -Z edge
-      edgeDownSpans(rects, occluders, r, true, true, visual, out);   // +Z edge
-      edgeDownSpans(rects, occluders, r, false, false, visual, out); // -X edge
-      edgeDownSpans(rects, occluders, r, false, true, visual, out);  // +X edge
-    }
-    return out;
-  }
-
-  // Append the drop sub-spans of one rect edge (see computeDownSkirts). alongX: the
-  // edge runs along X at a fixed Z; maxSide: the +axis edge (line = the rect's max
-  // coordinate on the perpendicular axis). Coverage from equal-or-higher neighbours
-  // and from occluder spans on this edge is subtracted; abutting *lower* neighbours
-  // set maxExtent on leftover intervals (rimKey − neighbourKey) so the curtain stops
-  // at that surface. Open leftovers stay UNLIMITED.
-  private static void edgeDownSpans(List<StandableRect> rects, List<SkirtSpan> occluders,
-      StandableRect r, boolean alongX, boolean maxSide, boolean visual, List<SkirtSpan> out) {
-    double lo = alongX ? r.minX() : r.minZ();
-    double hi = alongX ? r.maxX() : r.maxZ();
-    double line = alongX ? (maxSide ? r.maxZ() : r.minZ()) : (maxSide ? r.maxX() : r.minX());
-    // The height two rects/occluders must share to count as a continuation (seam)
-    // rather than a step: collisionTopY for the drop pass, visualTopY for the skirt
-    // pass. Only this key differs between the passes; the geometry is identical.
-    double rKey = visual ? r.visualTopY() : r.collisionTopY();
-
-    List<double[]> covered = new ArrayList<>();
-    // Abutting lower neighbours: [overlapLo, overlapHi, neighbourKey]. Used to clamp
-    // leftover drop intervals to the gap (tallest lower key wins when several overlap).
-    List<double[]> lands = new ArrayList<>();
-    for (StandableRect nb : rects) {
-      if (nb == r) {
-        continue;
-      }
-      boolean abuts;
-      double clo;
-      double chi;
-      if (alongX) {
-        abuts = Math.abs((maxSide ? nb.minZ() - r.maxZ() : nb.maxZ() - r.minZ())) < EPS;
-        clo = Math.max(nb.minX(), r.minX());
-        chi = Math.min(nb.maxX(), r.maxX());
-      } else {
-        abuts = Math.abs((maxSide ? nb.minX() - r.maxX() : nb.maxX() - r.minX())) < EPS;
-        clo = Math.max(nb.minZ(), r.minZ());
-        chi = Math.min(nb.maxZ(), r.maxZ());
-      }
-      if (!abuts || chi - clo <= EPS) {
-        continue;
-      }
-      // Collision pass: equal collisionTopY is a merge seam. Visual pass: equal visualTopY
-      // is a flush continuation, and a *higher* visual neighbour is a taller face
-      // the lower side must not hang a down-skirt into (the high side still skirts;
-      // the low side already has / will get an up-skirt when collision rises).
-      // A *lower* neighbour is a land stop for the high side's leftover drop.
-      double nbKey = visual ? nb.visualTopY() : nb.collisionTopY();
-      if (visual) {
-        if (nbKey < rKey - EPS) {
-          lands.add(new double[] {clo, chi, nbKey});
-        } else {
-          covered.add(new double[] {clo, chi});
-        }
-      } else if (Math.abs(nbKey - rKey) <= EPS) {
-        covered.add(new double[] {clo, chi});
-      } else if (nbKey < rKey - EPS) {
-        lands.add(new double[] {clo, chi, nbKey});
-      }
-    }
-    for (SkirtSpan s : occluders) {
-      if (s.alongX() != alongX || s.maxSide() != maxSide) {
-        continue;
-      }
-      if (Math.abs(s.line() - line) > EPS
-          || Math.abs((visual ? s.visualBaseY() : s.baseY()) - rKey) > EPS) {
-        continue;
-      }
-      double clo = Math.max(s.lo(), lo);
-      double chi = Math.min(s.hi(), hi);
-      if (chi - clo > EPS) {
-        covered.add(new double[] {clo, chi});
-      }
-    }
-
-    for (double[] iv : RectMath.subtractIntervals(lo, hi, covered)) {
-      appendLandClampedDownSpans(alongX, maxSide, line, iv[0], iv[1], r, rKey, lands, out);
-    }
-  }
-
-  // Split one uncovered drop interval at land breakpoints; each piece gets
-  // maxExtent = rKey − tallest overlapping lower neighbour key, or UNLIMITED.
-  // Adjacent pieces with the same extent are coalesced (several coplanar lower
-  // rects along one edge must not shatter a single curtain).
-  private static void appendLandClampedDownSpans(boolean alongX, boolean maxSide, double line,
-      double lo, double hi, StandableRect r, double rKey, List<double[]> lands,
-      List<SkirtSpan> out) {
-    List<Double> breaks = new ArrayList<>();
-    breaks.add(lo);
-    breaks.add(hi);
-    for (double[] land : lands) {
-      double clo = land[0];
-      double chi = land[1];
-      if (chi <= lo + EPS || clo >= hi - EPS) {
-        continue;
-      }
-      if (clo > lo + EPS && clo < hi - EPS) {
-        breaks.add(clo);
-      }
-      if (chi > lo + EPS && chi < hi - EPS) {
-        breaks.add(chi);
-      }
-    }
-    breaks.sort(Double::compareTo);
-    List<Double> unique = new ArrayList<>();
-    for (double b : breaks) {
-      if (unique.isEmpty() || Math.abs(unique.get(unique.size() - 1) - b) > EPS) {
-        unique.add(b);
-      }
-    }
-
-    double runLo = Double.NaN;
-    double runHi = Double.NaN;
-    double runExtent = Double.NaN;
-    for (int i = 0; i + 1 < unique.size(); i++) {
-      double a = unique.get(i);
-      double b = unique.get(i + 1);
-      if (b - a <= EPS) {
-        continue;
-      }
-      double stopKey = Double.NEGATIVE_INFINITY;
-      for (double[] land : lands) {
-        if (land[1] <= a + EPS || land[0] >= b - EPS) {
-          continue;
-        }
-        stopKey = Math.max(stopKey, land[2]);
-      }
-      double maxExtent = stopKey > Double.NEGATIVE_INFINITY / 2.0
-        ? rKey - stopKey
-        : SkirtSpan.UNLIMITED;
-      if (maxExtent <= EPS && maxExtent != SkirtSpan.UNLIMITED) {
-        continue;
-      }
-      if (!Double.isNaN(runLo)
-          && Math.abs(a - runHi) <= EPS
-          && sameExtent(runExtent, maxExtent)) {
-        runHi = b;
-        continue;
-      }
-      if (!Double.isNaN(runLo)) {
-        out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-          SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier(), r.hazard()));
-      }
-      runLo = a;
-      runHi = b;
-      runExtent = maxExtent;
-    }
-    if (!Double.isNaN(runLo)) {
-      out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-        SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier(), r.hazard()));
-    }
-  }
-
-  private static boolean sameExtent(double a, double b) {
-    if (Double.isInfinite(a) || Double.isInfinite(b)) {
-      return a == b;
-    }
-    return Math.abs(a - b) <= EPS;
-  }
-
-  // Classify each drop span and return the hole sub-spans (through-walls beam
-  // candidates). For each drop span: (1) check if a reached surface exists below
-  // across the fall column, (2) if yes, scan the world between collisionTopY and landY for
-  // intermediate standable surfaces (ledges) via exposeBox — if any cross the
-  // column, the entity gets trapped on the ledge -> HOLE. Because one edge can
-  // span several verdicts, the span is SUBDIVIDED at reached-rect boundaries into
-  // homogeneous sub-spans. Runs once per select (not per frame).
-  private List<HoleSpan> computeHoles(Level level, List<StandableRect> rects,
-      List<SkirtSpan> drops, EntityProfile profile, boolean swimmableFluids) {
-    if (drops.isEmpty()) {
-      return List.of();
-    }
-    double halfW = profile.width() / 2.0;
-    double height = profile.height();
-    List<HoleSpan> out = new ArrayList<>();
-    List<StandableRect> ledges = new ArrayList<>();
-    for (SkirtSpan sp : drops) {
-      if (sp.frontier()) {
-        continue;
-      }
-      FallColumn fall = FallColumn.of(sp);
-      ledges.clear();
-      gatherLedges(level, fall, sp.baseY(), rects, halfW, height, ledges, swimmableFluids);
-      holeSubSpans(sp, rects, ledges, out);
-    }
-    return out;
-  }
-
-  // Pure: subdivide one drop span into homogeneous sub-spans (at reached-rect
-  // boundaries), classify each via classifyDrop (with ledge check), and append the
-  // contiguous HOLE pieces (coalesced) as HoleSpans. A single edge can span reached
-  // and unreached ground, so classifying the whole edge at once mislabels it.
-  // Package-private for unit tests (synthetic reached rects / ledges, no world).
-  static void holeSubSpans(SkirtSpan sp, List<StandableRect> reached,
-      List<StandableRect> ledges, List<HoleSpan> out) {
-    double collisionTopY = sp.baseY();
-    FallColumn fall = FallColumn.of(sp);
-    double[] cuts = spanBreakpoints(sp, reached);
-    double holeLo = Double.NaN;
-    double holeHi = 0.0;
-    double holeFall = 0.0;
-    for (int i = 0; i + 1 < cuts.length; i++) {
-      double a = cuts[i];
-      double b = cuts[i + 1];
-      if (b - a <= EPS) {
-        continue;
-      }
-      DropClassification c = classifyDrop(fall.clampedTo(a, b), collisionTopY, reached, ledges);
-      if (c.kind() != DropClass.HOLE) {
-        continue;
-      }
-      if (Double.isNaN(holeLo)) {
-        holeLo = a;
-        holeHi = b;
-        holeFall = c.fallDistance();
-      } else if (a <= holeHi + EPS) {
-        holeHi = b;
-        holeFall = Math.max(holeFall, c.fallDistance());
-      } else {
-        out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, collisionTopY, holeFall, sp.visualBaseY()));
-        holeLo = a;
-        holeHi = b;
-        holeFall = c.fallDistance();
-      }
-    }
-    if (!Double.isNaN(holeLo)) {
-      out.add(new HoleSpan(sp.alongX(), sp.maxSide(), sp.line(), holeLo, holeHi, collisionTopY, holeFall, sp.visualBaseY()));
-    }
-  }
-
-  // Breakpoints along a drop span's varying axis where its classification can
-  // change: the span ends, integer block boundaries, and the varying-axis edges of
-  // every reached rect that crosses the rim line. Splitting here makes each sub-span
-  // homogeneous (uniform "reached below or not"), so classifyDrop is exact on it.
-  // Duplicates collapse to zero-width sub-spans (skipped by caller).
-  private static double[] spanBreakpoints(SkirtSpan sp, List<StandableRect> rects) {
-    double lo = sp.lo();
-    double hi = sp.hi();
-    List<Double> cuts = new ArrayList<>();
-    cuts.add(lo);
-    cuts.add(hi);
-    for (int k = (int) Math.floor(lo) + 1; k <= (int) Math.ceil(hi) - 1; k++) {
-      addCut(cuts, k, lo, hi);
-    }
-    for (StandableRect r : rects) {
-      if (RectMath.crossesLine(r, sp.alongX(), sp.maxSide(), sp.line())) {
-        addCut(cuts, sp.alongX() ? r.minX() : r.minZ(), lo, hi);
-        addCut(cuts, sp.alongX() ? r.maxX() : r.maxZ(), lo, hi);
-      }
-    }
-    double[] arr = new double[cuts.size()];
-    for (int i = 0; i < arr.length; i++) {
-      arr[i] = cuts.get(i);
-    }
-    Arrays.sort(arr);
-    return arr;
-  }
-
-  private static void addCut(List<Double> cuts, double c, double lo, double hi) {
-    if (c > lo + EPS && c < hi - EPS) {
-      cuts.add(c);
-    }
-  }
-
-  // Scan the world for standable surfaces (via exposeBox) between landY and collisionTopY
-  // that cross the fall column — intermediate ledges that would trap the entity. Only
-  // called when a reached floor exists below (landY is known). The occluder shell is
-  // supplied by WorldSurfaceIndex.tops (the same primitive the flood uses), so the
-  // ledge gather cannot re-expose a fragment the flood buried.
-  private static void gatherLedges(Level level, FallColumn fall, double collisionTopY,
-      List<StandableRect> reached, double halfW, double height, List<StandableRect> out,
-      boolean swimmableFluids) {
-    gatherLedgesFrom(WorldGeometry.levelColumnBoxes(level, false, swimmableFluids),
-      fall, collisionTopY, reached, halfW, height, out);
-  }
-
-  // Pure kernel of gatherLedges: reads the world only through the ColumnBoxes port,
-  // driving a WorldSurfaceIndex. Finds candidate boxes whose top lies in
-  // (landY, collisionTopY) in the columns around the fall column, then exposes each via
-  // index.tops(candidate) — the SAME occluder-shell primitive the flood uses. So a
-  // fragment the flood buried (a headroom ceiling above the rim, a wide-entity
-  // occluder a column or two out) can never be re-exposed here, and no window is
-  // re-derived to drift. Package-private for tests (synthetic world via the port).
-  static void gatherLedgesFrom(ColumnBoxes source, FallColumn fall, double collisionTopY,
-      List<StandableRect> reached, double halfW, double height, List<StandableRect> out) {
-    // Find landY: the topmost reached surface below collisionTopY crossing the column.
-    double landY = Double.NEGATIVE_INFINITY;
-    for (StandableRect r : reached) {
-      if (r.collisionTopY() >= collisionTopY - EPS) {
-        continue;
-      }
-      if (!fall.crosses(r)) {
-        continue;
-      }
-      if (r.collisionTopY() > landY) {
-        landY = r.collisionTopY();
-      }
-    }
-    if (landY == Double.NEGATIVE_INFINITY) {
-      return;
-    }
-    // Band covers candidate finding (down to floor(landY)-1 for shapes rising from the
-    // row below) and every candidate's headroom shell (up to floor(collisionTopY+height)+1,
-    // since candidate tops are < collisionTopY). tops() ensures its own shell within it.
-    int bandLo = (int) Math.floor(landY) - 1;
-    int bandHi = (int) Math.floor(collisionTopY + height) + 1;
-    WorldSurfaceIndex surfaces = new WorldSurfaceIndex(source, halfW, height, bandLo, bandHi);
-    // Candidate boxes: tops strictly in (landY, collisionTopY) in the columns whose
-    // dilated tops can still reach the fall column — the rim column and its
-    // neighbours across the line, plus the span's own columns, each widened by the
-    // dilation ceil(halfW). Derived from the column itself rather than from a probe
-    // footprint, so the scan window cannot shrink with the classification region
-    // (the drift LedgeExposureContractTest guards). The occluder shell each candidate
-    // needs on top of this is tops()'s concern.
-    int reachCols = (int) Math.ceil(halfW) + 1;
-    int spanLo = (int) Math.floor(fall.lo()) - reachCols;
-    int spanHi = (int) Math.ceil(fall.hi()) + reachCols;
-    int crossLo = (int) Math.floor(fall.line()) - reachCols;
-    int crossHi = (int) Math.floor(fall.line()) + reachCols;
-    int xLo = fall.alongX() ? spanLo : crossLo;
-    int xHi = fall.alongX() ? spanHi : crossHi;
-    int zLo = fall.alongX() ? crossLo : spanLo;
-    int zHi = fall.alongX() ? crossHi : spanHi;
-    int scanLo = (int) Math.floor(landY) - 1;
-    int scanHi = (int) Math.ceil(collisionTopY);
-    List<WorldBox> candidates = new ArrayList<>();
-    for (int x = xLo; x <= xHi; x++) {
-      for (int z = zLo; z <= zHi; z++) {
-        surfaces.ensureRows(x, z, scanLo, scanHi);
-        List<WorldBox> column = surfaces.column(x, z);
-        if (column == null) {
-          continue;
-        }
-        for (WorldBox wb : column) {
-          double top = wb.yMax();
-          if (top > landY + EPS && top < collisionTopY - EPS) {
-            candidates.add(wb);
-          }
-        }
-      }
-    }
-    // Expose each candidate against the flood's occluder shell; keep fragments in
-    // (landY, collisionTopY) that cross the fall column.
-    for (WorldBox cand : candidates) {
-      for (StandableRect s : surfaces.tops(cand)) {
-        if (s.collisionTopY() <= landY + EPS || s.collisionTopY() >= collisionTopY - EPS) {
-          continue;
-        }
-        if (fall.crosses(s)) {
-          out.add(s);
-        }
-      }
-    }
-  }
-
-  // World-reading wrapper: near each reached surface, gather boxes and classify
-  // UP skirts via occluderSpansForRect. Once per stick action. visual picks the
-  // rim (collision vs paint). ColumnBoxes only — fluid surfaces cannot mark UPs.
-  private List<SkirtSpan> computeOccluders(Level level, List<StandableRect> rects,
-      EntityProfile profile, boolean swimmableFluids, boolean visual) {
-    return computeOccludersFrom(
-      WorldGeometry.levelColumnBoxes(level, false, swimmableFluids),
-      level.getMinY(), level.getMaxY(), rects, profile, visual);
-  }
-
-  // Pure kernel of computeOccluders: reads the world only through the ColumnBoxes
-  // port. Keeps this pass's own XZ window and per-rect Y window (clamped to
-  // worldMinY/worldMaxY) — not WorldSurfaceIndex / occluderColumns, whose flood
-  // band and undilated-box window would silently drop occluders here.
-  static List<SkirtSpan> computeOccludersFrom(ColumnBoxes source, int worldMinY, int worldMaxY,
-      List<StandableRect> rects, EntityProfile profile) {
-    return computeOccludersFrom(source, worldMinY, worldMaxY, rects, profile, false);
-  }
-
-  static List<SkirtSpan> computeOccludersFrom(ColumnBoxes source, int worldMinY, int worldMaxY,
-      List<StandableRect> rects, EntityProfile profile, boolean visual) {
-    if (rects.isEmpty()) {
-      return List.of();
-    }
-    double halfW = profile.width() / 2.0;
-    double height = profile.height();
-    List<SkirtSpan> out = new ArrayList<>();
-    List<WorldBox> candidates = new ArrayList<>();
-    for (StandableRect r : rects) {
-      double rim = visual ? r.visualTopY() : r.collisionTopY();
-      int xLo = (int) Math.floor(r.minX() - halfW) - 1;
-      int xHi = (int) Math.ceil(r.maxX() + halfW);
-      int zLo = (int) Math.floor(r.minZ() - halfW) - 1;
-      int zHi = (int) Math.ceil(r.maxZ() + halfW);
-      int yLo = Math.max((int) Math.floor(rim) - 1, worldMinY);
-      int yHi = Math.min((int) Math.floor(rim + height) + 1, worldMaxY);
-      candidates.clear();
-      for (int x = xLo; x <= xHi; x++) {
-        for (int z = zLo; z <= zHi; z++) {
-          for (int y = yLo; y <= yHi; y++) {
-            candidates.addAll(source.at(x, y, z));
-          }
-        }
-      }
-      occluderSpansForRect(r, candidates, halfW, height, visual, out);
-    }
-    return mergeOccluderSpans(out);
   }
 
   /**

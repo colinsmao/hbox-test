@@ -112,8 +112,9 @@ it.
   │   │   ├── Overlay.java / OverlayManager.java / RadiusIndicatorOverlay.java
   │   │   └── WorldOverlay.java / WorldOverlayManager.java
   │   └── surface/                         # compute + selection widget + emit
-  │       ├── EntityProfile / StandableRect / SkirtSpan / HoleSpan / FallColumn
+  │       ├── EntityProfile / StandableRect / SkirtSpan / BeamSpan / FallColumn / ClimbRule
   │       ├── RectMath.java / SurfaceSelection.java / WorldGeometry.java
+  │       ├── HoleBeams.java / DownSkirts.java / OccluderSkirts.java
   │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java
   ├── client/resources/assets/mobwalk/lang/en_us.json
   └── test/java/dev/kelianmao/mobwalk/client/{config,surface}/  # mirrors source packages

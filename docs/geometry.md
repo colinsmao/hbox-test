@@ -20,9 +20,10 @@ home, [hole classification](#hole-classification), and is unbounded there.
 **World read vs flood math.** `WorldGeometry` is the adapter over the
 `ColumnBoxes` port: it translates Minecraft block/fluid state into domain
 `WorldBox` / `HazardClass` (including fluid-surface emission via
-`fluidSurfaceHeight`). `SurfaceSelection` holds the pure flood, merge, skirts,
-and holes, and reaches the world only through that port (`WorldSurfaceIndex`,
-`gatherLedgesFrom`, `computeOccludersFrom`).
+`fluidSurfaceHeight`). `SurfaceSelection` holds the flood, merge, and publish;
+`DownSkirts`, `OccluderSkirts`, and `HoleBeams` are the peer compute passes.
+World access stays on that port (`WorldSurfaceIndex`, `HoleBeams.gatherLedgesFrom`,
+`OccluderSkirts.computeFrom`).
 
 ## Representation: rect/double space
 
@@ -251,9 +252,9 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
   fluid surfaces set `occludes=false`, so every solid top under fluid survives, and
   solids still clip a fluid top the same way they clip any other top. The same
-  rule gates up-skirts: `wallOccluder` requires `occludes`, and `computeOccluders`
-  reads through the shared `ColumnBoxes` port (`WorldGeometry.levelColumnBoxes`) so
-  only occluding boxes mark wall faces.
+  rule gates up-skirts: `OccluderSkirts.wallOccluder` requires `occludes`, and
+  `OccluderSkirts.compute` reads through the shared `ColumnBoxes` port
+  (`WorldGeometry.levelColumnBoxes`) so only occluding boxes mark wall faces.
 - **Emission (`WorldGeometry.levelColumnBoxes`).** When Generic `swimmableFluids` is
   on, a cell whose fluid state is in `FluidTags.WATER` or `FluidTags.LAVA` emits one
   full-footprint fluid surface (`yMin = y`, `yMax = y + fluidSurfaceHeight`). Height
@@ -350,7 +351,7 @@ first factor; lazy-Y trims the second — orthogonal, and they compose.
 Hole classification **reads the flood output** to label the
 **drop edges** of the selection (the `openSpans` edges that are neither equal-height
 merge seams nor wall/ceiling up-skirts). One pure predicate,
-`SurfaceSelection.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
+`HoleBeams.classifyDrop`, classifies a **homogeneous** drop sub-span as `HOLE` or
 `BENIGN` in two steps:
 
 1. **Is there a reached surface strictly below the edge, across the fall column?** If
@@ -365,7 +366,7 @@ merge seams nor wall/ceiling up-skirts). One pure predicate,
    distance `T − landY`.
 
 Step 1 is pure rect/double work against the reached `StandableRect`s. Step 2 is the one
-world read: `gatherLedges` finds candidate boxes with tops in `(landY, T)` in the columns
+world read: `HoleBeams.gatherLedges` finds candidate boxes with tops in `(landY, T)` in the columns
 around the fall column and exposes each through **`WorldSurfaceIndex.tops`, the same
 per-box primitive the flood uses** (dilate by `W/2`, cut by the box's occluder shell) —
 so only flood-standable fragments count as ledges, and a wide hitbox is handled the same
@@ -391,7 +392,7 @@ the line" test would turn every drop into a step-up). Ground that sits *beside* 
 — is passed on the way down, so such a rim stays a hole.
 
 **Exposure-agreement contract.** The invariant step 2 relies on: **a candidate ledge is
-exposed by `gatherLedges` iff the flood would expose it.** It holds **by construction**:
+exposed by `HoleBeams.gatherLedges` iff the flood would expose it.** It holds **by construction**:
 both callers sit on one `WorldSurfaceIndex` (the shared lazy box index + memoized
 `tops()`), so the occluder shell has a single definition and cannot drift between them.
 `exposeBox` subtracts only occluders present in the index, and `tops()` populates that
@@ -420,16 +421,16 @@ a hole beam in the grey ring is blended toward grey by the same distance falloff
 greys tops/skirts (see [`rendering.md`](rendering.md)), signalling "raise the radius".
 
 The candidate drop spans are the compute-side down `SkirtSpan`s (every genuine drop
-edge). `computeHoles` walks them once per select: for each it takes the **fall column**,
+edge). `HoleBeams.compute` walks them once per select: for each it takes the **fall column**,
 gathers ledges, and classifies. Because **one edge can span reached and unreached
-ground**, `holeSubSpans` subdivides the edge at the `[lo,hi]` of the reached rects that
+ground**, `HoleBeams.holeSubSpans` subdivides the edge at the `[lo,hi]` of the reached rects that
 cross the line (`spanBreakpoints`) into homogeneous sub-spans — so a hole span's bounds
-are the geometry justifying it — classifies each via `classifyDrop`, and publishes
-the contiguous `HOLE` pieces (coalesced) as `HoleSpan`s. `BENIGN` sub-spans keep their
-ordinary down-skirt. Each `HoleSpan` is drawn as its own through-walls beam at the rim
+are the geometry justifying it — classifies each via `HoleBeams.classifyDrop`, and publishes
+the contiguous `HOLE` pieces (coalesced) as `BeamSpan`s. `BENIGN` sub-spans keep their
+ordinary down-skirt. Each `BeamSpan` is drawn as its own through-walls beam at the rim
 (a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
 
-**Ledge gather occluders from below.** `gatherLedges` exposes each candidate box (top in
+**Ledge gather occluders from below.** `HoleBeams.gatherLedges` exposes each candidate box (top in
 `(landY, collisionTopY)`) via `WorldSurfaceIndex.tops`, whose occluder shell starts one
 row below the candidate top (`floor(L) - 1`), so collision that *lives in the block row
 below* `L` and rises into the standing column (vanilla walls/fences at height 1.5) still
@@ -486,11 +487,12 @@ skirts/occluders may also key on `visualTopY`.
   class](#representation-rectdouble-space): raised geometry claims any overlap with
   flush geometry, while abutting raised and flush regions stay separate rects. The
   raised paint therefore keeps its own height and the flush-only region stays flush.
-  Up and down `SkirtSpan`s and `HoleSpan` each carry a
-  `visualBaseY` (the source rect's `visualTopY`) alongside the collision `baseY`.
+  Up and down `SkirtSpan`s carry a `visualBaseY` (the source rect's `visualTopY`)
+  alongside the collision `baseY`. Published `BeamSpan`s carry only the draw foot
+  (`visualBaseY`) plus the rim interval.
 - **Skirts are a render pass, holes a geometry pass.** Downs and occluder (UP) skirts
   share a dual rim: **`collisionTopY`** for hole / collision-drop coverage, **`visualTopY`**
-  for paint. `computeDownSkirts` / `wallOccluder` take that key; `maxExtent` for UPs is
+  for paint. `DownSkirts.compute` / `OccluderSkirts.wallOccluder` take that key; `maxExtent` for UPs is
   `wallTop − rim` (positive when emitted). On the visual pass, an abutting neighbour with
   **equal or higher** `visualTopY` covers the edge; a **lower** neighbour is a land stop
   (`maxExtent = rimKey − neighbourKey`; open drops unlimited). A visible step at the same

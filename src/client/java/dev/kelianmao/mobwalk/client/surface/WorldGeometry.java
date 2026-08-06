@@ -93,7 +93,7 @@ public final class WorldGeometry {
   // read is paid only when computeVisualTop is on), plus an optional non-occluding
   // fluid surface (HazardClass on that box only). Shared by the flood, the ledge
   // gather, and the occluder pass so there is one world-read implementation behind
-  // WorldSurfaceIndex / computeOccludersFrom.
+  // WorldSurfaceIndex / OccluderSkirts.computeFrom.
   static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop,
       boolean swimmableFluids) {
     BlockPos.MutableBlockPos scan = new BlockPos.MutableBlockPos();

@@ -50,7 +50,7 @@ final class LedgeExposureContractTest {
 
   private static List<StandableRect> gather(ColumnBoxes world) {
     List<StandableRect> out = new ArrayList<>();
-    SurfaceSelection.gatherLedgesFrom(world, FALL, T, FLOOR, HALF_W, HEIGHT, out);
+    HoleBeams.gatherLedgesFrom(world, FALL, T, FLOOR, HALF_W, HEIGHT, out);
     return out;
   }
 
