@@ -36,16 +36,15 @@ default shape of every task.
 1. **Design the plan as committable steps.** Each step should be a self-contained,
    independently verifiable unit of work — the thing that becomes one commit. Prefer
    more small steps over a few large ones. If a step can't be validated and committed
-   on its own, it's too big; split it. Put a short docs-quality TODO on the plan
-   (intent in Documentation & conventions) so mid-work doc edits stay honest.
-2. **Every step has its own enumerated in-game checklist.** Not a summary, not
-   "verify it works": a numbered list of concrete `action → exact expected on-screen
-   result` items (e.g. "right-click a slab → its half-height top face is drawn, and
-   *only* that block"). Writing the checklist is part of writing the plan, so don't
-   present a plan as ready until every step carries a checklist.
-   **Keep it lean:** only cases that must be checked in-game (impossible or meaningless
-   as a unit test). Drop duplicates, variants of the same path, and anything pure
-   logic already covers.
+   on its own, it's too big; split it. Add a docs-quality item to the plan's **tracked
+   TODO list** (CreatePlan / TodoWrite) so it stays visible while you work.
+2. **Every step has its own enumerated in-game checklist.** A numbered list of concrete
+   `action → exact expected on-screen result` items (e.g. "right-click a slab → its
+   half-height top face is drawn, and *only* that block"). Writing the checklist is
+   part of writing the plan, so don't present a plan as ready until every step carries
+   one. **Keep it lean:** only cases that must be checked in-game (impossible or
+   meaningless as a unit test). Drop duplicates, variants of the same path, and anything
+   pure logic already covers.
 3. **Validate in-game, then commit, before the next step.** The human runs the
    checklist in-game (`./gradlew runClient`) and ticks every box — then commit that
    step. Do not start the next step until the current one is validated and committed.
@@ -83,9 +82,12 @@ as a substitute for actually validating in-game, and keep them working if you to
 - `commit-gate.js` (`beforeShellExecution`) turns every `git commit` into a manual
   **ask** carrying the checklist reminder — a hook can't verify you ran `runClient`,
   only force the pause, so the confirmation is on you.
-- `plan-checklist-nudge.js` (`postToolUse`) reminds, on each `PLAN.md` edit, that
-  every step needs its own enumerated in-game checklist (and to keep a docs-quality
-  TODO on the plan — see Documentation & conventions).
+- `plan-checklist-nudge.js` (`postToolUse`) reminds, on each `PLAN.md` or
+  `*.plan.md` (CreatePlan temp) edit, that every step needs its own enumerated
+  in-game checklist, and that docs-quality belongs on the tracked TODO list
+  (CreatePlan / TodoWrite).
+- `prose-positive-nudge.js` (`preToolUse`) reminds, before each `.md` edit, to write
+  positive facts and replace stale sentences rather than padding them.
 - `stop-ingame-reminder.js` (`stop`) nudges once when a turn ends with uncommitted
   `src/`/`docs/` changes. Caveat: `stop` hooks don't run on cloud agents and have a
   known Windows stdout-capture quirk, so this one is best-effort — the commit gate is
@@ -228,13 +230,12 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 
 - **Indentation is two spaces** (Java, Gradle, JSON under `src/`).
 - **Prose: positive facts; keep corrections honest.** Write what something *is* /
-  *does*, not what it isn't. Prefer "Client chat command `/mobwalk dump`" over
-  "chat command only (no keybind)". The failure mode to avoid: fixing a wrong claim
-  by *appending* hedges until the paragraph is longer but still muddy — replace the
-  stale sentence instead. New material may lengthen the docs. Leave a short TODO on
-  each plan that keeps that intent visible while you work. **Exceptions (narrow):**
-  checklist regression absences; hard safety invariants; contrasting two real
-  behaviours ("upward skirt, not a downward drop").
+  *does*. Prefer "Client chat command `/mobwalk dump`" over "chat command only (no
+  keybind)". When a claim goes stale, replace that sentence with a shorter accurate
+  one; new material may lengthen the docs. Keep that intent as a **tracked TODO list
+  item** on each plan (CreatePlan / TodoWrite). **Exceptions (narrow):** checklist
+  regression absences; hard safety invariants; contrasting two real behaviours
+  ("upward skirt, not a downward drop").
 - **Keep the docs current — per commit, written after checks pass.** Update the
   relevant docs in the same commit as the change. Within a step: `code → checks →
   fix (loop) → docs → approval → commit` (see Git/workflow).

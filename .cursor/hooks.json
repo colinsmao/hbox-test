@@ -14,6 +14,11 @@
         "failClosed": true
       }
     ],
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/prose-positive-nudge.js"
+      }
+    ],
     "postToolUse": [
       {
         "command": "node .cursor/hooks/plan-checklist-nudge.js"

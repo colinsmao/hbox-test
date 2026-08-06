@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// postToolUse: on plan edits, remind checklist + docs-quality TODO.
+// preToolUse: before an agent edits a .md file, remind positive-only prose
+// (AGENTS.md -> Documentation). Filter in-script by tool + path.
 "use strict";
 
 function readStdin() {
@@ -21,13 +22,13 @@ const toolName = String(input.tool_name || "");
 const toolInput = JSON.stringify(input.tool_input || {});
 
 const isEditTool = /^(Write|StrReplace|MultiEdit|Edit|EditNotebook)$/i.test(toolName);
-const touchesPlan = /PLAN\.md|\.plan\.md/i.test(toolInput);
+const touchesMd = /\.md(["'\\s]|$)/i.test(toolInput) || /["'][^"']*\.md["']/i.test(toolInput);
 
-if (isEditTool && touchesPlan) {
+if (isEditTool && touchesMd) {
   process.stdout.write(
     JSON.stringify({
       additional_context:
-        "Stage-gating reminder: every step needs its own enumerated in-game checklist (action -> exact on-screen result). Put docs-quality on the tracked TODO list.",
+        "Prose reminder (editing .md): Write positively. Describe what something is / does, not what it doesn't or used to do.",
     })
   );
   process.exit(0);
