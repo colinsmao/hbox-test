@@ -185,13 +185,15 @@ Each reached `StandableRect` is drawn as a **top fill**, an optional **border**,
 through-walls, depth-on `SKIRT` occluded). `CollisionSurfaceOverlay.emit` forwards
 the published snapshots into `SurfaceEmitter.emit`.
 
-- **Top fill, Appearance-colored (or depth-hue debug).** Tops use Appearance
-  `walkableColor` (RGB + alpha) by default. Debug `shadeByDepth` (default off)
-  switches RGB to the cyclic BFS-depth hue band (`Palette` / `depthColor`, blue at
-  depth 0, cycling every `DEPTH_CYCLE` (20) rings) so a continuity bug reads as an
-  out-of-sequence color. Frontier greying (`Palette.colorAtDepth` when
-  `rect.frontier()`) applies in both modes when Debug `showCutoffRing` is on
-  (default); when off, frontier tops are not drawn.
+- **Top fill color precedence.** Tops and skirts share one frame fill palette
+  (`Palette.FillColors`, hoisted once in `emit` and passed into `emitSkirts`).
+  Precedence, highest first: frontier grey (`Palette.GREY_RGB`, walkable alpha) →
+  Debug `shadeByDepth` hue (`Palette.depthColor`, walkable alpha) → hazard Color4f
+  when that kind’s Appearance show is on (`showWaterHazard` / `waterHazardColor`,
+  `showLavaHazard` / `lavaHazardColor`) → Appearance `walkableColor`. Show off keeps
+  the surface drawn but uses `walkableColor`; `HazardClass` on the rect is unchanged.
+  Frontier greying applies when Debug `showCutoffRing` is on (default); when off,
+  frontier tops are not drawn.
 - **Crouch-gated through-walls, depth-tested by default.** Gated by Debug
   `crouchSeeThroughWalls` (default on; see [`settings.md`](settings.md)). Seeing
   surfaces *through* blocks is a debug aid, so when the option is on the top is
@@ -207,8 +209,10 @@ the published snapshots into `SurfaceEmitter.emit`.
   `extract` — same gate as through-walls tops).
 - **Skirts: square, fading, depth-tested.** Each edge drops a double-winding vertical
   skirt of height Appearance `downSkirtHeight` (default `2`; `0` skips draw), dimmed
-  by vanilla face brightness (N/S 0.8, E/W 0.6), **fading linearly from walkable fill alpha at the rim to
-  transparent at the far end of the Appearance height**. Draw length is
+  by vanilla face brightness (N/S 0.8, E/W 0.6), **fading linearly from the resolved
+  fill alpha at the rim to transparent at the far end of the Appearance height**.
+  `SkirtSpan` carries the source rect’s `HazardClass` so skirts resolve through the
+  same precedence as tops. Draw length is
   `min(Appearance height, maxExtent)`; when `maxExtent` clips the quad shorter than
   the configured height, the tip samples the same fade curve and keeps residual alpha
   (e.g. extent 0.5 with height 2 ends at 0.75× fill alpha). Skirts always live in the
@@ -279,8 +283,9 @@ the published snapshots into `SurfaceEmitter.emit`.
 - **Depth-based grey cutoff (incomplete-selection signal).** When Debug
   `showCutoffRing` is on (default), surfaces on the merge **frontier** band
   (`StandableRect.frontier()`, the `RadiusTier.FRONTIER` ownership class at the
-  BFS depth limit) are drawn **fully grey** (`Palette.colorAtDepth`). INNER
-  geometry keeps the walkable color (or `shadeByDepth` hue). When off,
+  BFS depth limit) are drawn **fully grey** (`Palette.GREY_RGB`). INNER
+  geometry keeps the normal fill precedence (hazard color / `walkableColor`, or
+  `shadeByDepth` hue). When off,
   frontier tops are not drawn. Skirt and hole spans on frontier rects are always
   suppressed compute-side — they are cutoff artifacts, not real geometry.
 - **Hole beams.** A drop edge the classifier labels a **hole** (a mob
@@ -321,14 +326,14 @@ the published snapshots into `SurfaceEmitter.emit`.
   snapshot/occluder/down-skirt/hole/crouch handoff into
   `SurfaceEmitter`.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
-  frontier grey (`Palette.GREY_RGB`, keyed on `rect.frontier()`), the square fading
+  fill precedence (`Palette.FillColors` / `resolve`: frontier grey → depth hue →
+  hazard show+color → `walkableColor`), the square fading
   skirt draw (`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** skirt spans
   (`emitSkirts`, from `SkirtSpan` UP/DOWN lists; length `min(Appearance height,
   maxExtent)`; fade over Appearance height so a clip keeps tip alpha; frontier spans
   suppressed), and the **hole beams** (`emitHoles`, from `HoleSpan`, into the
   depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`) —
-  emit draws only the published spans — the cyclic depth-gradient color (`Palette` /
-  `DEPTH_CYCLE` hue band), and the double-sided-winding requirement.
+  emit draws only the published spans — and the double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak

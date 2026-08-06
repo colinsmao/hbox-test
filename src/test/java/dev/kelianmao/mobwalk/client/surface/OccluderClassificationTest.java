@@ -108,6 +108,33 @@ final class OccluderClassificationTest {
   }
 
   @Test
+  void mergeKeepsAbuttingWaterAndLavaSpansSeparate() {
+    // Same +X edge / baseY, abutting along Z: WATER [0,1] then LAVA [1,2] must not
+    // coalesce (hazard is part of SpanGroupKey so each keeps its own color).
+    SkirtSpan water = new SkirtSpan(false, true, 1.0, 0.0, 1.0, 64.0, 64.0,
+      SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.WATER);
+    SkirtSpan lava = new SkirtSpan(false, true, 1.0, 1.0, 2.0, 64.0, 64.0,
+      SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.LAVA);
+    List<SkirtSpan> merged = SurfaceSelection.mergeOccluderSpans(List.of(water, lava));
+    assertEquals(2, merged.size());
+    assertEquals(HazardClass.WATER, merged.get(0).hazard());
+    assertEquals(HazardClass.LAVA, merged.get(1).hazard());
+  }
+
+  @Test
+  void mergeStillCoalescesSameHazardAbuttingSpans() {
+    SkirtSpan a = new SkirtSpan(false, true, 1.0, 0.0, 1.0, 64.0, 64.0,
+      SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.WATER);
+    SkirtSpan b = new SkirtSpan(false, true, 1.0, 1.0, 2.0, 64.0, 64.0,
+      SkirtSpan.Direction.UP, 1.0, 0, false, HazardClass.WATER);
+    List<SkirtSpan> merged = SurfaceSelection.mergeOccluderSpans(List.of(a, b));
+    assertEquals(1, merged.size());
+    assertEquals(0.0, merged.get(0).lo(), EPS);
+    assertEquals(2.0, merged.get(0).hi(), EPS);
+    assertEquals(HazardClass.WATER, merged.get(0).hazard());
+  }
+
+  @Test
   void fluidSurfaceAcrossEdgeEmitsNoUpSpan() {
     // A non-occluding water fluid surface abutting the +X edge rises above T the same
     // way a wall would, but occlusion is a volume property — fluid surfaces must not

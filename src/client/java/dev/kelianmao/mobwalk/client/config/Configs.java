@@ -257,6 +257,14 @@ public final class Configs implements IConfigHandler {
   public static final class Appearance {
     public static final ConfigColor WALKABLE_COLOR =
       new ConfigColor("walkableColor", "#B055AA55").apply(APPEARANCE_KEY);
+    public static final ConfigBoolean SHOW_WATER_HAZARD =
+      new ConfigBoolean("showWaterHazard", true).apply(APPEARANCE_KEY);
+    public static final ConfigColor WATER_HAZARD_COLOR =
+      new ConfigColor("waterHazardColor", "#B03A9AE0").apply(APPEARANCE_KEY);
+    public static final ConfigBoolean SHOW_LAVA_HAZARD =
+      new ConfigBoolean("showLavaHazard", true).apply(APPEARANCE_KEY);
+    public static final ConfigColor LAVA_HAZARD_COLOR =
+      new ConfigColor("lavaHazardColor", "#B0E07020").apply(APPEARANCE_KEY);
     public static final ConfigBoolean DRAW_ON_VISIBLE_FACE =
       new ConfigBoolean("drawOnVisibleFace", true).apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
@@ -272,6 +280,10 @@ public final class Configs implements IConfigHandler {
 
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
       WALKABLE_COLOR,
+      SHOW_WATER_HAZARD,
+      WATER_HAZARD_COLOR,
+      SHOW_LAVA_HAZARD,
+      LAVA_HAZARD_COLOR,
       SHOW_BEAMS_THROUGH_WALLS,
       SHOW_HOLE_BEAMS,
       HOLE_BEAM_COLOR,
@@ -589,6 +601,22 @@ public final class Configs implements IConfigHandler {
 
   public static Color4f walkableColor() {
     return Appearance.WALKABLE_COLOR.getColor();
+  }
+
+  public static boolean showWaterHazard() {
+    return Appearance.SHOW_WATER_HAZARD.getBooleanValue();
+  }
+
+  public static Color4f waterHazardColor() {
+    return Appearance.WATER_HAZARD_COLOR.getColor();
+  }
+
+  public static boolean showLavaHazard() {
+    return Appearance.SHOW_LAVA_HAZARD.getBooleanValue();
+  }
+
+  public static Color4f lavaHazardColor() {
+    return Appearance.LAVA_HAZARD_COLOR.getColor();
   }
 
   public static boolean drawOnVisibleFace() {

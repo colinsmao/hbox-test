@@ -81,12 +81,8 @@ General / Appearance / Debug tabs, live apply, save-on-close, and General
 uncapped customs); see `[settings.md](settings.md)`.
 - **M8 — surface/overlay pipeline refactor**: extract `RectMath` / `SurfaceEmitter`,
 split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygiene.
-- **M9 — hazards (in progress):** Steps 1–3 landed — water/lava emit non-occluding
-fluid surfaces behind Generic `swimmableFluids` (thin fluid at cell-floor height);
-`HazardClass` through the merge; fluid→non-fluid escape capped by Generic
-`fluidEscapeHeight` (`ClimbRule` / `HazardClass.isFluid()`). See
-[geometry.md](geometry.md) → Fluid surfaces / Reachability model. Next: hazard fill
-+ perimeter beams (`PLAN.md` Step 4).
+- **M9 — hazards (in progress):** swimmable water/lava surfaces, fluid escape
+height, and hazard fill colors; perimeter beams next (`PLAN.md` Step 4b).
 
 ## Repository layout
 

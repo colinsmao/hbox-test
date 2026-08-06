@@ -39,8 +39,8 @@ public final class SurfaceEmitter {
 
   // Upward skirts: drawn where a surface edge borders a wall/ceiling (compute-side
   // SkirtSpan UP). Draw height from Appearance upwardSkirtHeight (0 skips draw),
-  // clamped to span.maxExtent (wall top above the surface). Peak alpha is the
-  // same Appearance walkableColor alpha used for tops.
+  // clamped to span.maxExtent (wall top above the surface). Peak alpha follows
+  // the same fill resolve as tops (walkable / hazard).
 
   // Hole beam: a vertical marker rising from the cliff-edge top of a hole span.
   // Routed to the depth-off BEAM layer or depth-tested SKIRT layer by Appearance
@@ -65,9 +65,11 @@ public final class SurfaceEmitter {
 
     boolean showCutoff = Configs.showCutoffRing();
     boolean shadeByDepth = Configs.shadeByDepth();
-    Color4f walkable = Configs.walkableColor();
-    float fillAlpha = walkable.a;
-    float[] walkableRgb = {walkable.r, walkable.g, walkable.b};
+    // One fill decision for the frame: tops and skirts share this palette.
+    Palette.FillColors colors = new Palette.FillColors(
+      Configs.walkableColor(),
+      Configs.showWaterHazard(), Configs.waterHazardColor(),
+      Configs.showLavaHazard(), Configs.lavaHazardColor());
 
     for (StandableRect rect : rects) {
       if (!showCutoff && rect.frontier()) {
@@ -79,15 +81,15 @@ public final class SurfaceEmitter {
       float maxZ = (float) rect.maxZ();
       float y = (float) rect.visualTopY() + (float) Y_OFFSET;
 
-      float[] rgb = rect.frontier()
-        ? Palette.GREY_RGB
-        : shadeByDepth ? Palette.depthColor(rect.depth()) : walkableRgb;
-      float r = rgb[0];
-      float g = rgb[1];
-      float b = rgb[2];
+      Palette.Resolved fill = colors.resolve(
+        rect.frontier(), shadeByDepth, rect.depth(), rect.hazard());
+      float r = fill.r;
+      float g = fill.g;
+      float b = fill.b;
+      float a = fill.a;
 
       BufferBuilder topBuffer = crouching ? fillBuffer : skirtBuffer;
-      quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, fillAlpha);
+      quad(topBuffer, positionMatrix, minX, maxX, minZ, maxZ, y, r, g, b, a);
 
       if (crouching) {
         float bx = Math.min(BORDER_THICKNESS, (maxX - minX) * 0.5f);
@@ -100,8 +102,8 @@ public final class SurfaceEmitter {
 
     }
 
-    emitSkirts(skirtBuffer, positionMatrix, downSkirts, shadeByDepth, walkableRgb, fillAlpha);
-    emitSkirts(skirtBuffer, positionMatrix, occluders, shadeByDepth, walkableRgb, fillAlpha);
+    emitSkirts(skirtBuffer, positionMatrix, downSkirts, shadeByDepth, colors);
+    emitSkirts(skirtBuffer, positionMatrix, occluders, shadeByDepth, colors);
 
     BufferBuilder holeBuffer = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
     emitHoles(holeBuffer, positionMatrix, holes);
@@ -152,9 +154,10 @@ public final class SurfaceEmitter {
   // Draw published skirts (UP and DOWN) into the depth-tested layer. Length is
   // min(Appearance height for the direction, span.maxExtent). Fade is over the
   // Appearance height: a shorter clamp samples the same curve (tip keeps residual
-  // alpha). Frontier spans are never drawn (cutoff artifacts).
+  // alpha). Frontier spans are never drawn (cutoff artifacts). Fill color comes
+  // from the frame palette shared with tops (not re-read from Configs).
   private static void emitSkirts(BufferBuilder skirtBuffer, Matrix4fc positionMatrix,
-      List<SkirtSpan> spans, boolean shadeByDepth, float[] walkableRgb, float fillAlpha) {
+      List<SkirtSpan> spans, boolean shadeByDepth, Palette.FillColors colors) {
     if (spans.isEmpty()) {
       return;
     }
@@ -174,16 +177,18 @@ public final class SurfaceEmitter {
       if (!(extent > 0.0f)) {
         continue;
       }
+      Palette.Resolved fill = colors.resolve(
+        false, shadeByDepth, sp.depth(), sp.hazard());
+      float fillAlpha = fill.a;
       // Fade is parameterized by Appearance height; a maxExtent clamp shortens
       // the quad but samples the same curve (clipped tip keeps residual alpha).
       float tipAlpha = fillAlpha * (1.0f - extent / configHeight);
 
-      float[] rgb = shadeByDepth ? Palette.depthColor(sp.depth()) : walkableRgb;
       // alongX edge → face normal ±Z (N/S); else ±X (E/W).
       float shade = sp.alongX() ? SHADE_NORTH_SOUTH : SHADE_EAST_WEST;
-      float r = rgb[0] * shade;
-      float g = rgb[1] * shade;
-      float b = rgb[2] * shade;
+      float r = fill.r * shade;
+      float g = fill.g * shade;
+      float b = fill.b * shade;
 
       float baseY = (float) sp.visualBaseY();
       float yTop;
@@ -286,6 +291,49 @@ public final class SurfaceEmitter {
     static final float[] GREY_RGB = {0.5f, 0.5f, 0.5f};
 
     private Palette() {
+    }
+
+    /** Resolved fill RGBA for one top or skirt after precedence. */
+    record Resolved(float r, float g, float b, float a) {
+    }
+
+    /**
+     * Frame fill palette: walkable + per-hazard show/color. Hoisted once in
+     * {@code emit} and shared with skirts. Precedence: frontier grey → depth hue
+     * → hazard color (if shown) → walkable.
+     */
+    static final class FillColors {
+      private final Color4f walkable;
+      private final boolean showWater;
+      private final Color4f water;
+      private final boolean showLava;
+      private final Color4f lava;
+
+      FillColors(Color4f walkable, boolean showWater, Color4f water,
+          boolean showLava, Color4f lava) {
+        this.walkable = walkable;
+        this.showWater = showWater;
+        this.water = water;
+        this.showLava = showLava;
+        this.lava = lava;
+      }
+
+      Resolved resolve(boolean frontier, boolean shadeByDepth, int depth,
+          HazardClass hazard) {
+        if (frontier) {
+          return new Resolved(GREY_RGB[0], GREY_RGB[1], GREY_RGB[2], walkable.a);
+        }
+        if (shadeByDepth) {
+          float[] rgb = depthColor(depth);
+          return new Resolved(rgb[0], rgb[1], rgb[2], walkable.a);
+        }
+        Color4f base = switch (hazard) {
+          case WATER -> showWater ? water : walkable;
+          case LAVA -> showLava ? lava : walkable;
+          case NONE -> walkable;
+        };
+        return new Resolved(base.r, base.g, base.b, base.a);
+      }
     }
 
     // Map a flood BFS depth (distance from the seed) to RGB: the hue advances a small

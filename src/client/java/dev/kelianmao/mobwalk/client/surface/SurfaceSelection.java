@@ -597,9 +597,11 @@ public final class SurfaceSelection {
   }
 
   // Grouping key for the occluder-span merge: orientation + side + line + base
-  // height, each double quantized to 1/1024 so collinear spans on the same edge at
-  // one height hash together (opposite sides at one coordinate stay distinct).
-  private record SpanGroupKey(boolean alongX, boolean maxSide, long line, long baseY) {
+  // height + hazard, each double quantized to 1/1024 so collinear spans on the
+  // same edge at one height hash together (opposite sides at one coordinate stay
+  // distinct). Hazard keeps WATER|LAVA from coalescing into one color.
+  private record SpanGroupKey(boolean alongX, boolean maxSide, long line, long baseY,
+      HazardClass hazard) {
   }
 
   // True iff box is a wall/ceiling for rim: occludes, yMax > rim, and
@@ -623,6 +625,7 @@ public final class SurfaceSelection {
     double rim = visual ? visualTopY : collisionTopY;
     int depth = r.depth();
     boolean frontier = r.frontier();
+    HazardClass hazard = r.hazard();
     for (WorldBox b : candidates) {
       if (!wallOccluder(b, rim, height)) {
         continue;
@@ -638,11 +641,11 @@ public final class SurfaceSelection {
       if (zHi - zLo > EPS) {
         if (Math.abs(oMinX - r.maxX()) < EPS) {
           out.add(new SkirtSpan(false, true, r.maxX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
         }
         if (Math.abs(oMaxX - r.minX()) < EPS) {
           out.add(new SkirtSpan(false, false, r.minX(), zLo, zHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
         }
       }
       double xLo = Math.max(oMinX, r.minX());
@@ -650,11 +653,11 @@ public final class SurfaceSelection {
       if (xHi - xLo > EPS) {
         if (Math.abs(oMinZ - r.maxZ()) < EPS) {
           out.add(new SkirtSpan(true, true, r.maxZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
         }
         if (Math.abs(oMaxZ - r.minZ()) < EPS) {
           out.add(new SkirtSpan(true, false, r.minZ(), xLo, xHi, collisionTopY, visualTopY,
-            SkirtSpan.Direction.UP, extent, depth, frontier));
+            SkirtSpan.Direction.UP, extent, depth, frontier, hazard));
         }
       }
     }
@@ -671,7 +674,7 @@ public final class SurfaceSelection {
     Map<SpanGroupKey, List<SkirtSpan>> groups = new LinkedHashMap<>();
     for (SkirtSpan s : spans) {
       SpanGroupKey key = new SpanGroupKey(s.alongX(), s.maxSide(),
-        Math.round(s.line() * 1024.0), Math.round(s.baseY() * 1024.0));
+        Math.round(s.line() * 1024.0), Math.round(s.baseY() * 1024.0), s.hazard());
       groups.computeIfAbsent(key, k -> new ArrayList<>()).add(s);
     }
     List<SkirtSpan> out = new ArrayList<>();
@@ -689,8 +692,10 @@ public final class SurfaceSelection {
       // different depth); take the min so the merged marker reads as the nearest
       // surface's band (mirrors the max-stop handling above). Frontier only when
       // every piece is frontier — an inner piece keeps the span drawable.
+      // Hazard is fixed per group (SpanGroupKey).
       int spanDepth = head.depth();
       boolean spanFrontier = head.frontier();
+      HazardClass spanHazard = head.hazard();
       for (int i = 1; i < group.size(); i++) {
         SkirtSpan s = group.get(i);
         if (s.lo() <= hi + EPS) {
@@ -702,18 +707,19 @@ public final class SurfaceSelection {
         } else {
           out.add(new SkirtSpan(head.alongX(), head.maxSide(),
             head.line(), lo, hi, head.baseY(), visualBase,
-            SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier));
+            SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier, spanHazard));
           lo = s.lo();
           hi = s.hi();
           stop = s.visualBaseY() + s.maxExtent();
           visualBase = s.visualBaseY();
           spanDepth = s.depth();
           spanFrontier = s.frontier();
+          spanHazard = s.hazard();
         }
       }
       out.add(new SkirtSpan(head.alongX(), head.maxSide(),
         head.line(), lo, hi, head.baseY(), visualBase,
-        SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier));
+        SkirtSpan.Direction.UP, stop - visualBase, spanDepth, spanFrontier, spanHazard));
     }
     return out;
   }
@@ -937,7 +943,7 @@ public final class SurfaceSelection {
       }
       if (!Double.isNaN(runLo)) {
         out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-          SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier()));
+          SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier(), r.hazard()));
       }
       runLo = a;
       runHi = b;
@@ -945,7 +951,7 @@ public final class SurfaceSelection {
     }
     if (!Double.isNaN(runLo)) {
       out.add(new SkirtSpan(alongX, maxSide, line, runLo, runHi, r.collisionTopY(), r.visualTopY(),
-        SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier()));
+        SkirtSpan.Direction.DOWN, runExtent, r.depth(), r.frontier(), r.hazard()));
     }
   }
 

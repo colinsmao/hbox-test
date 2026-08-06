@@ -150,7 +150,11 @@ category name: `"Appearance"`.
 
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
-| `walkableColor` | `ConfigColor` | `#B055AA55` (green, ~69% alpha) | RGB for tops/skirts when Debug `shadeByDepth` is off; alpha used for top fill and skirt peak. Read live in `SurfaceEmitter` / `Palette`. |
+| `walkableColor` | `ConfigColor` | `#B055AA55` (green, ~69% alpha) | Default RGB+alpha for tops/skirts when no higher precedence applies (see [rendering.md](rendering.md) fill precedence). Read live in `SurfaceEmitter` / `Palette.FillColors`. |
+| `showWaterHazard` | `ConfigBoolean` | `true` | When on: water surfaces use `waterHazardColor`. When off: water still draws but with `walkableColor` (`HazardClass` unchanged). |
+| `waterHazardColor` | `ConfigColor` | `#B03A9AE0` (blue, ~69% alpha) | RGB+alpha for water hazard fill when `showWaterHazard` is on. |
+| `showLavaHazard` | `ConfigBoolean` | `true` | When on: lava surfaces use `lavaHazardColor`. When off: lava still draws but with `walkableColor`. |
+| `lavaHazardColor` | `ConfigColor` | `#B0E07020` (orange, ~69% alpha) | RGB+alpha for lava hazard fill when `showLavaHazard` is on. |
 | `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
 | `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter.emitHoles` draws beams at hole rims. When off: beams are skipped. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
@@ -158,7 +162,8 @@ category name: `"Appearance"`.
 | `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `drawOnVisibleFace` | `ConfigBoolean` | `true` | When on: standable tops of taller-than-collision blocks (soul sand, mud) draw on the visible block face; when off, at the collision height. **Compute-side** — passed into `select` as `computeVisualTop`, so a value-change callback re-floods (the one Appearance option that touches compute). See `[geometry.md](geometry.md)` / `[rendering.md](rendering.md)`. |
 
-Helpers: `Configs.walkableColor()`, `Configs.holeBeamColor()` → `Color4f`;
+Helpers: `Configs.walkableColor()`, `Configs.waterHazardColor()`, `Configs.lavaHazardColor()`,
+`Configs.holeBeamColor()` → `Color4f`; `Configs.showWaterHazard()`, `Configs.showLavaHazard()`,
 `Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`,
 `Configs.downSkirtHeight()`, `Configs.upwardSkirtHeight()`,
 `Configs.drawOnVisibleFace()`.
@@ -173,7 +178,7 @@ name: `"Debug"`.
 | `crouchSeeThroughWalls` | `ConfigBoolean` | `true` | When on: crouching routes tops + rect borders into the depth-off layer. When off: tops stay depth-tested and crouch borders stay off. Skirts stay depth-tested either way. |
 | `crouchScrollRadius` | `ConfigBoolean` | `true` | When on: wand + crouch + scroll adjusts flood radius (`wantsRadiusScroll` → `Configs.setFloodRadius`). When off: that gesture is inactive — scroll never changes the radius. |
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
-| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: they use Appearance `walkableColor`. Cutoff ring (when shown) still greys via `Palette.colorAtDepth`. |
+| `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: fill precedence continues to hazard color / `walkableColor`. Cutoff ring (when shown) still greys via frontier greying. |
 | `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the merge frontier band fully grey (`Palette.colorAtDepth` when `frontier`). When off: frontier tops are not drawn. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,

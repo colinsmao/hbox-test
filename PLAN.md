@@ -235,14 +235,38 @@ Lava: re-check items 1–4 on a lava pool with a Warden before treating this ste
 lava turns out to want a materially different height, splitting the setting per hazard
 is the follow-up.
 
-## Step 4 — Hazard fill + perimeter beams
+## Step 4a — Hazard fill colors (+ settings)
 
 `SurfaceEmitter` colors hazard-tagged rects (and their skirts) from the fluid's hazard
 color instead of `walkableColor`, so open water reads as water rather than as walkable
-ground. The **color precedence** becomes explicit, highest first: frontier grey, Debug
-`shadeByDepth` hue, hazard color, `walkableColor` — the first two already outrank
-everything, so hazard slots in one level above the default. The emitter looks the color
-up through a single `Configs.hazardColor(kind)`, so it never branches per kind.
+ground. Precedence, highest first: frontier grey → Debug `shadeByDepth` hue → hazard
+Color4f (if that kind’s show is on) → `walkableColor`. Each hazard is a show+color pair
+like holes (`showHoleBeams` + `holeBeamColor`): Appearance `showWaterHazard` /
+`waterHazardColor`, `showLavaHazard` / `lavaHazardColor`. Show off keeps the surface
+drawn but uses `walkableColor` (hazard identity unchanged for merge / dump / escape).
+
+`emit` hoists one `FillColors` (walkable + both shows + both hazard colors) per frame and
+passes it into `emitSkirts` — skirts share the tops’ fill decision. `SkirtSpan` carries
+`HazardClass` (like `depth` / `frontier`); `SpanGroupKey` includes hazard so WATER|LAVA
+UP skirts do not coalesce across kinds.
+
+In-game checklist (unit tests cover skirt hazard stamp / merge separation):
+1. Deep pond, click floor → water planes and their skirts paint from `waterHazardColor`;
+   dry shore past a flush rim stays walkable green.
+2. Lava pool → lava planes paint from `lavaHazardColor`.
+3. Configure → Appearance → `showWaterHazard` Off → pond fill uses walkable green
+   (surfaces still drawn); On → hazard color returns. `showLavaHazard` Off leaves water
+   hazard-colored.
+4. Change `waterHazardColor` → pond updates without re-select; change `walkableColor` →
+   dry ground retints, water stays on its color when shown.
+5. Debug `shadeByDepth` On → water/lava use depth hues; Off → hazard colors return when
+   shown. Cutoff ring still greys when shown.
+6. Dry cliff / stair selection fill unchanged from Step 3. Hole beams at unreachable pool
+   rims stay `holeBeamColor` (no new perimeter hazard beams).
+7. `./gradlew build` green; cross-cutting: `runClient` clean, world load/unload and
+   resize OK.
+
+## Step 4b — Hazard perimeter beams
 
 A new `HazardSpan` record plus a pure `computeHazardSpans(mergedRects)` in
 `SurfaceSelection` (a hazard-rect edge sub-span with no same-fluid rect across it,
@@ -251,14 +275,17 @@ frontier skipped) is published as another `volatile` snapshot by
 [SurfaceEmitter.java](src/client/java/dev/kelianmao/mobwalk/client/surface/SurfaceEmitter.java),
 `emitHoles` is factored into one beam emit (spans + color + toggle + the
 `showBeamsThroughWalls` buffer choice) that holes and hazards both call — the
-generalization done at its second use rather than in advance. Appearance
-`showHazardBeams` (on), `waterHazardColor`, `lavaHazardColor`. `HazardSpanTest` covers
-interior-seam suppression and perimeter coverage. Dump gains a `hazards=` block.
+generalization done at its second use rather than in advance. Beam draw gated by the
+same `showWaterHazard` / `showLavaHazard` (no separate `showHazardBeams`); beam color
+from the matching hazard color. `HazardSpanTest` covers interior-seam suppression and
+perimeter coverage. Dump gains a `hazards=` block. Fluid-under-fall hole-beam recolor
+folds in here if still wanted.
 
 In-game checklist (unit tests cover perimeter span geometry):
 1. Pond → blue fill and blue perimeter beams; pool interior clear of beams.
 2. Lava pool → orange fill and orange perimeter beams.
-3. `showHazardBeams` Off → beams gone, hazard fill stays.
+3. `showWaterHazard` Off → water beams gone, water fill uses walkable green; lava
+   unchanged.
 4. Dry-cliff hole beams unchanged.
 5. `./gradlew build` green.
 
@@ -349,7 +376,7 @@ climbables inherit it.
   hole beam. That is the accurate verdict for a mob that falls in, at the cost of the
   "the trap is water" cue — and at the mob-pathing default it is the **common** case
   (any pool dug into terrain), so coloring such a beam by the fluid found under its fall
-  column is worth folding into Step 4.
+  column is worth folding into Step 4b.
 - The reached set now includes the water volume and the seafloor under it, so a click
   near open water spends its hop budget on water where it used to spend it on land. The
   cap on consecutive fluid hops is the knob if that trade goes the wrong way.

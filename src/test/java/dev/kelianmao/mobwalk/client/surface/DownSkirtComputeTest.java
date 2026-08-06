@@ -160,4 +160,14 @@ final class DownSkirtComputeTest {
     assertTrue(step != null, "high -X faces a drop onto low");
     assertEquals(1.0, step.maxExtent(), EPS);
   }
+
+  @Test
+  void waterRectDownSkirtsCarryWaterHazard() {
+    StandableRect water = new StandableRect(0, 0, 1, 1, 64.0, 64.0, HazardClass.WATER);
+    List<SkirtSpan> spans = SurfaceSelection.computeDownSkirts(List.of(water), List.of(), false);
+    assertEquals(4, spans.size());
+    for (SkirtSpan s : spans) {
+      assertEquals(HazardClass.WATER, s.hazard());
+    }
+  }
 }
