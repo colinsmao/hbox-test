@@ -43,6 +43,7 @@ final class HoleSubSpanTest {
     assertEquals(true, h.alongX());
     assertEquals(1.0, h.line(), EPS);
     assertEquals(64.0, h.visualBaseY(), EPS);
+    assertEquals(HazardClass.HOLE, h.hazard());
   }
 
   @Test

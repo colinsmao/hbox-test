@@ -283,11 +283,19 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   surviving fluid edge meets the shore's dilated footprint, so the drop classifier
   finds the kept floor (or the plane one cell down) as a landing. Edge marking stays
   with the occluder / drop passes.
+- **Perimeter beams (`HazardBeams`).** Each non-frontier fluid rect edge minus
+  sub-spans covered by an abutting neighbour with the same `HazardClass` and equal
+  `collisionTopY` (interior pool seams) publishes a `BeamSpan` stamped `WATER` /
+  `LAVA`. No occluder subtract — water|lava abutting edges keep both kinds.
+  `HazardClass.HOLE` is beam-marker identity only (trap drops from `HoleBeams`);
+  it is never stamped on standable surfaces or world boxes. Draw path:
+  [`rendering.md`](rendering.md) beams.
 
 Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
 coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
 complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
-disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder).
+disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder),
+`HazardBeamsTest` (perimeter seams, water|lava abut, frontier skip).
 
 ## How it is computed: the output-sensitive (lazy) flood
 
@@ -426,9 +434,11 @@ gathers ledges, and classifies. Because **one edge can span reached and unreache
 ground**, `HoleBeams.holeSubSpans` subdivides the edge at the `[lo,hi]` of the reached rects that
 cross the line (`spanBreakpoints`) into homogeneous sub-spans — so a hole span's bounds
 are the geometry justifying it — classifies each via `HoleBeams.classifyDrop`, and publishes
-the contiguous `HOLE` pieces (coalesced) as `BeamSpan`s. `BENIGN` sub-spans keep their
-ordinary down-skirt. Each `BeamSpan` is drawn as its own through-walls beam at the rim
-(a long dangerous rim reads as a row of beams clearly marking every unsafe edge).
+the contiguous `HOLE` pieces (coalesced) as `BeamSpan`s with `hazard = HOLE`.
+`BENIGN` sub-spans keep their ordinary down-skirt. Each `BeamSpan` is drawn as its
+own through-walls beam at the rim (a long dangerous rim reads as a row of beams
+clearly marking every unsafe edge). Hazard pool perimeters use the same `BeamSpan`
+type via `HazardBeams` (see [Fluid surfaces](#fluid-surfaces)).
 
 **Ledge gather occluders from below.** `HoleBeams.gatherLedges` exposes each candidate box (top in
 `(landY, collisionTopY)`) via `WorldSurfaceIndex.tops`, whose occluder shell starts one

@@ -151,12 +151,12 @@ category name: `"Appearance"`.
 | Option | Class | Default | Behavior |
 | --- | --- | --- | --- |
 | `walkableColor` | `ConfigColor` | `#B055AA55` (green, ~69% alpha) | Default RGB+alpha for tops/skirts when no higher precedence applies (see [rendering.md](rendering.md) fill precedence). Read live in `SurfaceEmitter` / `Palette.FillColors`. |
-| `showWaterHazard` | `ConfigBoolean` | `true` | When on: water surfaces use `waterHazardColor`. When off: water still draws but with `walkableColor` (`HazardClass` unchanged). |
-| `waterHazardColor` | `ConfigColor` | `#B03A9AE0` (blue, ~69% alpha) | RGB+alpha for water hazard fill when `showWaterHazard` is on. |
-| `showLavaHazard` | `ConfigBoolean` | `true` | When on: lava surfaces use `lavaHazardColor`. When off: lava still draws but with `walkableColor`. |
-| `lavaHazardColor` | `ConfigColor` | `#B0E07020` (orange, ~69% alpha) | RGB+alpha for lava hazard fill when `showLavaHazard` is on. |
-| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types. |
-| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter` draws hole beams at trap rims via `emitBeam`. When off: beams are skipped. |
+| `showWaterHazard` | `ConfigBoolean` | `true` | When on: water tops/skirts and water perimeter beams use `waterHazardColor`. When off: water fill uses `walkableColor` and water beams are skipped (`HazardClass` unchanged). |
+| `waterHazardColor` | `ConfigColor` | `#B03A9AE0` (blue, ~69% alpha) | RGB+alpha for water hazard fill and water perimeter beams when `showWaterHazard` is on. |
+| `showLavaHazard` | `ConfigBoolean` | `true` | When on: lava tops/skirts and lava perimeter beams use `lavaHazardColor`. When off: lava fill uses `walkableColor` and lava beams are skipped. |
+| `lavaHazardColor` | `ConfigColor` | `#B0E07020` (orange, ~69% alpha) | RGB+alpha for lava hazard fill and lava perimeter beams when `showLavaHazard` is on. |
+| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types (`HOLE`, water, lava). |
+| `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter` draws hole (`HazardClass.HOLE`) beams at trap rims via `emitBeam`. When off: hole beams are skipped; hazard perimeter beams still follow their own show flags. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 | `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `SurfaceEmitter`. |
 | `upwardSkirtHeight` | `ConfigDouble` | `0.25` (min `0`, max `4`, slider) | Draw height of upward wall-edge markers, clamped to available wall. `0` skips draw. Read live in `SurfaceEmitter`. |

@@ -260,8 +260,8 @@ the published snapshots into `SurfaceEmitter.emit`.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a wand
   selection active it re-runs `select` once with a one-shot flag, writes a single
   `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
-  downskirts → holes), and posts a short chat summary (`merged=… occluders=…
-  skirts=… holes=… (see latest.log)`). Raised selections log `occluders-collision`
+  downskirts → holes → hazards), and posts a short chat summary (`merged=… occluders=…
+  skirts=… holes=… hazards=… (see latest.log)`). Raised selections log `occluders-collision`
   and `occluders-paint`; otherwise one `occluders` list. Empty selection: chat
   `flood-debug: no selection`. Armed by `/mobwalk dump`.
 - **Surface-height toggle (Appearance `drawOnVisibleFace`, default on).** Blocks that
@@ -288,25 +288,29 @@ the published snapshots into `SurfaceEmitter.emit`.
   `shadeByDepth` hue). When off,
   frontier tops are not drawn. Skirt and hole spans on frontier rects are always
   suppressed compute-side — they are cutoff artifacts, not real geometry.
-- **Hole beams.** A drop edge the classifier labels a **hole** (a mob
-  leaving it is trapped — see [`geometry.md`](geometry.md)) raises a **vertical
-  beam** from the cliff-edge top `T`. Appearance `showBeamsThroughWalls` (default on)
-  routes it to a dedicated depth-off `BEAM` layer (same pipeline as crouch-gated tops)
-  **after** the depth-tested skirts, so opaque beams cover skirts and read through
+- **Beams (holes + hazard perimeters).** Vertical beams rise from a published
+  `BeamSpan`'s `visualBaseY`. Appearance `showBeamsThroughWalls` (default on) routes
+  every beam kind to a dedicated depth-off `BEAM` layer (same pipeline as crouch-gated
+  tops) **after** the depth-tested skirts, so opaque beams cover skirts and read through
   terrain; when off, beams go into the depth-tested `SKIRT` layer and are occluded by
-  blocks. Beams rise a fixed world height (`BEAM_HEIGHT`) at the opacity from
-  Appearance `holeBeamColor`. Appearance `showHoleBeams` (default on) gates
-  drawing; `holeBeamColor` supplies RGB and alpha (uniform along the beam). Benign
-  drops keep their ordinary down-skirt and get **no** beam.
-  Drop spans on the **frontier** (`SkirtSpan.frontier()`) are skipped by `HoleBeams.compute`
-  — they are depth-cutoff artifacts, not real geometry (without this, the entire
-  perimeter drew a hole-beam wall).
-  The hole spans are classified **compute-side** (`HoleBeams.compute` +
-  `holeSubSpans`, published as `BeamSpan`) and `emit` draws them via `emitBeam`.
-  Because one edge can span reached and unreached ground, `holeSubSpans` **subdivides**
-  an edge and emits a beam only over the unreached sub-intervals. One beam is drawn per
-  hole edge-span, so a long dangerous rim reads as a row of beams clearly marking every
-  unsafe edge (deliberately not coalesced into one beam per region).
+  blocks. Beams rise a fixed world height (`BEAM_HEIGHT`). `BeamSpan.hazard` selects
+  Appearance color/toggle at emit (`Palette.FillColors.beamColor`):
+  - **`HOLE`** — trap drop edges from `HoleBeams.compute` (+ `holeSubSpans`). Appearance
+    `showHoleBeams` / `holeBeamColor`. Benign drops keep their ordinary down-skirt and
+    get no beam. Frontier drop spans (`SkirtSpan.frontier()`) are skipped — without
+    that, the entire perimeter drew a hole-beam wall. Because one edge can span reached
+    and unreached ground, `holeSubSpans` subdivides and emits only over unreached
+    sub-intervals. One beam per hole edge-span (deliberately not coalesced per region).
+  - **`WATER` / `LAVA`** — pool perimeter from `HazardBeams.compute` (fluid rect edge
+    minus same-hazard equal-`collisionTopY` abutters; frontier fluid rects skipped; no
+    occluder subtract). Gated by the existing `showWaterHazard` / `showLavaHazard` and
+    colored with `waterHazardColor` / `lavaHazardColor` (no separate `showHazardBeams`).
+    Show off skips that kind's beams and falls fill back to `walkableColor`. Water|lava
+    shared edges keep both kinds. Pool-rim **hole** beams (trap drops at a high shore)
+    stay `holeBeamColor`; fluid-under-fall recolor is backlog.
+
+  `CollisionSurfaceOverlay` publishes a `volatile` hazard list beside holes;
+  `SurfaceEmitter.emitBeams` draws both lists via `emitBeam`.
 
 ## `26.1.2` rendering API names (verified against the resolved jars)
 
@@ -323,7 +327,7 @@ the published snapshots into `SurfaceEmitter.emit`.
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the level-identity reset, and the `volatile`
-  snapshot/occluder/down-skirt/hole/crouch handoff into
+  snapshot/occluder/down-skirt/hole/hazard/crouch handoff into
   `SurfaceEmitter`.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
   fill precedence (`Palette.FillColors` / `resolve`: frontier grey → depth hue →
@@ -331,9 +335,10 @@ the published snapshots into `SurfaceEmitter.emit`.
   skirt draw (`vQuad`, tiny `SKIRT_OFFSET`), drawing the **published** skirt spans
   (`emitSkirts`, from `SkirtSpan` UP/DOWN lists; length `min(Appearance height,
   maxExtent)`; fade over Appearance height so a clip keeps tip alpha; frontier spans
-  suppressed), and the **hole beams** (`emitBeam`, from `BeamSpan`, into the
-  depth-off `BEAM` layer or depth-tested `SKIRT` layer per `showBeamsThroughWalls`) —
-  emit draws only the published spans — and the double-sided-winding requirement.
+  suppressed), and **beams** (`emitBeams` / `emitBeam`, from hole + hazard `BeamSpan`
+  lists; `beamColor` by `HazardClass`; depth-off `BEAM` or depth-tested `SKIRT` per
+  `showBeamsThroughWalls`) — emit draws only the published spans — and the
+  double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
@@ -370,7 +375,11 @@ the published snapshots into `SurfaceEmitter.emit`.
   a standable **ledge** sits between the rim and that floor; reachability is reached-set
   membership, the ledge scan reuses `exposeBox` — and `compute` / `gatherLedges` /
   `holeSubSpans`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
-  the line-crossing reached rects' bounds and published as `BeamSpan`).
+  the line-crossing reached rects' bounds and published as `BeamSpan` with
+  `hazard = HOLE`).
+- `HazardBeams.java`: fluid perimeter beams (`compute` / `edgeSpans` — non-frontier
+  fluid rect edge minus same-hazard equal-`collisionTopY` abutters; no occluder
+  subtract; published as `BeamSpan` with `WATER` / `LAVA`).
 - `WorldOverlayManager.java`: three-layer setup (depth-off `FILLED` tops,
   depth-on `SKIRT`, depth-off `BEAM` last), single draw at `AFTER_TRANSLUCENT_TERRAIN` (ice/honey
   composite; pond bottoms via crouch — see the translucent-phase decision),

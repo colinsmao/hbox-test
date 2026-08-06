@@ -52,6 +52,7 @@ public final class MobWalkClient implements ClientModInitializer {
                 + " occluders=" + counts.occluders()
                 + " skirts=" + counts.skirts()
                 + " holes=" + counts.holes()
+                + " hazards=" + counts.hazards()
                 + " (see latest.log)"));
           }
           return 1;

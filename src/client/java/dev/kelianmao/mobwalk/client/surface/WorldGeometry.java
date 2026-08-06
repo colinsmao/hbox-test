@@ -136,7 +136,7 @@ public final class WorldGeometry {
    * ({@link ClimbRule}), not a change to this plane height.
    */
   static OptionalDouble fluidSurfaceHeight(HazardClass hazard, double fluidHeight) {
-    if (hazard == HazardClass.NONE) {
+    if (hazard == HazardClass.NONE || hazard == HazardClass.HOLE || !hazard.isFluid()) {
       return OptionalDouble.empty();
     }
     if (fluidHeight <= FLUID_JUMP_THRESHOLD + RectMath.EPS) {

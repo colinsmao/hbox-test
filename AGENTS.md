@@ -82,18 +82,14 @@ as a substitute for actually validating in-game, and keep them working if you to
 - `commit-gate.js` (`beforeShellExecution`) turns every `git commit` into a manual
   **ask** carrying the checklist reminder — a hook can't verify you ran `runClient`,
   only force the pause, so the confirmation is on you.
-- `plan-checklist-nudge.js` (`postToolUse`) reminds, on each `PLAN.md` or
+- `plan-checklist-nudge.js` (`preToolUse`) reminds, before each `PLAN.md` or
   `*.plan.md` (CreatePlan temp) edit, that every step needs its own enumerated
   in-game checklist, and that docs-quality belongs on the tracked TODO list
   (CreatePlan / TodoWrite).
 - `prose-positive-nudge.js` (`preToolUse`) reminds, before each `.md` edit, to write
   positive facts and replace stale sentences rather than padding them.
-- `stop-ingame-reminder.js` (`stop`) nudges once when a turn ends with uncommitted
-  `src/`/`docs/` changes. Caveat: `stop` hooks don't run on cloud agents and have a
-  known Windows stdout-capture quirk, so this one is best-effort — the commit gate is
-  the reliable backstop.
 
-## Bugfixing
+## Bug fixing
 
 When fixing a bug, drive the change with a regression test that encodes the **real
 failure mode** (the geometry / inputs that break in-game — not a simplified case after

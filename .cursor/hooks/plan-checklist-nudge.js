@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// postToolUse: on plan edits, remind checklist + docs-quality TODO.
+// preToolUse: before plan edits, remind checklist + docs-quality TODO.
 "use strict";
 
 function readStdin() {
@@ -21,13 +21,18 @@ const toolName = String(input.tool_name || "");
 const toolInput = JSON.stringify(input.tool_input || {});
 
 const isEditTool = /^(Write|StrReplace|MultiEdit|Edit|EditNotebook)$/i.test(toolName);
-const touchesPlan = /PLAN\.md|\.plan\.md/i.test(toolInput);
+const touchesTempPlan = /\.plan\.md/i.test(toolInput);
+const touchesRepoPlan = /PLAN\.md/.test(toolInput);
 
-if (isEditTool && touchesPlan) {
+if (isEditTool && (touchesRepoPlan || touchesTempPlan)) {
+  let reminder =
+    "Stage-gating reminder: every step needs its own enumerated in-game checklist (action -> exact on-screen result). Put docs-quality on the tracked TODO list.";
+  if (touchesRepoPlan) {
+    reminder += " Avoid PLAN.md churn — significant design shifts only, or a short note.";
+  }
   process.stdout.write(
     JSON.stringify({
-      additional_context:
-        "Stage-gating reminder: every step needs its own enumerated in-game checklist (action -> exact on-screen result). Put docs-quality on the tracked TODO list.",
+      additional_context: reminder,
     })
   );
   process.exit(0);

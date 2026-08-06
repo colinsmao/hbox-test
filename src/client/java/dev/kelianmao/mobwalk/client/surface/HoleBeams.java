@@ -130,13 +130,15 @@ final class HoleBeams {
       } else if (a <= holeHi + EPS) {
         holeHi = b;
       } else {
-        out.add(new BeamSpan(sp.alongX(), sp.line(), holeLo, holeHi, sp.visualBaseY()));
+        out.add(new BeamSpan(sp.alongX(), sp.line(), holeLo, holeHi, sp.visualBaseY(),
+          HazardClass.HOLE));
         holeLo = a;
         holeHi = b;
       }
     }
     if (!Double.isNaN(holeLo)) {
-      out.add(new BeamSpan(sp.alongX(), sp.line(), holeLo, holeHi, sp.visualBaseY()));
+      out.add(new BeamSpan(sp.alongX(), sp.line(), holeLo, holeHi, sp.visualBaseY(),
+        HazardClass.HOLE));
     }
   }
 

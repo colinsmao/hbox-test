@@ -81,8 +81,8 @@ General / Appearance / Debug tabs, live apply, save-on-close, and General
 uncapped customs); see `[settings.md](settings.md)`.
 - **M8 — surface/overlay pipeline refactor**: extract `RectMath` / `SurfaceEmitter`,
 split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygiene.
-- **M9 — hazards (in progress):** swimmable water/lava surfaces, fluid escape
-height, and hazard fill colors; perimeter beams next (`PLAN.md` Step 4b).
+- **M9 — fluid hazards:** swimmable water/lava surfaces, fluid escape height, hazard
+fill colors, and perimeter beams (`HazardBeams`).
 
 ## Repository layout
 
@@ -113,8 +113,8 @@ it.
   │   │   └── WorldOverlay.java / WorldOverlayManager.java
   │   └── surface/                         # compute + selection widget + emit
   │       ├── EntityProfile / StandableRect / SkirtSpan / BeamSpan / FallColumn / ClimbRule
-  │       ├── RectMath.java / SurfaceSelection.java / WorldGeometry.java
-  │       ├── HoleBeams.java / DownSkirts.java / OccluderSkirts.java
+  │       ├── HazardClass.java / RectMath.java / SurfaceSelection.java / WorldGeometry.java
+  │       ├── HoleBeams.java / HazardBeams.java / DownSkirts.java / OccluderSkirts.java
   │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java
   ├── client/resources/assets/mobwalk/lang/en_us.json
   └── test/java/dev/kelianmao/mobwalk/client/{config,surface}/  # mirrors source packages

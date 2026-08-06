@@ -57,7 +57,7 @@ public final class SurfaceEmitter {
   public static void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer,
       BufferBuilder skirtBuffer, BufferBuilder beamBuffer,
       List<StandableRect> rects, List<SkirtSpan> occluders,
-      List<SkirtSpan> downSkirts, List<BeamSpan> holes,
+      List<SkirtSpan> downSkirts, List<BeamSpan> holes, List<BeamSpan> hazards,
       boolean crouching) {
     if (rects.isEmpty()) {
       return;
@@ -69,7 +69,8 @@ public final class SurfaceEmitter {
     Palette.FillColors colors = new Palette.FillColors(
       Configs.walkableColor(),
       Configs.showWaterHazard(), Configs.waterHazardColor(),
-      Configs.showLavaHazard(), Configs.lavaHazardColor());
+      Configs.showLavaHazard(), Configs.lavaHazardColor(),
+      Configs.showHoleBeams(), Configs.holeBeamColor());
 
     for (StandableRect rect : rects) {
       if (!showCutoff && rect.frontier()) {
@@ -105,27 +106,30 @@ public final class SurfaceEmitter {
     emitSkirts(skirtBuffer, positionMatrix, downSkirts, shadeByDepth, colors);
     emitSkirts(skirtBuffer, positionMatrix, occluders, shadeByDepth, colors);
 
-    BufferBuilder holeBuffer = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
-    emitHoles(holeBuffer, positionMatrix, holes);
+    BufferBuilder beamTarget = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
+    emitBeams(beamTarget, positionMatrix, holes, colors);
+    emitBeams(beamTarget, positionMatrix, hazards, colors);
   }
 
-  // Hole beams are only published for non-frontier drops (HoleBeams.compute skips
-  // frontier skirts), so no cutoff suppress is needed here.
-  private static void emitHoles(BufferBuilder holeBuffer, Matrix4fc positionMatrix,
-      List<BeamSpan> holes) {
-    if (!Configs.showHoleBeams() || holes.isEmpty()) {
+  // Per-span Appearance color/toggle from BeamSpan.hazard (HOLE → hole settings;
+  // WATER/LAVA → hazard show+color; show off skips that kind).
+  private static void emitBeams(BufferBuilder buffer, Matrix4fc positionMatrix,
+      List<BeamSpan> spans, Palette.FillColors colors) {
+    if (spans.isEmpty()) {
       return;
     }
-    Color4f beam = Configs.holeBeamColor();
-    for (BeamSpan h : holes) {
-      emitBeam(holeBuffer, positionMatrix, h.alongX(), h.line(), h.lo(), h.hi(),
-        h.visualBaseY(), beam);
+    for (BeamSpan s : spans) {
+      Color4f beam = colors.beamColor(s.hazard());
+      if (beam == null) {
+        continue;
+      }
+      emitBeam(buffer, positionMatrix, s.alongX(), s.line(), s.lo(), s.hi(),
+        s.visualBaseY(), beam);
     }
   }
 
-  // Shared vertical beam drawer for hole (and later hazard) rim markers. Caller
-  // picks buffer (Appearance showBeamsThroughWalls) and color; rise is fixed
-  // BEAM_HEIGHT from visualBaseY.
+  // Shared vertical beam drawer. Caller picks buffer (Appearance showBeamsThroughWalls)
+  // and color; rise is fixed BEAM_HEIGHT from visualBaseY.
   private static void emitBeam(BufferBuilder buffer, Matrix4fc positionMatrix,
       boolean alongX, double line, double lo, double hi, double visualBaseY, Color4f color) {
     float base = (float) visualBaseY;
@@ -296,9 +300,10 @@ public final class SurfaceEmitter {
     }
 
     /**
-     * Frame fill palette: walkable + per-hazard show/color. Hoisted once in
-     * {@code emit} and shared with skirts. Precedence: frontier grey → depth hue
-     * → hazard color (if shown) → walkable.
+     * Frame fill palette: walkable + per-hazard show/color + hole beam show/color.
+     * Hoisted once in {@code emit} and shared with skirts and beams. Fill precedence:
+     * frontier grey → depth hue → hazard color (if shown) → walkable. Beam colors
+     * come from {@link #beamColor} (show off returns null).
      */
     static final class FillColors {
       private final Color4f walkable;
@@ -306,14 +311,18 @@ public final class SurfaceEmitter {
       private final Color4f water;
       private final boolean showLava;
       private final Color4f lava;
+      private final boolean showHole;
+      private final Color4f hole;
 
       FillColors(Color4f walkable, boolean showWater, Color4f water,
-          boolean showLava, Color4f lava) {
+          boolean showLava, Color4f lava, boolean showHole, Color4f hole) {
         this.walkable = walkable;
         this.showWater = showWater;
         this.water = water;
         this.showLava = showLava;
         this.lava = lava;
+        this.showHole = showHole;
+        this.hole = hole;
       }
 
       Resolved resolve(boolean frontier, boolean shadeByDepth, int depth,
@@ -328,9 +337,19 @@ public final class SurfaceEmitter {
         Color4f base = switch (hazard) {
           case WATER -> showWater ? water : walkable;
           case LAVA -> showLava ? lava : walkable;
-          case NONE -> walkable;
+          case NONE, HOLE -> walkable;
         };
         return new Resolved(base.r, base.g, base.b, base.a);
+      }
+
+      /** Beam RGBA for {@code hazard}, or {@code null} when that kind's show is off. */
+      Color4f beamColor(HazardClass hazard) {
+        return switch (hazard) {
+          case HOLE -> showHole ? hole : null;
+          case WATER -> showWater ? water : null;
+          case LAVA -> showLava ? lava : null;
+          case NONE -> null;
+        };
       }
     }
 

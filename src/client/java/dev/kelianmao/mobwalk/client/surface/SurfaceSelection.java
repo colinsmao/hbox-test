@@ -212,13 +212,16 @@ public final class SurfaceSelection {
   // hole classification can share this same drop-edge pass. Replaced each select.
   private List<SkirtSpan> downSkirts = List.of();
 
-  // Hole spans for the last select: drop sub-spans with no reached surface below
-  // (void, or unreached ground). Marked by a through-walls beam at the rim.
-  // Replaced wholesale each select.
+  // Hole beam spans for the last select: drop sub-spans with no reached surface
+  // below (void, or unreached ground). HazardClass.HOLE. Replaced each select.
   private List<BeamSpan> holes = List.of();
 
+  // Hazard perimeter beam spans for the last select (WATER/LAVA rect edges minus
+  // same-hazard seams). Replaced each select.
+  private List<BeamSpan> hazards = List.of();
+
   // One-shot geometry dump for /mobwalk dump: when set, the next select() logs
-  // reached/merged/occluders/skirts/holes then clears the flag. Armed by
+  // reached/merged/occluders/skirts/holes/hazards then clears the flag. Armed by
   // requestDebugDump() only.
   private boolean debugDumpOnce = false;
   // Pre-merge reached tops captured only when debugDumpOnce is set.
@@ -281,6 +284,7 @@ public final class SurfaceSelection {
       occluders = collisionOccluders;
     }
     holes = HoleBeams.compute(level, result, dropEdges, profile, swimmableFluids);
+    hazards = HazardBeams.compute(result);
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape,
         raisedVisual ? collisionOccluders : null);
@@ -313,8 +317,14 @@ public final class SurfaceSelection {
     MobWalk.LOGGER.info("[flood-debug] holes={}", holes.size());
     for (BeamSpan s : holes) {
       MobWalk.LOGGER.info(
-        "[flood-debug]   hole alongX={} line={} [{},{}] visualBaseY={}",
-        s.alongX(), s.line(), s.lo(), s.hi(), s.visualBaseY());
+        "[flood-debug]   hole alongX={} line={} [{},{}] visualBaseY={} hazard={}",
+        s.alongX(), s.line(), s.lo(), s.hi(), s.visualBaseY(), s.hazard());
+    }
+    MobWalk.LOGGER.info("[flood-debug] hazards={}", hazards.size());
+    for (BeamSpan s : hazards) {
+      MobWalk.LOGGER.info(
+        "[flood-debug]   hazard alongX={} line={} [{},{}] visualBaseY={} hazard={}",
+        s.alongX(), s.line(), s.lo(), s.hi(), s.visualBaseY(), s.hazard());
     }
   }
 
@@ -343,6 +353,7 @@ public final class SurfaceSelection {
     occluders = List.of();
     downSkirts = List.of();
     holes = List.of();
+    hazards = List.of();
     debugDumpOnce = false;
     debugReachedPreMerge = List.of();
   }
@@ -362,9 +373,14 @@ public final class SurfaceSelection {
     return downSkirts;
   }
 
-  /** Immutable snapshot of the hole spans (through-walls beam markers) for the reached set. */
+  /** Immutable snapshot of hole beam spans ({@link HazardClass#HOLE}) for the reached set. */
   public List<BeamSpan> allHoles() {
     return holes;
+  }
+
+  /** Immutable snapshot of hazard perimeter beam spans for the reached set. */
+  public List<BeamSpan> allHazards() {
+    return hazards;
   }
 
   /**

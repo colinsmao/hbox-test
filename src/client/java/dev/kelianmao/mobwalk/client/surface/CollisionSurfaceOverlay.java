@@ -93,6 +93,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
   // See HoleBeams.compute.
   private volatile List<BeamSpan> holeSnapshot = List.of();
+  // Hazard perimeter beams (WATER/LAVA). See HazardBeams.compute.
+  private volatile List<BeamSpan> hazardSnapshot = List.of();
 
   @Override
   public String id() {
@@ -116,6 +118,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       occluderSnapshot = List.of();
       downSkirtSnapshot = List.of();
       holeSnapshot = List.of();
+      hazardSnapshot = List.of();
     }
 
     Item wand = Configs.wandItem();
@@ -140,6 +143,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     occluderSnapshot = cache.allOccluders();
     downSkirtSnapshot = cache.allDownSkirts();
     holeSnapshot = cache.allHoles();
+    hazardSnapshot = cache.allHazards();
   }
 
   // Walk down from the targeted block until a non-empty collision shape is
@@ -297,17 +301,18 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       cache.allRects().size(),
       cache.allOccluders().size(),
       cache.allDownSkirts().size(),
-      cache.allHoles().size());
+      cache.allHoles().size(),
+      cache.allHazards().size());
   }
 
   /** Counts returned by {@link #dumpFloodDebug} for the chat status line. */
-  public record FloodDebugCounts(int merged, int occluders, int skirts, int holes) {
+  public record FloodDebugCounts(int merged, int occluders, int skirts, int holes, int hazards) {
   }
 
   @Override
   public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
       BufferBuilder beamBuffer) {
     SurfaceEmitter.emit(positionMatrix, fillBuffer, skirtBuffer, beamBuffer,
-      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, crouching);
+      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, hazardSnapshot, crouching);
   }
 }
