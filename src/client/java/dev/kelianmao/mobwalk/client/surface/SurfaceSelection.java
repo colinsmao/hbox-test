@@ -87,7 +87,7 @@ public final class SurfaceSelection {
    * first BFS wave via adjacency only; they are never painted.
    */
   record OriginProbe(double minX, double minZ, double maxX, double maxZ,
-      double collisionTopY) {
+      double collisionTopY, HazardClass hazard) {
   }
 
   /**
@@ -252,10 +252,11 @@ public final class SurfaceSelection {
    * {@code select} (see {@code CollisionSurfaceOverlay}).
    */
   public void select(Level level, BlockPos start, int radius, EntityProfile profile,
-      boolean computeVisualTop, boolean swimmableFluids) {
+      boolean computeVisualTop, boolean swimmableFluids, double fluidEscape) {
     boolean dump = debugDumpOnce;
     debugReachedPreMerge = List.of();
-    LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop, swimmableFluids);
+    LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop,
+      swimmableFluids, fluidEscape);
     result = lazy.run();
     if (dump) {
       debugReachedPreMerge = lazy.preMergeReached();
@@ -278,17 +279,17 @@ public final class SurfaceSelection {
       : dropEdges;
     holes = computeHoles(level, result, dropEdges, profile, swimmableFluids);
     if (dump) {
-      logFloodDebug(profile, start, radius, computeVisualTop);
+      logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape);
       debugDumpOnce = false;
       debugReachedPreMerge = List.of();
     }
   }
 
   private void logFloodDebug(EntityProfile profile, BlockPos start, int radius,
-      boolean computeVisualTop) {
+      boolean computeVisualTop, double fluidEscape) {
     MobWalk.LOGGER.info(
-      "[flood-debug] profile={} W={} H={} reach={} seed={} radius={} visualTop={}",
-      profile.name(), profile.width(), profile.height(), profile.reach(),
+      "[flood-debug] profile={} W={} H={} reach={} fluidEscape={} seed={} radius={} visualTop={}",
+      profile.name(), profile.width(), profile.height(), profile.reach(), fluidEscape,
       start, radius, computeVisualTop);
     logFloodDebugRects("reached", debugReachedPreMerge);
     logFloodDebugRects("merged", result);
@@ -356,14 +357,14 @@ public final class SurfaceSelection {
 
   /**
    * Initial BFS wave from non-emitted {@link OriginProbe}s: keep candidates that
-   * are footprint-adjacent to a probe within {@code reach} of that probe's
-   * height; assign depth 0 when {@code fromSeedBlock}, else 1; keep the minimum
-   * depth on duplicates; drop depths above {@code depthLimit}. Returns depth-0
-   * entries before depth-1 so a FIFO queue preserves shortest-path order.
+   * are footprint-adjacent to a probe and climbable under {@code climb}; assign
+   * depth 0 when {@code fromSeedBlock}, else 1; keep the minimum depth on
+   * duplicates; drop depths above {@code depthLimit}. Returns depth-0 entries
+   * before depth-1 so a FIFO queue preserves shortest-path order.
    * Package-private for unit tests (synthetic probes/candidates, no world).
    */
   static List<SeedWaveEntry> assignOriginWave(List<OriginProbe> probes,
-      List<OriginCandidate> candidates, double reach, int depthLimit) {
+      List<OriginCandidate> candidates, ClimbRule climb, int depthLimit) {
     if (probes.isEmpty() || candidates.isEmpty() || depthLimit < 0) {
       return List.of();
     }
@@ -372,7 +373,8 @@ public final class SurfaceSelection {
       StandableRect r = c.rect();
       boolean adjacent = false;
       for (OriginProbe p : probes) {
-        if (Math.abs(r.collisionTopY() - p.collisionTopY()) > reach + EPS) {
+        StandableRect probeRect = probeAsRect(p);
+        if (!climb.climbs(probeRect, r)) {
           continue;
         }
         if (probeFootprintAdjacent(p, r)) {
@@ -409,9 +411,12 @@ public final class SurfaceSelection {
 
   // footprintAdjacent for a raw dilated probe vs an exposed standable top.
   private static boolean probeFootprintAdjacent(OriginProbe p, StandableRect r) {
-    return RectMath.footprintAdjacent(
-      new StandableRect(p.minX(), p.minZ(), p.maxX(), p.maxZ(), p.collisionTopY()),
-      r);
+    return RectMath.footprintAdjacent(probeAsRect(p), r);
+  }
+
+  private static StandableRect probeAsRect(OriginProbe p) {
+    return new StandableRect(p.minX(), p.minZ(), p.maxX(), p.maxZ(), p.collisionTopY(),
+      p.collisionTopY(), p.hazard());
   }
 
   /**
@@ -971,8 +976,7 @@ public final class SurfaceSelection {
       }
       FallColumn fall = FallColumn.of(sp);
       ledges.clear();
-      gatherLedges(level, fall, sp.baseY(), rects, halfW, height, ledges, swimmableFluids,
-        profile.reach());
+      gatherLedges(level, fall, sp.baseY(), rects, halfW, height, ledges, swimmableFluids);
       holeSubSpans(sp, rects, ledges, out);
     }
     return out;
@@ -1061,8 +1065,8 @@ public final class SurfaceSelection {
   // ledge gather cannot re-expose a fragment the flood buried.
   private static void gatherLedges(Level level, FallColumn fall, double collisionTopY,
       List<StandableRect> reached, double halfW, double height, List<StandableRect> out,
-      boolean swimmableFluids, double reach) {
-    gatherLedgesFrom(WorldGeometry.levelColumnBoxes(level, false, swimmableFluids, reach),
+      boolean swimmableFluids) {
+    gatherLedgesFrom(WorldGeometry.levelColumnBoxes(level, false, swimmableFluids),
       fall, collisionTopY, reached, halfW, height, out);
   }
 
@@ -1158,7 +1162,7 @@ public final class SurfaceSelection {
   private List<SkirtSpan> computeOccluders(Level level, List<StandableRect> rects,
       EntityProfile profile, boolean swimmableFluids) {
     return computeOccludersFrom(
-      WorldGeometry.levelColumnBoxes(level, false, swimmableFluids, profile.reach()),
+      WorldGeometry.levelColumnBoxes(level, false, swimmableFluids),
       level.getMinY(), level.getMaxY(), rects, profile);
   }
 
@@ -1227,7 +1231,8 @@ public final class SurfaceSelection {
    * on demand (with each box's occluder shell — the columns {@link #exposeBox}
    * scans — exposed first, so the spans-above test sees a complete shell) and a
    * surface is enqueued iff it is unvisited,
-   * {@link RectMath#footprintAdjacent}, and within {@code reach}.
+   * {@link RectMath#footprintAdjacent}, and {@link ClimbRule#climbs} (the
+   * collect height window {@code [h-reach, h+reach]} stays a valid superset).
    *
    * <p><b>Depth-bounded</b> (debug mode): the flood stops when BFS hop-count
    * exceeds {@code depthLimit} (Flood Radius in settings). There is no spatial
@@ -1245,6 +1250,7 @@ public final class SurfaceSelection {
     private final int depthLimit;
     private final double halfW;
     private final double reach;
+    private final ClimbRule climb;
     // Chebyshev neighbour-search radius in cells = floor(W)+1 (see class doc).
     private final int neighbour;
     // The shared lazy world-surface index (per-column boxes + scanned rows + memoized
@@ -1256,7 +1262,7 @@ public final class SurfaceSelection {
     private List<StandableRect> preMergeReached = List.of();
 
     LazyFlood(Level level, BlockPos start, int depthLimit, EntityProfile profile,
-        boolean computeVisualTop, boolean swimmableFluids) {
+        boolean computeVisualTop, boolean swimmableFluids, double fluidEscape) {
       BlockPos origin = start.immutable();
       this.ox = origin.getX();
       this.oy = origin.getY();
@@ -1265,12 +1271,13 @@ public final class SurfaceSelection {
       this.halfW = profile.width() / 2.0;
       double height = profile.height();
       this.reach = profile.reach();
+      this.climb = new ClimbRule(reach, fluidEscape);
       this.neighbour = (int) Math.floor(profile.width()) + 1;
       int bandLo = Math.max(oy - depthLimit - 1, level.getMinY());
       int bandHi = Math.min(oy + depthLimit + 1, level.getMaxY());
       this.surfaces = new WorldSurfaceIndex(
-        WorldGeometry.levelColumnBoxes(level, computeVisualTop, swimmableFluids, reach), halfW, height, bandLo,
-        bandHi);
+        WorldGeometry.levelColumnBoxes(level, computeVisualTop, swimmableFluids), halfW, height,
+        bandLo, bandHi);
     }
 
     List<StandableRect> preMergeReached() {
@@ -1295,7 +1302,7 @@ public final class SurfaceSelection {
           }
         }
       }
-      List<SeedWaveEntry> initial = assignOriginWave(probes, candidates, reach, depthLimit);
+      List<SeedWaveEntry> initial = assignOriginWave(probes, candidates, climb, depthLimit);
       if (initial.isEmpty()) {
         preMergeReached = List.of();
         return List.of();
@@ -1336,7 +1343,8 @@ public final class SurfaceSelection {
               if (hopCount.containsKey(t)) {
                 continue;
               }
-              if (RectMath.footprintAdjacent(s.rect(), t.rect())) {
+              if (RectMath.footprintAdjacent(s.rect(), t.rect())
+                  && climb.climbs(s.rect(), t.rect())) {
                 hopCount.put(t, d + 1);
                 queue.addLast(t);
               }
@@ -1373,7 +1381,7 @@ public final class SurfaceSelection {
         probes.add(new OriginProbe(
           box.minX() - halfW, box.minZ() - halfW,
           box.maxX() + halfW, box.maxZ() + halfW,
-          box.yMax()));
+          box.yMax(), box.hazard()));
       }
       return probes;
     }

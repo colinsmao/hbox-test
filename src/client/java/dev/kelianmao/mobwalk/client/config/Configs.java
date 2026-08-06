@@ -137,6 +137,8 @@ public final class Configs implements IConfigHandler {
       new ConfigInteger("floodRadius", 20, 0, 30, true).apply(GENERIC_KEY);
     public static final ConfigBoolean SWIMMABLE_FLUIDS =
       new ConfigBoolean("swimmableFluids", true).apply(GENERIC_KEY);
+    public static final ConfigDouble FLUID_ESCAPE_HEIGHT =
+      new ConfigDouble("fluidEscapeHeight", 0.375, 0.0, 2.0, true).apply(GENERIC_KEY);
 
     /** GUI order (includes tables). File I/O uses {@link #FILE_OPTIONS}. */
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
@@ -146,7 +148,8 @@ public final class Configs implements IConfigHandler {
       BUILTIN_PROFILES,
       CUSTOM_PROFILES,
       FLOOD_RADIUS,
-      SWIMMABLE_FLUIDS
+      SWIMMABLE_FLUIDS,
+      FLUID_ESCAPE_HEIGHT
     );
 
     /** Generic JSON category — profile tables live under Profiles. */
@@ -155,7 +158,8 @@ public final class Configs implements IConfigHandler {
       WAND_ITEM,
       MOB_PROFILE,
       FLOOD_RADIUS,
-      SWIMMABLE_FLUIDS
+      SWIMMABLE_FLUIDS,
+      FLUID_ESCAPE_HEIGHT
     );
 
     private Generic() {}
@@ -416,6 +420,12 @@ public final class Configs implements IConfigHandler {
         collision.reselectWithMobProfile();
       }
     });
+    Generic.FLUID_ESCAPE_HEIGHT.setValueChangeCallback(cfg -> {
+      CollisionSurfaceOverlay collision = WorldOverlayManager.collisionSurface();
+      if (collision != null) {
+        collision.reselectWithMobProfile();
+      }
+    });
     Profiles.BUILTIN_PROFILES.setValueChangeCallback(cfg -> onProfilesChanged());
     Profiles.CUSTOM_PROFILES.setValueChangeCallback(cfg -> onCustomProfilesChanged());
   }
@@ -588,6 +598,15 @@ public final class Configs implements IConfigHandler {
   /** Whether water/lava emit swim planes for {@link SurfaceSelection#select}. */
   public static boolean swimmableFluids() {
     return Generic.SWIMMABLE_FLUIDS.getBooleanValue();
+  }
+
+  /**
+   * Rim height above the fluid block top that a fluid→solid climb may clear
+   * (Generic {@code fluidEscapeHeight}; fed into
+   * {@link dev.kelianmao.mobwalk.client.surface.ClimbRule}).
+   */
+  public static double fluidEscapeHeight() {
+    return Generic.FLUID_ESCAPE_HEIGHT.getDoubleValue();
   }
 
   public static boolean showBeamsThroughWalls() {

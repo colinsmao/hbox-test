@@ -14,13 +14,15 @@
   "mobwalk.config.generic.showSurfaces.whileHoldingWand": "While Holding Wand",
   "mobwalk.config.generic.showSurfaces.always": "Always",
 
-  "mobwalk.config.generic.comment.wandItem": "Item id of the wand tool. Defaults to minecraft:stick. Right-click with a wand to select an area. It is recommended to use a non-interaction item (eg stick, ingot) to prevent action conflicts on right-click.",
+  "mobwalk.config.generic.comment.wandItem": "Item id of the wand tool. Defaults to minecraft:stick. Right-click with a wand to select an area.\nIt is recommended to use a non-interaction item (eg stick, ingot) to prevent action conflicts on right-click.",
 
   "mobwalk.config.generic.comment.mobProfile": "Which mob's hitbox and vertical reach to use when calculating walkable area. Cycles enabled mob profiles only. Does NOT account for horizontal movement when jumping (ie parkour).",
 
   "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block, in flood steps. Large values may impact performance, especially with a large mob hitbox (must check farther per step).",
 
   "mobwalk.config.generic.comment.swimmableFluids": "If enabled, water and lava are treated as walkable to approximate swimming.",
+
+  "mobwalk.config.generic.comment.fluidEscapeHeight": "The max height a mob can escape from a water or lava source block. From empirical testing:\n6/16 = 0.375 seems to match mob pathfinding.\n14/16 = 0.875 (soul sand) seems to be the player's max escape height from water.",
 
   "mobwalk.gui.text_field.invalid_item_id": "Unknown or invalid item id",
 

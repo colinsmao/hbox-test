@@ -171,7 +171,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     var profile = Configs.mobProfile();
     if (level != null && lastSeed != null && profile.isPresent()) {
       cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
-        Configs.swimmableFluids());
+        Configs.swimmableFluids(), Configs.fluidEscapeHeight());
       publish();
     }
   }
@@ -223,7 +223,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
         var profile = Configs.mobProfile();
         if (profile.isPresent()) {
           cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
-            Configs.swimmableFluids());
+            Configs.swimmableFluids(), Configs.fluidEscapeHeight());
           lastSeed = start;
         }
       }
@@ -291,7 +291,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     }
     cache.requestDebugDump();
     cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
-      Configs.swimmableFluids());
+      Configs.swimmableFluids(), Configs.fluidEscapeHeight());
     publish();
     return new FloodDebugCounts(
       cache.allRects().size(),

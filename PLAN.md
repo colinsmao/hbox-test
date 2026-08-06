@@ -61,8 +61,9 @@ rect/flood machinery.
 - **Hazard identity lives on the fluid surface.** Only the fluid box carries a
   `HazardClass`; solids stay `NONE`. Thin sheets get a floor-height fluid surface so they
   carry the fluid hazard over the solid underfoot.
-- **Escape lives in the climb test.** When the lower surface of a pair is fluid and the
-  higher is solid, the budget is capped at `collisionTopY + 1/9 + escape` (Step 3);
+- **Escape lives in the climb test.** When the lower surface of a pair is fluid
+  (`HazardClass.isFluid()`) and the higher is not, the budget is capped at
+  `collisionTopY + 1/9 + escape` (Step 3);
   climbing to another fluid keeps the plain reach, which is what leaves the column ladder
   intact. `escape` is the thickest rim a mob leaves the fluid onto, measured from the
   fluid **block** top — the same number an in-game measurement produces (water `6/16`) —
@@ -76,7 +77,7 @@ rect/flood machinery.
 - **Fluid identity through the merge.** Ownership `(radiusTier, hazardPriority, visualTopY)`
   — hazard priority separates water/lava and lets a thin fluid surface claim over solid.
 - **One hazard enum is the extension point.** `HazardClass { NONE, WATER, LAVA }` keys
-  the color and the merge priority; the escape thickness is one value shared by all
+  the color and the merge priority; the escape height is one value shared by all
   fluids.
 - **Marking.** Hazard fill color + perimeter `HazardSpan` beams.
 
@@ -163,18 +164,18 @@ than by moving any plane.
 
 - The whole rule is one predicate over two rects, `ClimbRule.climbs(a, b)`: take the
   lower by `collisionTopY`, give it a budget of `lower.collisionTopY() + reach`, and when
-  the lower is fluid and the upper is solid cap that at
+  the lower `isFluid()` and the upper is not, cap that at
   `lower.collisionTopY() + FLUID_SURFACE_DROP + fluidEscape`; the edge exists iff the
   higher's `collisionTopY` is at or below the budget. One undirected edge with the lower
   supplying it, so *reachable is escapable* is untouched.
 - `FLUID_SURFACE_DROP = 1/9` is the still-fluid assumption made concrete: a source sits
-  `8/9` up its cell, so adding `1/9` back turns the setting (a rim thickness above the
+  `8/9` up its cell, so adding `1/9` back turns the setting (a rim height above the
   fluid **block** top) into a height above the plane the rect actually carries. That is
   what keeps the predicate a pure function of two `StandableRect`s — no source block, no
   fluid height, nothing new on the node.
-- **The cap binds only when the target is solid**, which is what leaves the fluid column
+- **The cap binds only when the target is non-fluid**, which is what leaves the fluid column
   on the ordinary reach: consecutive planes sit `1.0` apart, far past any escape
-  thickness, so a pool floor and a waterfall stay connected exactly as in Step 1. It does
+  height, so a pool floor and a waterfall stay connected exactly as in Step 1. It does
   bind for **every** fluid rect rather than surface cells alone, so a submerged plane
   cannot route around the surface plane's limit at a low setting; a shelf inside the
   water column is still reached from the plane above it, where the solid is the lower
@@ -196,7 +197,7 @@ than by moving any plane.
   `fluidSurfaceHeight` lose the parameter they reserved for seating.
 
 One Generic setting supplies `fluidEscape` for every fluid, alongside the single
-`swimmableFluids` toggle: `fluidEscapeThickness`, a `ConfigDouble` in blocks over
+`swimmableFluids` toggle: `fluidEscapeHeight`, a `ConfigDouble` in blocks over
 `[0, 2]` defaulting to `0.375` (`6/16`), with the `floodRadius` live-apply → re-flood
 callback and a `comment.*` key in
 [en_us.json](src/client/resources/assets/mobwalk/lang/en_us.json) naming the two anchors
@@ -225,13 +226,13 @@ column ladder):
    terrain past it paint as one connected region.
 5. **Waterfall** down a cliff into the pool → click the pool floor: the falling column
    paints from the pool up to its source.
-6. Configure → General → `fluidEscapeThickness` `0.875` → a soul-sand (`14/16`) ring
+6. Configure → General → `fluidEscapeHeight` `0.875` → a soul-sand (`14/16`) ring
    paints while the full-block ring still fails; `2.0` → the full-block ring paints.
 7. Dry cliff / stair / trench selection unchanged from Step 2.
 8. `./gradlew build` green.
 
 Lava: re-check items 1–4 on a lava pool with a Warden before treating this step done. If
-lava turns out to want a materially different thickness, splitting the setting per hazard
+lava turns out to want a materially different height, splitting the setting per hazard
 is the follow-up.
 
 ## Step 4 — Hazard fill + perimeter beams
@@ -289,10 +290,10 @@ within a step); the concrete case tables are written during the step.
    solid in Step 2).
 6. **Escape cap** (Step 3, `FluidEscapeTest`). A pair's budget is
    `lower.collisionTopY() + profile.reach()`, further capped at
-   `lower.collisionTopY() + 1/9 + fluidEscape` when the lower is fluid and the higher is
-   solid. `climbs` gives the same verdict whichever order the pair is passed and always
+   `lower.collisionTopY() + 1/9 + fluidEscape` when the lower
+   `HazardClass.isFluid()` and the higher is not. `climbs` gives the same verdict whichever order the pair is passed and always
    spends the lower rect's budget, so every edge stays undirected and *reachable is
-   escapable* holds. The cap is confined to fluid-to-solid pairs, so consecutive planes in
+   escapable* holds. The cap is confined to fluid-to-non-fluid pairs, so consecutive planes in
    a fluid column stay connected for every profile at every setting value.
 
 Doc homes: a new "Fluid surfaces" section in [docs/geometry.md](docs/geometry.md) for
@@ -313,12 +314,12 @@ climbables inherit it.
 - **Falling fluid emits like still fluid.** Downward push unmodelled.
 - **Manual toggle, no roster field.** One Generic `swimmableFluids` (on by default) for
   vanilla water and lava, rather than a `lavaImmune` column on the profile roster.
-- **One Generic escape-thickness setting** covers every fluid, matching the single
+- **One Generic escape-height setting** covers every fluid, matching the single
   `swimmableFluids` toggle. A setting rather than a constant because the true value is
   uncertain and the useful range spans two different questions — `0.375` answers "where
   will a mob go", `0.875` and up answers "where can one physically get" — and that is the
   user's call, not the code's.
-- **Escape is measured from the fluid block top**, so the setting is the rim thickness an
+- **Escape is measured from the fluid block top**, so the setting is the rim height an
   in-game test produces. One constant (`1/9`, the still-fluid surface drop) converts it
   to a height above the plane, which keeps fluid height out of the arithmetic and the
   climb test a pure function of two rects.
@@ -333,17 +334,17 @@ climbables inherit it.
 
 ## Limitations to record in the docs
 
-- One escape thickness covers every fluid and every profile. At its default it models
+- One escape height covers every fluid and every profile. At its default it models
   **AI pathing** rather than physical capability, so a rim the mod calls unreachable can still
   be left by a mob that is pushed, knocked back, or ridden — and vanilla wardens avoid
   pathing into lava despite their immunity (MC-249415), so an enabled lava plane says
   "it can cross", not "it will". Raising the setting moves the model back toward
   capability.
-- The escape thickness is measured on **still** water and converted to a height above the
+- The escape height is measured on **still** water and converted to a height above the
   plane by a fixed `1/9`, the drop from a cell top to a source's surface. Whether mob
   pathing changes with flow level is unverified, so a shallower flowing cell gets that
   same budget above its own plane.
-- A pool whose rim sits more than the escape thickness above the water block top is
+- A pool whose rim sits more than the escape height above the water block top is
   outside the connected region entirely, so it stays unpainted and its rim reads as a
   hole beam. That is the accurate verdict for a mob that falls in, at the cost of the
   "the trap is water" cue — and at the mob-pathing default it is the **common** case

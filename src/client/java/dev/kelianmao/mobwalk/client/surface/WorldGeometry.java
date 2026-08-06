@@ -95,7 +95,7 @@ public final class WorldGeometry {
   // gather, and the occluder pass so there is one world-read implementation behind
   // WorldSurfaceIndex / computeOccludersFrom.
   static ColumnBoxes levelColumnBoxes(Level level, boolean computeVisualTop,
-      boolean swimmableFluids, double reach) {
+      boolean swimmableFluids) {
     BlockPos.MutableBlockPos scan = new BlockPos.MutableBlockPos();
     return (x, y, z) -> {
       scan.set(x, y, z);
@@ -103,7 +103,7 @@ public final class WorldGeometry {
       FluidState fluidState = state.getFluidState();
       HazardClass hazard = hazardClass(fluidState, swimmableFluids);
       double fluidHeight = fluidState.isEmpty() ? 0.0 : fluidState.getHeight(level, scan);
-      OptionalDouble fluidTop = fluidSurfaceHeight(hazard, fluidHeight, reach);
+      OptionalDouble fluidTop = fluidSurfaceHeight(hazard, fluidHeight);
 
       VoxelShape shape = state.getCollisionShape(level, scan, CollisionContext.empty());
       List<WorldBox> boxes = new ArrayList<>();
@@ -132,14 +132,13 @@ public final class WorldGeometry {
    * Whether a cell emits a fluid surface, and at what height above the block floor.
    * Enabled fluid hazard always emits: at {@code getHeight} when above
    * {@link #FLUID_JUMP_THRESHOLD}, otherwise at {@code 0} (coplanar with the solid
-   * underfoot). Seating at the effective standing height is Step 3 ({@code reach}
-   * is reserved for that seating).
+   * underfoot). Escape from fluid onto a solid rim is a climb-budget cap
+   * ({@link ClimbRule}), not a change to this plane height.
    */
-  static OptionalDouble fluidSurfaceHeight(HazardClass hazard, double fluidHeight, double reach) {
+  static OptionalDouble fluidSurfaceHeight(HazardClass hazard, double fluidHeight) {
     if (hazard == HazardClass.NONE) {
       return OptionalDouble.empty();
     }
-    // reach reserved for Step 3 effective-plane seating
     if (fluidHeight <= FLUID_JUMP_THRESHOLD + RectMath.EPS) {
       return OptionalDouble.of(0.0);
     }

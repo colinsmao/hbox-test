@@ -22,4 +22,12 @@ public enum HazardClass {
   public int priority() {
     return priority;
   }
+
+  /**
+   * Whether this kind is a swimmable fluid surface (escape-cap / fluid emission).
+   * Non-fluid hazards (future magma, soul sand) stay {@code false}.
+   */
+  public boolean isFluid() {
+    return this == WATER || this == LAVA;
+  }
 }

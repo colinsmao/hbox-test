@@ -21,18 +21,17 @@ import dev.kelianmao.mobwalk.client.surface.WorldGeometry.WorldBox;
 final class FluidPlaneTest {
   private static final double EPS = 1.0e-9;
   private static final double SOURCE_HEIGHT = 8.0 / 9.0;
-  private static final double REACH = EntityProfile.PLAYER.reach();
 
   @Test
   void sourceWaterEmitsFluidSurfaceAtFluidHeight() {
-    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, SOURCE_HEIGHT, REACH);
+    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, SOURCE_HEIGHT);
     assertTrue(h.isPresent());
     assertEquals(SOURCE_HEIGHT, h.getAsDouble(), EPS);
   }
 
   @Test
   void submergedCellEmitsFullHeightFluidSurface() {
-    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 1.0, REACH);
+    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 1.0);
     assertTrue(h.isPresent());
     assertEquals(1.0, h.getAsDouble(), EPS);
   }
@@ -40,7 +39,7 @@ final class FluidPlaneTest {
   @Test
   void fallingCellEmitsFullHeightFluidSurface() {
     // Falling water reads getHeight == 1.0, same as a submerged still cell.
-    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 1.0, REACH);
+    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 1.0);
     assertTrue(h.isPresent());
     assertEquals(1.0, h.getAsDouble(), EPS);
   }
@@ -49,17 +48,17 @@ final class FluidPlaneTest {
   void thinLayerEmitsFluidSurfaceAtZero() {
     // Water levels 1–3 and Overworld lava's level-2 tail sit at or below 0.4 —
     // fluid surface at cell floor so it stays coplanar with the solid underfoot.
-    assertEquals(0.0, WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 0.4, REACH).orElseThrow(),
+    assertEquals(0.0, WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 0.4).orElseThrow(),
       EPS);
-    assertEquals(0.0, WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 3.0 / 9.0, REACH).orElseThrow(),
+    assertEquals(0.0, WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 3.0 / 9.0).orElseThrow(),
       EPS);
-    assertEquals(0.0, WorldGeometry.fluidSurfaceHeight(HazardClass.LAVA, 2.0 / 9.0, REACH).orElseThrow(),
+    assertEquals(0.0, WorldGeometry.fluidSurfaceHeight(HazardClass.LAVA, 2.0 / 9.0).orElseThrow(),
       EPS);
   }
 
   @Test
   void disabledKindYieldsNoFluidSurface() {
-    assertTrue(WorldGeometry.fluidSurfaceHeight(HazardClass.NONE, SOURCE_HEIGHT, REACH).isEmpty());
+    assertTrue(WorldGeometry.fluidSurfaceHeight(HazardClass.NONE, SOURCE_HEIGHT).isEmpty());
   }
 
   @Test

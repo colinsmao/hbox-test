@@ -10,9 +10,9 @@ space**, never a pixel raster (a raster rewrite was prototyped and rejected — 
 
 **The core model, in one paragraph.** A standable surface is a rect at a collision
 height. Two surfaces are **connected** when their footprints touch and the **lower one
-can climb to the higher** within the profile's `reach`: a climb test over an *unordered*
-pair, which is why it reads `|dTopY| <= reach` and yields **one undirected edge** (see
-[Reachability model](#reachability-model)). The selection is everything connected to the
+can climb to the higher** under `ClimbRule` (land budget `reach`, with a fluid→non-fluid
+escape cap — see [Reachability model](#reachability-model)): a climb test over an
+*unordered* pair yielding **one undirected edge**. The selection is everything connected to the
 clicked seed, so **reachable is escapable** — every edge is climbable in the up direction,
 therefore every path is walkable backwards. Falling is a separate subject with its own
 home, [hole classification](#hole-classification), and is unbounded there.
@@ -127,14 +127,14 @@ defined by four rules:
    minimal partition, but a missed merge only costs an extra interior skirt,
    **never reachability**.
 4. **Flood / reachability.** The click defines a **non-emitted origin**: the raw
-   pre-occlusion dilated footprints of the clicked block's collision boxes. An
-   exposed top is in the initial wave when it is footprint-adjacent to that origin
-   within `reach` — depth **0** when its source is the clicked block, depth **1**
-   otherwise. From there a surface is reached iff it connects to an already-reached
-   surface by **one geometric adjacency rule**: the footprints share an edge with
-   positive overlap (or overlap with positive area), `footprintAdjacent`, **and**
-   `|dTopY| <= reach` — the lower of the two can climb to the higher, one undirected
-   edge (see [Reachability model](#reachability-model)). This subsumes the old
+   pre-occlusion dilated footprints of the clicked block's collision boxes (carrying
+   `HazardClass`). An exposed top is in the initial wave when it is footprint-adjacent
+   to that origin and `ClimbRule.climbs` — depth **0** when its source is the clicked
+   block, depth **1** otherwise. From there a surface is reached iff it connects to an
+   already-reached surface by **one geometric adjacency rule**: the footprints share an
+   edge with positive overlap (or overlap with positive area), `footprintAdjacent`,
+   **and** `ClimbRule.climbs` — the lower of the two can climb to the higher, one
+   undirected edge (see [Reachability model](#reachability-model)). This subsumes the old
    same-block / own-column / neighbour-column special cases: a glass pane on a block
    connects to that block's exposed ring because their footprints abut at the hole
    edges — no special case. Only exposed tops are painted; a fully occluded click
@@ -176,13 +176,21 @@ makes the output-sensitive flood possible.
 
 ## Reachability model
 
-Reach is a **climb test over an unordered pair** (`profile.reach()` = `max(jump, step)`):
-of two surfaces, it asks whether the **lower can climb to the higher**. The pair is
-unordered, which is why the test reads `|dTopY| <= reach` — the absolute value picks
-whichever surface is lower — and why one passing pair yields **one undirected edge** that
-the flood walks in either direction. So the only quantity reach ever measures is a climb,
-and a rim whose drop exceeds `reach` yields no edge at all: the ground under it enters the
+Reach is a **climb test over an unordered pair**, implemented as
+`ClimbRule.climbs(a, b)`: of two surfaces, it asks whether the **lower can climb
+to the higher**. The land budget is `lower.collisionTopY() + profile.reach()`
+(`reach` = `max(jump, step)`). When the lower `HazardClass.isFluid()` and the
+higher is not, that budget is further capped at
+`lower.collisionTopY() + FLUID_SURFACE_DROP + fluidEscape`
+(`FLUID_SURFACE_DROP = 1/9`; `fluidEscape` from Generic `fluidEscapeHeight`) so
+leaving fluid onto a non-fluid rim is never easier than jumping on land. The pair
+is unordered — same verdict either argument order — and one passing pair yields
+**one undirected edge** that the flood walks in either direction. A rim whose
+rise exceeds the budget yields no edge at all: the ground under it enters the
 reached set only by another route (a staircase, a slope), if at all.
+
+The collect window stays `[h - reach, h + reach]` (a valid **superset** of the
+climb predicate); `ClimbRule` is the real edge filter.
 
 That single property carries the model's central guarantee. Every edge is climbable in the
 up direction, so every path is walkable backwards, and **membership in the reached set
@@ -260,9 +268,15 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 - **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
   fluid surface in a fluid column survives exposure. Consecutive tops differ by at
   most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
-  floor), so the ordinary [climb test](#reachability-model) connects surface,
-  intermediates, and floor —
-  including a waterfall column.
+  floor), so the [climb test](#reachability-model) connects surface, intermediates,
+  and floor — including a waterfall column. Fluid→fluid pairs use plain
+  `profile.reach()` (the escape cap does not bind), so the column stays connected
+  at every `fluidEscapeHeight` setting.
+- **Escape cap.** Leaving fluid onto a non-fluid rim uses Generic
+  `fluidEscapeHeight`: a rim height measured from the fluid **block** top, converted
+  to a height above the plane by `+ 1/9` (`ClimbRule.FLUID_SURFACE_DROP`). The
+  predicate keys on `HazardClass.isFluid()` (water/lava only), so later non-fluid
+  hazards do not inherit the cap. Contract: `FluidEscapeTest`.
 - **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
   the fluid top is clipped by that solid the same amount. At a flush pond rim the
   surviving fluid edge meets the shore's dilated footprint, so the drop classifier
@@ -272,7 +286,7 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
 coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
 complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
-disjoint rects).
+disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder).
 
 ## How it is computed: the output-sensitive (lazy) flood
 
@@ -308,11 +322,13 @@ milestones).
   `select`, so the memo key is unchanged). A `BitSet` per column records
   scanned rows so each `(column,row)` is queried at most once. The flood boots from
   **non-emitted origin probes** — each clicked-block box's raw dilated footprint at
-  its `collisionTopY` — then assigns initial depths via `assignOriginWave` (depth 0
-  on the seed block's exposed tops, depth 1 on other tops adjacent to a probe within
-  `reach`). Later hops use the same `|dTopY| <= reach` + footprint adjacency on
-  exposed tops only. The flood front moves `<= reach` per hop, so by induction
-  everything reachable is found near an already-reached height. This drops the
+  its `collisionTopY` (with `HazardClass`) — then assigns initial depths via
+  `assignOriginWave` (depth 0 on the seed block's exposed tops, depth 1 on other
+  tops adjacent to a probe and climbable under `ClimbRule`). Later hops use the
+  same `ClimbRule.climbs` + footprint adjacency on exposed tops only (candidates
+  still gathered in `[h-reach, h+reach]`). The flood front moves `<= reach` per
+  hop, so by induction everything reachable is found near an already-reached
+  height. This drops the
   per-column vertical factor from `O(radius)` to `O(heights the flood actually
   traverses there)`, so open ground goes `~radius³ → ~radius²`.
 - **`occluderColumns` (the occluder shell).** For `exposeBox` to trim a box's

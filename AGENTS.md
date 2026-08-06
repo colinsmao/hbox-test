@@ -11,6 +11,8 @@ in that area); the *current long-term plan* lives in **[`PLAN.md`](PLAN.md)** â€
 milestone's steps with their in-game checklists, decisions, and backlog. Commit it to
 hand a plan between agents and machines through git (a cloud agent to a local dev
 agent); clear it once that plan lands, since durable knowledge lives in `docs/`.
+Do not churn `PLAN.md` for small implementation tweaks â€” only significant design
+shifts, or else append a short note.
 
 > **The core workflow:** work proceeds one plan step at a time, and **each step is
 > its own commit.** A step is not done until its enumerated in-game checklist has

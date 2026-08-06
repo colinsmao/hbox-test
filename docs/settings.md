@@ -55,9 +55,10 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
 | `swimmableFluids` | `ConfigBoolean` | `true` | When on, vanilla water and lava (`FluidTags`) emit non-occluding fluid surfaces in the flood (see [geometry.md](geometry.md) → Fluid surfaces). Off restores pre-fluid hole beams on pools. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
+| `fluidEscapeHeight` | `ConfigDouble` | `0.375` (min `0`, max `2`, slider) | Rim height above the fluid **block** top that a fluid→non-fluid climb may clear (`ClimbRule`; see [geometry.md](geometry.md) Escape cap). Default matches mob pathing (`6/16`); `0.875` reaches soul sand. At or above the active profile's vertical reach, leaving fluid matches jumping on land. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
 
 Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
-`Configs.setFloodRadius()`, `Configs.swimmableFluids()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
+`Configs.setFloodRadius()`, `Configs.swimmableFluids()`, `Configs.fluidEscapeHeight()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
