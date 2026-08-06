@@ -20,7 +20,8 @@ home, [hole classification](#hole-classification), and is unbounded there.
 **World read vs flood math.** `WorldGeometry` is the adapter over the
 `ColumnBoxes` port: it translates Minecraft block/fluid state into domain
 `WorldBox` / `HazardClass` (including fluid-surface emission via
-`fluidSurfaceHeight`). `SurfaceSelection` holds the flood, merge, and publish;
+`fluidSurfaceHeight` and solid-hazard stamps for soul sand / magma).
+`SurfaceSelection` holds the flood, merge, and publish;
 `DownSkirts`, `OccluderSkirts`, and `HoleBeams` are the peer compute passes.
 World access stays on that port (`WorldSurfaceIndex`, `HoleBeams.gatherLedgesFrom`,
 `OccluderSkirts.computeFrom`).
@@ -78,8 +79,9 @@ Today the surface class is `(hazardPriority, visualTopY)`, ordered by
 `HazardClass.priority()` then highest visible shell: a hazardous class claims
 overlap from a benign class in the same radius tier, then visual height orders
 otherwise equal hazard classes. Water and lava arrive as `HazardClass` values from
-vanilla fluid tags at world read; later hazards add constants on the same enum.
-The priority-partition algorithm and the durable invariants stay unchanged.
+vanilla fluid tags at world read; soul sand and magma stamp from solid block
+identity (`WorldGeometry.solidHazardClass`). The priority-partition algorithm and
+the durable invariants stay unchanged.
 
 **Aggregate metadata.** Exact `depth` is traversal metadata rather than an ownership
 axis. An inner winner's depth aggregates by minimum over every covering inner node,
@@ -262,10 +264,11 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   threshold), otherwise `0` (thin sheet seated on the cell floor, coplanar with
   the solid underfoot). Falling fluid uses the same path as still fluid
   (`getHeight == 1.0`). The fluid surface carries a `HazardClass` stamp (`WATER` /
-  `LAVA`) for merge ownership / seating / draw; solids stay `NONE`. Geometry today only
-  needs “emit or not.” Thin sheets at height `0` share `collisionTopY` with the solid
-  underfoot; merge ownership lets the fluid's higher `HazardClass.priority()` claim
-  that overlap.
+  `LAVA`) for merge ownership / seating / draw. Ordinary solids stay `NONE`; soul
+  sand and magma stamp solid hazards (see [Solid hazards](#solid-hazards-soul-sand--magma)).
+  Geometry for fluids only needs “emit or not.” Thin sheets at height `0` share
+  `collisionTopY` with the solid underfoot; merge ownership lets the fluid's higher
+  `HazardClass.priority()` claim that overlap.
 - **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
   fluid surface in a fluid column survives exposure. Consecutive tops differ by at
   most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
@@ -276,8 +279,8 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 - **Escape cap.** Leaving fluid onto a non-fluid rim uses Generic
   `fluidEscapeHeight`: a rim height measured from the fluid **block** top, converted
   to a height above the plane by `+ 1/9` (`ClimbRule.FLUID_SURFACE_DROP`). The
-  predicate keys on `HazardClass.isFluid()` (water/lava only), so later non-fluid
-  hazards do not inherit the cap. Contract: `FluidEscapeTest`.
+  predicate keys on `HazardClass.isFluid()` (water/lava only), so solid hazards
+  (soul sand / magma) do not inherit the cap. Contract: `FluidEscapeTest`.
 - **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
   the fluid top is clipped by that solid the same amount. At a flush pond rim the
   surviving fluid edge meets the shore's dilated footprint, so the drop classifier
@@ -296,6 +299,37 @@ coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
 complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
 disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder),
 `HazardBeamsTest` (perimeter seams, water|lava abut, frontier skip).
+
+## Solid hazards (soul sand / magma)
+
+Walkability and vanilla solid block effects are different questions. Walkability still
+dilates supports by `W/2`. Solid-hazard paint (soul sand slow, magma damage) follows
+**center attribution among coplanar supports**, not full fluid-style dilation and not
+a pure undilated core:
+
+`hazard_paint = dilated_hazard − ∪(undilated footprints of coplanar competing supports)`.
+
+- **World read.** `WorldGeometry.solidHazardClass` stamps `SOUL_SAND` /
+  `MAGMA` on solid collision `WorldBox`es from `Blocks.SOUL_SAND` /
+  `Blocks.MAGMA_BLOCK`. Collision, outline, and `occludes=true` are unchanged.
+  Priorities: `SOUL_SAND(3)`, `MAGMA(4)`; `isFluid()` stays false; climb ignores them.
+- **Expose then punch.** `exposeBox` dilates and occludes as for any solid top. For
+  solid-hazard targets it then guillotine-subtracts **undilated** footprints of other
+  coplanar supports (same `collisionTopY`, different hazard class — stone/`NONE` and
+  other rivals; same class such as magma|magma do not punch each other). Remainders
+  keep the solid-hazard tag; punched XZ stays with the competitor’s dilated standable.
+  Occlusion runs first (soul sand beside a taller full block is clipped before punch).
+- **Cliff non-compete.** A void overhang has no coplanar competitor, so the dilated
+  lip over empty space stays hazard. Magma flush with stone punches at the **block**
+  edge on the stone side.
+- **No `UNDILATED_NONE`.** Paint is the explicit punch, then ordinary same-`HazardClass`
+  merge — not a merge-only ownership axis for undilated cores.
+- **Fluids stay fully dilated.** Standing on the fluid top *is* the fluid condition.
+- **Draw (this slice).** Fill still resolves solid hazards to walkable color; tint and
+  perimeter beams land in later steps. Crouch borders already follow post-punch rects.
+
+Contract: `SolidHazardPunchTest` (magma|stone punch, cliff void lip, Point undilated,
+soul sand|wall occlusion, 2×2 same-class merge).
 
 ## How it is computed: the output-sensitive (lazy) flood
 

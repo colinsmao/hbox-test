@@ -337,7 +337,8 @@ public final class SurfaceEmitter {
         Color4f base = switch (hazard) {
           case WATER -> showWater ? water : walkable;
           case LAVA -> showLava ? lava : walkable;
-          case NONE, HOLE -> walkable;
+          // Solid hazards use walkable until Appearance show/color lands.
+          case NONE, HOLE, SOUL_SAND, MAGMA -> walkable;
         };
         return new Resolved(base.r, base.g, base.b, base.a);
       }
@@ -348,7 +349,7 @@ public final class SurfaceEmitter {
           case HOLE -> showHole ? hole : null;
           case WATER -> showWater ? water : null;
           case LAVA -> showLava ? lava : null;
-          case NONE -> null;
+          case NONE, SOUL_SAND, MAGMA -> null;
         };
       }
     }

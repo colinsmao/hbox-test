@@ -471,6 +471,9 @@ public final class SurfaceSelection {
    * search is bounded to the columns the dilated footprint can reach via the
    * per-column {@code index}. {@code halfW == 0} leaves neighbor footprints merely
    * abutting (zero overlap), so Point matches the undilated per-block result.
+   * Solid hazards then subtract undilated footprints of coplanar competing supports
+   * (same collision top, different hazard class) so paint stops at a neighbor block
+   * edge while a void overhang keeps the dilated lip; fluids stay fully dilated.
    */
   static void exposeBox(WorldBox target, Map<ColKey, List<WorldBox>> index, double halfW,
       double height, List<StandableRect> out) {
@@ -495,6 +498,11 @@ public final class SurfaceSelection {
     // collision top is below T, e.g. path 15/16 over soul sand 14/16).
     List<RectMath.Rect> raiseCores = new ArrayList<>();
     List<Double> raiseOutlines = new ArrayList<>();
+    // Coplanar competing supports (same collision top, different hazard class):
+    // their undilated footprints punch solid-hazard paint after occlusion so a
+    // magma|stone lip follows the block edge while a void overhang stays dilated.
+    List<RectMath.Rect> punchCores = new ArrayList<>();
+    boolean solidHazard = target.hazard().isSolidHazard();
     int[] win = occluderColumns(target, halfW);
     for (int cx = win[0]; cx <= win[1]; cx++) {
       for (int cz = win[2]; cz <= win[3]; cz++) {
@@ -531,13 +539,26 @@ public final class SurfaceSelection {
               other.minX(), other.minZ(), other.maxX(), other.maxZ()));
             raiseOutlines.add(other.blockOutlineTop());
           }
+          if (solidHazard
+              && Math.abs(other.yMax() - collisionTopY) <= EPS
+              && other.hazard() != target.hazard()) {
+            punchCores.add(new RectMath.Rect(
+              other.minX(), other.minZ(), other.maxX(), other.maxZ()));
+          }
         }
       }
     }
 
     for (RectMath.Rect exposed : RectMath.subtractRects(base, clipRects)) {
-      emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, target.hazard(),
-        raiseCores, raiseOutlines, out);
+      if (punchCores.isEmpty()) {
+        emitWithNeighborVisualRaise(exposed, collisionTopY, visualTopY, target.hazard(),
+          raiseCores, raiseOutlines, out);
+        continue;
+      }
+      for (RectMath.Rect remnant : RectMath.subtractRects(exposed, punchCores)) {
+        emitWithNeighborVisualRaise(remnant, collisionTopY, visualTopY, target.hazard(),
+          raiseCores, raiseOutlines, out);
+      }
     }
   }
 

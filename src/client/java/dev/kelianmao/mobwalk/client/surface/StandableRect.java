@@ -18,7 +18,8 @@ package dev.kelianmao.mobwalk.client.surface;
  * <p>{@code hazard} is the surface's hazard identity ({@link HazardClass}): stamped
  * from the source {@code WorldBox} in {@code exposeBox}, carried through the merge
  * as an ownership axis ({@code hazardPriority}), and printed by {@code /mobwalk dump}.
- * Ordinary solids are {@link HazardClass#NONE}.
+ * Ordinary solids are {@link HazardClass#NONE}; soul sand / magma stamp
+ * {@link HazardClass#SOUL_SAND} / {@link HazardClass#MAGMA}.
  *
  * <p>{@code depth} is flood-distance metadata: the BFS hop-count from the seed at
  * which this surface was reached (0 = seed), aggregated by min over the raw nodes

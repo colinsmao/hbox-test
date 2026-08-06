@@ -62,6 +62,8 @@ final class FluidEscapeTest {
     assertTrue(HazardClass.LAVA.isFluid());
     assertFalse(HazardClass.NONE.isFluid());
     assertFalse(HazardClass.HOLE.isFluid());
+    assertFalse(HazardClass.SOUL_SAND.isFluid());
+    assertFalse(HazardClass.MAGMA.isFluid());
   }
 
   @Test
