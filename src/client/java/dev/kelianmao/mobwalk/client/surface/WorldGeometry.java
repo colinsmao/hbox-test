@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
@@ -21,7 +22,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * into domain geometry ({@link WorldBox}, {@link HazardClass}). Pure flood / skirt /
  * hole logic lives in {@link SurfaceSelection}; emission policy that decides whether
  * a cell produces a fluid surface ({@link #fluidSurfaceHeight}) lives here with the
- * translation that stamps {@link HazardClass} from vanilla fluid tags.
+ * translation that stamps {@link HazardClass} from vanilla fluid tags and solid
+ * block identity (soul sand / magma), and marks scaffolding collision boxes
+ * non-occluding.
  */
 public final class WorldGeometry {
   private WorldGeometry() {
@@ -43,9 +46,11 @@ public final class WorldGeometry {
   // (collision vs visible/outline, world Y), carried so exposeBox can raise a
   // standable top to the visible face for render-taller-than-collide blocks (soul
   // sand, mud) without touching any walkability math (see exposeBox / StandableRect).
-  // hazard: surface hazard identity (NONE on ordinary solids). occludes: participates
-  // in burial/headroom clip — solids true; non-occluding support surfaces (fluid)
-  // false. Zero-thickness geometry alone still headroom-occludes; this bit skips clip.
+  // hazard: surface hazard identity (NONE on ordinary solids; SOUL_SAND / MAGMA
+  // from block identity). occludes: participates
+  // in burial/headroom clip — solids true; non-occluding support surfaces (fluid,
+  // scaffolding) false. Zero-thickness geometry alone still headroom-occludes;
+  // this bit skips clip.
   // Package-private for unit tests (synthetic boxes feed the classifier/headroom).
   record WorldBox(int bx, int by, int bz,
       double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
@@ -118,11 +123,14 @@ public final class WorldGeometry {
       }
       double blockCollisionTop = y + shape.max(Direction.Axis.Y);
       double blockOutlineTop = visibleTop(level, scan, state, blockCollisionTop, computeVisualTop);
+      HazardClass solidHazard = solidHazardClass(state);
+      // Scaffolding = non-occluding support surface.
+      boolean occludes = !state.is(Blocks.SCAFFOLDING);
       for (AABB box : shape.toAabbs()) {
         boxes.add(new WorldBox(x, y, z,
           x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
           y + box.minY, y + box.maxY,
-          blockCollisionTop, blockOutlineTop, HazardClass.NONE, true));
+          blockCollisionTop, blockOutlineTop, solidHazard, occludes));
       }
       return boxes;
     };
@@ -156,6 +164,18 @@ public final class WorldGeometry {
     }
     if (fluid.is(FluidTags.LAVA)) {
       return HazardClass.LAVA;
+    }
+    return HazardClass.NONE;
+  }
+
+  // Solid block identity → solid-hazard stamp (soul sand / magma). Ordinary solids
+  // stay NONE. Fluids use {@link #hazardClass}; this only tags collision boxes.
+  static HazardClass solidHazardClass(BlockState state) {
+    if (state.is(Blocks.SOUL_SAND)) {
+      return HazardClass.SOUL_SAND;
+    }
+    if (state.is(Blocks.MAGMA_BLOCK)) {
+      return HazardClass.MAGMA;
     }
     return HazardClass.NONE;
   }

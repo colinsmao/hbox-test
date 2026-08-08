@@ -76,13 +76,12 @@ land here.
 compute-side and subdivided so only the unsafe portion of an edge beams.
 - **M6 / 6.5 — bug fixes**: 2-block grey cutoff ring, visible-face surface height, flood seeded from the clicked block's tops, the documented jump reach, and `/mobwalk dump`.
 - **M7 — settings**: MaLiLib + ModMenu config screen with
-General / Appearance / Debug tabs, live apply, save-on-close, and General
-**Built-in Profiles** / **Custom Profiles** roster (enables + order, soft-disable,
-uncapped customs); see `[settings.md](settings.md)`.
+General / Appearance / Debug tabs, live apply, save-on-close, and Profiles roster; see `[settings.md](settings.md)`.
 - **M8 — surface/overlay pipeline refactor**: extract `RectMath` / `SurfaceEmitter`,
 split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygiene.
 - **M9 — fluid hazards:** swimmable water/lava surfaces, fluid escape height, hazard
 fill colors, and perimeter beams (`HazardBeams`).
+- **M10 — solid hazards:** soul sand / magma hazard marking, similar to fluids.
 
 ## Repository layout
 
@@ -181,26 +180,4 @@ decision, the entity-width dilation model, and the entity-height headroom rule.
 reference for the config stack, live Generic/Debug options, screen layout
 (flat list + LABEL sections), and MaLiLib option types (player-facing
 settings help is a separate publish-time doc).
-
-
-## Future work / roadmap
-
-The overlay frameworks (see `[rendering.md](rendering.md)`) are designed to make
-these incremental:
-
-- **Keybinds:** optional MaLiLib hotkeys for overlay toggles later.
-- **More widgets:** HUD readouts (FPS/coords/biome, ping) as `Overlay`s;
-in-world markers (block/entity highlights, waypoints) as `WorldOverlay`s.
-- **Anchored layout system:** corner/anchor + offset model for consistent HUD
-positioning across resolutions and GUI scales.
-- **Data sources:** a small polling/event layer so widgets can subscribe to
-client tick events for values that change over time.
-- **Distribution:** `fabric.mod.json` metadata, license, and a Modrinth/
-CurseForge publish pipeline.
-- **Fall-damage / tall-drop warning.** Every benign drop
-already carries its fall distance (`T − landY` from `classifyDrop`). A drop onto
-reachable ground that is nonetheless tall enough to hurt (fall-damage threshold, or a
-configurable height) could get a distinct lighter warning marker — a shorter/dimmer
-beam or a tinted rim — separate from the red hole beam. Deferred; the fall distance
-is plumbed and ready.
 

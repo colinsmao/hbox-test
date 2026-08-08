@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// preToolUse: before plan edits, remind checklist + docs-quality TODO.
+// preToolUse: before plan edits, inject a checklist / anti-churn reminder.
+// Soft allow + additional_context (surfaces as system_reminder). Strip BOM;
+// match file_path only (not contents — avoids false positives on this script).
 "use strict";
 
 function readStdin() {
@@ -12,17 +14,20 @@ function readStdin() {
 
 let input = {};
 try {
-  input = JSON.parse(readStdin() || "{}");
+  input = JSON.parse((readStdin() || "").replace(/^\uFEFF/, "").trim() || "{}");
 } catch (_e) {
   input = {};
 }
 
 const toolName = String(input.tool_name || "");
-const toolInput = JSON.stringify(input.tool_input || {});
+const toolInputObj = input.tool_input || {};
+const filePath = String(
+  toolInputObj.file_path || toolInputObj.path || toolInputObj.target_notebook || ""
+);
 
 const isEditTool = /^(Write|StrReplace|MultiEdit|Edit|EditNotebook)$/i.test(toolName);
-const touchesTempPlan = /\.plan\.md/i.test(toolInput);
-const touchesRepoPlan = /PLAN\.md/.test(toolInput);
+const touchesTempPlan = /\.plan\.md$/i.test(filePath);
+const touchesRepoPlan = /(^|[\\/])PLAN\.md$/i.test(filePath);
 
 if (isEditTool && (touchesRepoPlan || touchesTempPlan)) {
   let reminder =
@@ -30,11 +35,7 @@ if (isEditTool && (touchesRepoPlan || touchesTempPlan)) {
   if (touchesRepoPlan) {
     reminder += " Avoid PLAN.md churn — significant design shifts only, or a short note.";
   }
-  process.stdout.write(
-    JSON.stringify({
-      additional_context: reminder,
-    })
-  );
+  process.stdout.write(JSON.stringify({ additional_context: reminder }));
   process.exit(0);
 }
 

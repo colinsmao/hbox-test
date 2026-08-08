@@ -16,10 +16,12 @@
     ],
     "preToolUse": [
       {
-        "command": "node .cursor/hooks/prose-positive-nudge.js"
+        "command": "node .cursor/hooks/plan-checklist-nudge.js",
+        "matcher": "Write|StrReplace|MultiEdit|Edit|EditNotebook"
       },
       {
-        "command": "node .cursor/hooks/plan-checklist-nudge.js"
+        "command": "node .cursor/hooks/prose-positive-nudge.js",
+        "matcher": "Write|StrReplace|MultiEdit|Edit|EditNotebook"
       }
     ]
   }

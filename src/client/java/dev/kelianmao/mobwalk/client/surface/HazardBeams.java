@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Perimeter beam spans of reached hazard surfaces: each non-frontier fluid rect edge
+ * Perimeter beam spans of reached hazard surfaces: each non-frontier fluid or
+ * solid-hazard ({@link HazardClass#SOUL_SAND} / {@link HazardClass#MAGMA}) rect edge
  * minus sub-spans covered by an abutting neighbour with the same {@link HazardClass}
- * and equal {@code collisionTopY} (interior pool seams). No occluder subtract.
+ * and equal {@code collisionTopY} (interior seams). No occluder subtract — solid
+ * footprints are already post-punch / occlusion-trimmed upstream.
  * Package-private for unit tests (synthetic rects, no world).
  */
 final class HazardBeams {
@@ -18,7 +20,8 @@ final class HazardBeams {
   static List<BeamSpan> compute(List<StandableRect> rects) {
     List<BeamSpan> out = new ArrayList<>();
     for (StandableRect r : rects) {
-      if (r.frontier() || !r.hazard().isFluid()) {
+      HazardClass h = r.hazard();
+      if (r.frontier() || !(h.isFluid() || h.isSolidHazard())) {
         continue;
       }
       edgeSpans(rects, r, true, false, out);  // -Z

@@ -20,7 +20,9 @@ home, [hole classification](#hole-classification), and is unbounded there.
 **World read vs flood math.** `WorldGeometry` is the adapter over the
 `ColumnBoxes` port: it translates Minecraft block/fluid state into domain
 `WorldBox` / `HazardClass` (including fluid-surface emission via
-`fluidSurfaceHeight`). `SurfaceSelection` holds the flood, merge, and publish;
+`fluidSurfaceHeight`, solid-hazard stamps for soul sand / magma, and
+scaffolding non-occlusion).
+`SurfaceSelection` holds the flood, merge, and publish;
 `DownSkirts`, `OccluderSkirts`, and `HoleBeams` are the peer compute passes.
 World access stays on that port (`WorldSurfaceIndex`, `HoleBeams.gatherLedgesFrom`,
 `OccluderSkirts.computeFrom`).
@@ -78,8 +80,9 @@ Today the surface class is `(hazardPriority, visualTopY)`, ordered by
 `HazardClass.priority()` then highest visible shell: a hazardous class claims
 overlap from a benign class in the same radius tier, then visual height orders
 otherwise equal hazard classes. Water and lava arrive as `HazardClass` values from
-vanilla fluid tags at world read; later hazards add constants on the same enum.
-The priority-partition algorithm and the durable invariants stay unchanged.
+vanilla fluid tags at world read; soul sand and magma stamp from solid block
+identity (`WorldGeometry.solidHazardClass`). The priority-partition algorithm and
+the durable invariants stay unchanged.
 
 **Aggregate metadata.** Exact `depth` is traversal metadata rather than an ownership
 axis. An inner winner's depth aggregates by minimum over every covering inner node,
@@ -250,9 +253,10 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 
 - **Occlusion is a volume property.** Burial and headroom ask which boxes span
   above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
-  fluid surfaces set `occludes=false`, so every solid top under fluid survives, and
-  solids still clip a fluid top the same way they clip any other top. The same
-  rule gates up-skirts: `OccluderSkirts.wallOccluder` requires `occludes`, and
+  fluid surfaces and scaffolding collision boxes set `occludes=false`, so every
+  solid top under them survives, and solids still clip those tops the same way
+  they clip any other top. The same rule gates up-skirts:
+  `OccluderSkirts.wallOccluder` requires `occludes`, and
   `OccluderSkirts.compute` reads through the shared `ColumnBoxes` port
   (`WorldGeometry.levelColumnBoxes`) so only occluding boxes mark wall faces.
 - **Emission (`WorldGeometry.levelColumnBoxes`).** When Generic `swimmableFluids` is
@@ -262,10 +266,11 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   threshold), otherwise `0` (thin sheet seated on the cell floor, coplanar with
   the solid underfoot). Falling fluid uses the same path as still fluid
   (`getHeight == 1.0`). The fluid surface carries a `HazardClass` stamp (`WATER` /
-  `LAVA`) for merge ownership / seating / draw; solids stay `NONE`. Geometry today only
-  needs “emit or not.” Thin sheets at height `0` share `collisionTopY` with the solid
-  underfoot; merge ownership lets the fluid's higher `HazardClass.priority()` claim
-  that overlap.
+  `LAVA`) for merge ownership / seating / draw. Ordinary solids stay `NONE`; soul
+  sand and magma stamp solid hazards (see [Solid hazards](#solid-hazards-soul-sand--magma)).
+  Geometry for fluids only needs “emit or not.” Thin sheets at height `0` share
+  `collisionTopY` with the solid underfoot; merge ownership lets the fluid's higher
+  `HazardClass.priority()` claim that overlap.
 - **Column continuity.** Because a fluid surface sets `occludes=false`, every cell's
   fluid surface in a fluid column survives exposure. Consecutive tops differ by at
   most `1.0` (plane to plane exactly `1.0`; lowest fluid surface one block above the
@@ -276,8 +281,8 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 - **Escape cap.** Leaving fluid onto a non-fluid rim uses Generic
   `fluidEscapeHeight`: a rim height measured from the fluid **block** top, converted
   to a height above the plane by `+ 1/9` (`ClimbRule.FLUID_SURFACE_DROP`). The
-  predicate keys on `HazardClass.isFluid()` (water/lava only), so later non-fluid
-  hazards do not inherit the cap. Contract: `FluidEscapeTest`.
+  predicate keys on `HazardClass.isFluid()` (water/lava only), so solid hazards
+  (soul sand / magma) do not inherit the cap. Contract: `FluidEscapeTest`.
 - **Shore complementarity.** A solid shore dilates over adjacent water by `W/2`;
   the fluid top is clipped by that solid the same amount. At a flush pond rim the
   surviving fluid edge meets the shore's dilated footprint, so the drop classifier
@@ -287,15 +292,76 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   sub-spans covered by an abutting neighbour with the same `HazardClass` and equal
   `collisionTopY` (interior pool seams) publishes a `BeamSpan` stamped `WATER` /
   `LAVA`. No occluder subtract — water|lava abutting edges keep both kinds.
-  `HazardClass.HOLE` is beam-marker identity only (trap drops from `HoleBeams`);
-  it is never stamped on standable surfaces or world boxes. Draw path:
-  [`rendering.md`](rendering.md) beams.
+  Solid hazards share this path on post-punch footprints (see
+  [Solid hazards](#solid-hazards-soul-sand--magma)). `HazardClass.HOLE` is
+  beam-marker identity only (trap drops from `HoleBeams`); it is never stamped on
+  standable surfaces or world boxes. Draw path: [`rendering.md`](rendering.md) beams.
 
 Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
 coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
 complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
 disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder),
 `HazardBeamsTest` (perimeter seams, water|lava abut, frontier skip).
+
+## Scaffolding
+
+Scaffolding collision boxes are **non-occluding support surfaces**:
+`Blocks.SCAFFOLDING` emits each vanilla collision AABB (thin top / bottom via
+`CollisionContext.empty()`) with `occludes=false` and `HazardClass.NONE`.
+Tops still dilate, flood, merge, and accept solid clip; stacked lids and floors
+under a platform keep their headroom. Contract: `ScaffoldingOcclusionTest`.
+
+## Solid hazards (soul sand / magma)
+
+Walkability and vanilla solid block effects are different questions. Walkability still
+dilates supports by `W/2`.
+
+**Truth (vanilla-shaped):** among coplanar supports that cover a point under the
+entity’s dilated footprint, the effect block is the **Euclidean nearest** undilated
+support to the entity center (cliff with no coplanar rival keeps the support you
+stand on).
+
+**Heuristic (what we paint):** axis-aligned only —
+**perpendicular bisector (face midplane)** between face-separated rivals, plus a
+**conservative square in each contested corner** (side `g(√2−1)`, under-approximates
+stone so true magma is never painted as safe). Not full fluid-style dilation and not
+a pure undilated core.
+
+- **World read.** `WorldGeometry.solidHazardClass` stamps `SOUL_SAND` /
+  `MAGMA` on solid collision `WorldBox`es from `Blocks.SOUL_SAND` /
+  `Blocks.MAGMA_BLOCK`. Collision, outline, and `occludes=true` are unchanged.
+  Priorities: `SOUL_SAND(3)`, `MAGMA(4)`; `isFluid()` stays false; climb ignores them.
+- **Expose then coplanar-rival punch.** `exposeBox` dilates and occludes as for any
+  solid top. For each post-occlusion piece `E` of a solid-hazard target, each
+  coplanar rival `B` (same `collisionTopY`, different hazard — stone/`NONE` and
+  other rivals; same class such as magma|magma do not punch each other):
+  - **Face-aligned** (separated on one axis with positive undilated overlap on
+    the other, **or** flush on one axis and gapped on the other): form the
+    contested subspan `E ∩ B+ ∩ faceBand`. Classic face: `faceBand` = undilated
+    perp-overlap ± `halfW`. Flush + gap: `faceBand` = rival’s undilated extent
+    on the flush axis. Punch the rival’s side of the equidistant midplane inside
+    that subspan.
+  - **Corner squares** on each rival corner whose outward orthant reaches the
+    target: punch `E ∩` a square of side `g(√2-1)` (`g` = min of positive axis
+    gaps; flush on one axis still sizes by the other). Runs **in addition to**
+    face midplanes so face magmas cannot refill a bite.
+  - **No separation / nested:** punch `E ∩` undilated(`B`) only when neither face
+    nor corner square applied.
+  Occlusion runs first (soul sand beside a taller full block is clipped before punch).
+- **Face seams match the truth midplane; corners are AABB-conservative** (crescent
+  of true stone may stay magma). Ring stress locked by `SolidHazardPunchTest`.
+- **Cliff non-compete.** A void overhang has no coplanar competitor, so the dilated
+  lip over empty space stays hazard. Magma flush with stone seams at the **block**
+  edge on the stone side.
+- **No `UNDILATED_NONE`.** Paint is the explicit punch, then ordinary same-`HazardClass`
+  merge — not a merge-only ownership axis for undilated cores.
+- **Fluids stay fully dilated.** Standing on the fluid top *is* the fluid condition.
+- **Draw.** Fill and perimeter beams use the post-punch footprint (Appearance
+  show/color per kind; same `HazardBeams` abut-suppress as fluids). Crouch borders
+  follow those rects. See [`rendering.md`](rendering.md).
+
+Contract: `SolidHazardPunchTest` (magma|stone, cliff, Point, soul sand|wall, 2×2,
+air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner square).
 
 ## How it is computed: the output-sensitive (lazy) flood
 
@@ -437,8 +503,9 @@ are the geometry justifying it — classifies each via `HoleBeams.classifyDrop`,
 the contiguous `HOLE` pieces (coalesced) as `BeamSpan`s with `hazard = HOLE`.
 `BENIGN` sub-spans keep their ordinary down-skirt. Each `BeamSpan` is drawn as its
 own through-walls beam at the rim (a long dangerous rim reads as a row of beams
-clearly marking every unsafe edge). Hazard pool perimeters use the same `BeamSpan`
-type via `HazardBeams` (see [Fluid surfaces](#fluid-surfaces)).
+clearly marking every unsafe edge). Hazard perimeters (fluids and solid hazards)
+use the same `BeamSpan` type via `HazardBeams` (see [Fluid surfaces](#fluid-surfaces)
+and [Solid hazards](#solid-hazards-soul-sand--magma)).
 
 **Ledge gather occluders from below.** `HoleBeams.gatherLedges` exposes each candidate box (top in
 `(landY, collisionTopY)`) via `WorldSurfaceIndex.tops`, whose occluder shell starts one
