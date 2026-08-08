@@ -155,7 +155,11 @@ category name: `"Appearance"`.
 | `waterHazardColor` | `ConfigColor` | `#B03A9AE0` (blue, ~69% alpha) | RGB+alpha for water hazard fill and water perimeter beams when `showWaterHazard` is on. |
 | `showLavaHazard` | `ConfigBoolean` | `true` | When on: lava tops/skirts and lava perimeter beams use `lavaHazardColor`. When off: lava fill uses `walkableColor` and lava beams are skipped. |
 | `lavaHazardColor` | `ConfigColor` | `#B0E07020` (orange, ~69% alpha) | RGB+alpha for lava hazard fill and lava perimeter beams when `showLavaHazard` is on. |
-| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types (`HOLE`, water, lava). |
+| `showSoulSandHazard` | `ConfigBoolean` | `true` | When on: soul-sand tops/skirts and soul-sand perimeter beams use `soulSandHazardColor`. When off: fill uses `walkableColor` and soul-sand beams are skipped. |
+| `soulSandHazardColor` | `ConfigColor` | `#B08B5A2B` (brown, ~69% alpha) | RGB+alpha for soul-sand hazard fill and perimeter beams when `showSoulSandHazard` is on. |
+| `showMagmaHazard` | `ConfigBoolean` | `true` | When on: magma tops/skirts and magma perimeter beams use `magmaHazardColor`. When off: fill uses `walkableColor` and magma beams are skipped. |
+| `magmaHazardColor` | `ConfigColor` | `#B0E0C028` (orange-gold, ~69% alpha) | RGB+alpha for magma hazard fill and perimeter beams when `showMagmaHazard` is on. |
+| `showBeamsThroughWalls` | `ConfigBoolean` | `true` | When on: beams go to the depth-off beam layer (visible through terrain). When off: beams go to the depth-tested skirt layer (occluded by blocks). Shared by all beam types (`HOLE`, water, lava, soul sand, magma). |
 | `showHoleBeams` | `ConfigBoolean` | `true` | When on: `SurfaceEmitter` draws hole (`HazardClass.HOLE`) beams at trap rims via `emitBeam`. When off: hole beams are skipped; hazard perimeter beams still follow their own show flags. |
 | `holeBeamColor` | `ConfigColor` | `#80F2261A` (red, 50% alpha) | RGB + alpha for hole beams (uniform along the beam). |
 | `downSkirtHeight` | `ConfigDouble` | `2.0` (min `0`, max `4`, slider) | Draw depth of downward drop skirts. `0` skips draw. Read live in `SurfaceEmitter`. |
@@ -163,7 +167,9 @@ category name: `"Appearance"`.
 | `drawOnVisibleFace` | `ConfigBoolean` | `true` | When on: standable tops of taller-than-collision blocks (soul sand, mud) draw on the visible block face; when off, at the collision height. **Compute-side** — passed into `select` as `computeVisualTop`, so a value-change callback re-floods (the one Appearance option that touches compute). See `[geometry.md](geometry.md)` / `[rendering.md](rendering.md)`. |
 
 Helpers: `Configs.walkableColor()`, `Configs.waterHazardColor()`, `Configs.lavaHazardColor()`,
+`Configs.soulSandHazardColor()`, `Configs.magmaHazardColor()`,
 `Configs.holeBeamColor()` → `Color4f`; `Configs.showWaterHazard()`, `Configs.showLavaHazard()`,
+`Configs.showSoulSandHazard()`, `Configs.showMagmaHazard()`,
 `Configs.showBeamsThroughWalls()`, `Configs.showHoleBeams()`,
 `Configs.downSkirtHeight()`, `Configs.upwardSkirtHeight()`,
 `Configs.drawOnVisibleFace()`.

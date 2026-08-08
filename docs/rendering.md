@@ -190,7 +190,8 @@ the published snapshots into `SurfaceEmitter.emit`.
   Precedence, highest first: frontier grey (`Palette.GREY_RGB`, walkable alpha) →
   Debug `shadeByDepth` hue (`Palette.depthColor`, walkable alpha) → hazard Color4f
   when that kind’s Appearance show is on (`showWaterHazard` / `waterHazardColor`,
-  `showLavaHazard` / `lavaHazardColor`) → Appearance `walkableColor`. Show off keeps
+  `showLavaHazard` / `lavaHazardColor`, `showSoulSandHazard` / `soulSandHazardColor`,
+  `showMagmaHazard` / `magmaHazardColor`) → Appearance `walkableColor`. Show off keeps
   the surface drawn but uses `walkableColor`; `HazardClass` on the rect is unchanged.
   Frontier greying applies when Debug `showCutoffRing` is on (default); when off,
   frontier tops are not drawn.
@@ -301,13 +302,17 @@ the published snapshots into `SurfaceEmitter.emit`.
     that, the entire perimeter drew a hole-beam wall. Because one edge can span reached
     and unreached ground, `holeSubSpans` subdivides and emits only over unreached
     sub-intervals. One beam per hole edge-span (deliberately not coalesced per region).
-  - **`WATER` / `LAVA`** — pool perimeter from `HazardBeams.compute` (fluid rect edge
-    minus same-hazard equal-`collisionTopY` abutters; frontier fluid rects skipped; no
-    occluder subtract). Gated by the existing `showWaterHazard` / `showLavaHazard` and
-    colored with `waterHazardColor` / `lavaHazardColor` (no separate `showHazardBeams`).
-    Show off skips that kind's beams and falls fill back to `walkableColor`. Water|lava
-    shared edges keep both kinds. Pool-rim **hole** beams (trap drops at a high shore)
-    stay `holeBeamColor`; fluid-under-fall recolor is backlog.
+  - **`WATER` / `LAVA` / `SOUL_SAND` / `MAGMA`** — hazard perimeter from the same
+    `HazardBeams.compute` path (non-frontier rect edge minus same-hazard
+    equal-`collisionTopY` abutters; no occluder subtract). Fluids use swimmable pool
+    footprints; solid hazards use post-punch / occlusion-trimmed footprints (stone-side
+    seam on the **block** edge, void-side cliff lip on the dilated rim, soul sand on the
+    cut-back edge against a taller wall). Gated by each kind’s existing show/color pair
+    (`showWaterHazard` / `waterHazardColor`, and the lava / soul-sand / magma analogues;
+    no separate `showHazardBeams`). Show off skips that kind’s beams and falls fill back
+    to `walkableColor`. Different kinds abutting keep both faces (e.g. water|lava).
+    Pool-rim **hole** beams (trap drops at a high shore) stay `holeBeamColor`;
+    fluid-under-fall recolor is backlog.
 
   `CollisionSurfaceOverlay` publishes a `volatile` hazard list beside holes;
   `SurfaceEmitter.emitBeams` draws both lists via `emitBeam`.
@@ -377,9 +382,10 @@ the published snapshots into `SurfaceEmitter.emit`.
   `holeSubSpans`; frontier drops (`SkirtSpan.frontier()`) skipped; subdivided at
   the line-crossing reached rects' bounds and published as `BeamSpan` with
   `hazard = HOLE`).
-- `HazardBeams.java`: fluid perimeter beams (`compute` / `edgeSpans` — non-frontier
-  fluid rect edge minus same-hazard equal-`collisionTopY` abutters; no occluder
-  subtract; published as `BeamSpan` with `WATER` / `LAVA`).
+- `HazardBeams.java`: hazard perimeter beams (`compute` / `edgeSpans` — non-frontier
+  fluid or solid-hazard rect edge minus same-hazard equal-`collisionTopY` abutters;
+  no occluder subtract; published as `BeamSpan` with `WATER` / `LAVA` / `SOUL_SAND` /
+  `MAGMA`).
 - `WorldOverlayManager.java`: three-layer setup (depth-off `FILLED` tops,
   depth-on `SKIRT`, depth-off `BEAM` last), single draw at `AFTER_TRANSLUCENT_TERRAIN` (ice/honey
   composite; pond bottoms via crouch — see the translucent-phase decision),

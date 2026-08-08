@@ -76,15 +76,12 @@ land here.
 compute-side and subdivided so only the unsafe portion of an edge beams.
 - **M6 / 6.5 — bug fixes**: 2-block grey cutoff ring, visible-face surface height, flood seeded from the clicked block's tops, the documented jump reach, and `/mobwalk dump`.
 - **M7 — settings**: MaLiLib + ModMenu config screen with
-General / Appearance / Debug tabs, live apply, save-on-close, and General
-**Built-in Profiles** / **Custom Profiles** roster (enables + order, soft-disable,
-uncapped customs); see `[settings.md](settings.md)`.
+General / Appearance / Debug tabs, live apply, save-on-close, and Profiles roster; see `[settings.md](settings.md)`.
 - **M8 — surface/overlay pipeline refactor**: extract `RectMath` / `SurfaceEmitter`,
 split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygiene.
 - **M9 — fluid hazards:** swimmable water/lava surfaces, fluid escape height, hazard
 fill colors, and perimeter beams (`HazardBeams`).
-- **M10 — solid hazards (in progress):** soul sand / magma coplanar paint
-(perp-bisector + corner-square heuristic; see `[geometry.md](geometry.md)`).
+- **M10 — solid hazards:** soul sand / magma hazard marking, similar to fluids.
 
 ## Repository layout
 

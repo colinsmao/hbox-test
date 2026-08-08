@@ -290,9 +290,10 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
   sub-spans covered by an abutting neighbour with the same `HazardClass` and equal
   `collisionTopY` (interior pool seams) publishes a `BeamSpan` stamped `WATER` /
   `LAVA`. No occluder subtract — water|lava abutting edges keep both kinds.
-  `HazardClass.HOLE` is beam-marker identity only (trap drops from `HoleBeams`);
-  it is never stamped on standable surfaces or world boxes. Draw path:
-  [`rendering.md`](rendering.md) beams.
+  Solid hazards share this path on post-punch footprints (see
+  [Solid hazards](#solid-hazards-soul-sand--magma)). `HazardClass.HOLE` is
+  beam-marker identity only (trap drops from `HoleBeams`); it is never stamped on
+  standable surfaces or world boxes. Draw path: [`rendering.md`](rendering.md) beams.
 
 Contracts: `FluidPlaneTest` (existence, thin-at-0, column spacing, hazard tag
 coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
@@ -345,8 +346,9 @@ a pure undilated core.
 - **No `UNDILATED_NONE`.** Paint is the explicit punch, then ordinary same-`HazardClass`
   merge — not a merge-only ownership axis for undilated cores.
 - **Fluids stay fully dilated.** Standing on the fluid top *is* the fluid condition.
-- **Draw (this slice).** Fill still resolves solid hazards to walkable color; tint and
-  perimeter beams land in later steps. Crouch borders already follow post-punch rects.
+- **Draw.** Fill and perimeter beams use the post-punch footprint (Appearance
+  show/color per kind; same `HazardBeams` abut-suppress as fluids). Crouch borders
+  follow those rects. See [`rendering.md`](rendering.md).
 
 Contract: `SolidHazardPunchTest` (magma|stone, cliff, Point, soul sand|wall, 2×2,
 air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner square).
@@ -491,8 +493,9 @@ are the geometry justifying it — classifies each via `HoleBeams.classifyDrop`,
 the contiguous `HOLE` pieces (coalesced) as `BeamSpan`s with `hazard = HOLE`.
 `BENIGN` sub-spans keep their ordinary down-skirt. Each `BeamSpan` is drawn as its
 own through-walls beam at the rim (a long dangerous rim reads as a row of beams
-clearly marking every unsafe edge). Hazard pool perimeters use the same `BeamSpan`
-type via `HazardBeams` (see [Fluid surfaces](#fluid-surfaces)).
+clearly marking every unsafe edge). Hazard perimeters (fluids and solid hazards)
+use the same `BeamSpan` type via `HazardBeams` (see [Fluid surfaces](#fluid-surfaces)
+and [Solid hazards](#solid-hazards-soul-sand--magma)).
 
 **Ledge gather occluders from below.** `HoleBeams.gatherLedges` exposes each candidate box (top in
 `(landY, collisionTopY)`) via `WorldSurfaceIndex.tops`, whose occluder shell starts one
