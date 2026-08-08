@@ -23,7 +23,8 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * hole logic lives in {@link SurfaceSelection}; emission policy that decides whether
  * a cell produces a fluid surface ({@link #fluidSurfaceHeight}) lives here with the
  * translation that stamps {@link HazardClass} from vanilla fluid tags and solid
- * block identity (soul sand / magma).
+ * block identity (soul sand / magma), and marks scaffolding collision boxes
+ * non-occluding.
  */
 public final class WorldGeometry {
   private WorldGeometry() {
@@ -47,8 +48,9 @@ public final class WorldGeometry {
   // sand, mud) without touching any walkability math (see exposeBox / StandableRect).
   // hazard: surface hazard identity (NONE on ordinary solids; SOUL_SAND / MAGMA
   // from block identity). occludes: participates
-  // in burial/headroom clip — solids true; non-occluding support surfaces (fluid)
-  // false. Zero-thickness geometry alone still headroom-occludes; this bit skips clip.
+  // in burial/headroom clip — solids true; non-occluding support surfaces (fluid,
+  // scaffolding) false. Zero-thickness geometry alone still headroom-occludes;
+  // this bit skips clip.
   // Package-private for unit tests (synthetic boxes feed the classifier/headroom).
   record WorldBox(int bx, int by, int bz,
       double minX, double minZ, double maxX, double maxZ, double yMin, double yMax,
@@ -122,11 +124,13 @@ public final class WorldGeometry {
       double blockCollisionTop = y + shape.max(Direction.Axis.Y);
       double blockOutlineTop = visibleTop(level, scan, state, blockCollisionTop, computeVisualTop);
       HazardClass solidHazard = solidHazardClass(state);
+      // Scaffolding = non-occluding support surface.
+      boolean occludes = !state.is(Blocks.SCAFFOLDING);
       for (AABB box : shape.toAabbs()) {
         boxes.add(new WorldBox(x, y, z,
           x + box.minX, z + box.minZ, x + box.maxX, z + box.maxZ,
           y + box.minY, y + box.maxY,
-          blockCollisionTop, blockOutlineTop, solidHazard, true));
+          blockCollisionTop, blockOutlineTop, solidHazard, occludes));
       }
       return boxes;
     };

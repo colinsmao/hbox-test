@@ -20,7 +20,8 @@ home, [hole classification](#hole-classification), and is unbounded there.
 **World read vs flood math.** `WorldGeometry` is the adapter over the
 `ColumnBoxes` port: it translates Minecraft block/fluid state into domain
 `WorldBox` / `HazardClass` (including fluid-surface emission via
-`fluidSurfaceHeight` and solid-hazard stamps for soul sand / magma).
+`fluidSurfaceHeight`, solid-hazard stamps for soul sand / magma, and
+scaffolding non-occlusion).
 `SurfaceSelection` holds the flood, merge, and publish;
 `DownSkirts`, `OccluderSkirts`, and `HoleBeams` are the peer compute passes.
 World access stays on that port (`WorldSurfaceIndex`, `HoleBeams.gatherLedgesFrom`,
@@ -252,9 +253,10 @@ merge, skirts, holes), while contributing no collision volume to occlusion.
 
 - **Occlusion is a volume property.** Burial and headroom ask which boxes span
   above a top. Only `WorldBox`es with `occludes=true` participate in that clip;
-  fluid surfaces set `occludes=false`, so every solid top under fluid survives, and
-  solids still clip a fluid top the same way they clip any other top. The same
-  rule gates up-skirts: `OccluderSkirts.wallOccluder` requires `occludes`, and
+  fluid surfaces and scaffolding collision boxes set `occludes=false`, so every
+  solid top under them survives, and solids still clip those tops the same way
+  they clip any other top. The same rule gates up-skirts:
+  `OccluderSkirts.wallOccluder` requires `occludes`, and
   `OccluderSkirts.compute` reads through the shared `ColumnBoxes` port
   (`WorldGeometry.levelColumnBoxes`) so only occluding boxes mark wall faces.
 - **Emission (`WorldGeometry.levelColumnBoxes`).** When Generic `swimmableFluids` is
@@ -300,6 +302,14 @@ coverage), `FluidClipContractTest` (standable top, no clip from fluid, shore
 complementarity), `MergeContractTest` (hazard ownership fidelity / mixed-identity
 disjoint rects), `FluidEscapeTest` (escape budget, clamp, symmetry, column ladder),
 `HazardBeamsTest` (perimeter seams, water|lava abut, frontier skip).
+
+## Scaffolding
+
+Scaffolding collision boxes are **non-occluding support surfaces**:
+`Blocks.SCAFFOLDING` emits each vanilla collision AABB (thin top / bottom via
+`CollisionContext.empty()`) with `occludes=false` and `HazardClass.NONE`.
+Tops still dilate, flood, merge, and accept solid clip; stacked lids and floors
+under a platform keep their headroom. Contract: `ScaffoldingOcclusionTest`.
 
 ## Solid hazards (soul sand / magma)
 
