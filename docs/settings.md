@@ -2,8 +2,9 @@
 
 **This is the technical reference** for agents and maintainers working on the
 config stack (MaLiLib registration, JSON, option types, how to add options).
-**Player-facing settings help belongs elsewhere** (a publish-time README or wiki);
-read this file when you need implementation detail.
+**Player-facing help lives in [`../README.md`](../README.md)** (what the mod does,
+install, controls) and in the per-option `comment.*` tooltips; read this file when
+you need implementation detail.
 
 General project facts live in `[project.md](project.md)`; rules in
 `[../AGENTS.md](../AGENTS.md)`. How overlays are *drawn* lives in
@@ -211,6 +212,14 @@ Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
   “the mod” / “the overlay” as subject. **Debug** is the odd tab for debug aids;
   it is not required to be a pure mod-action or player-action group.
 - Do not ship `prettyName.*` unless a toggle message needs custom phrasing.
+
+Messages outside the config screen are lang entries too: the HUD readout under
+`mobwalk.hud.*` (`flood_radius`, `profile`, `no_profiles_active`, formatted with
+`%s`) and client-command chat under `mobwalk.command.*`. `RadiusIndicatorOverlay`
+resolves its own text through `StringUtils.translate`; `/mobwalk dump` sends
+`Component.translatable`. `LangKeysTest` pins that those keys exist and keep their
+placeholders. Profile names stay stored strings — built-in names double as Name
+cells in the Profiles table and custom names are player-typed.
 
 ## Adding an option
 

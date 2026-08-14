@@ -222,7 +222,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
 
     if (start != null) {
       if (!Configs.hasEnabledProfile()) {
-        OverlayManager.radiusIndicator().showProfile("no profiles active");
+        OverlayManager.radiusIndicator().showNoProfiles();
       } else {
         var profile = Configs.mobProfile();
         if (profile.isPresent()) {
@@ -239,7 +239,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       cache.clear();
       lastSeed = null;
       if (!Configs.hasEnabledProfile()) {
-        OverlayManager.radiusIndicator().showProfile("no profiles active");
+        OverlayManager.radiusIndicator().showNoProfiles();
       } else if (player.isShiftKeyDown() && Configs.crouchCycleProfile()) {
         if (Configs.cycleMobProfile().isPresent()) {
           OverlayManager.radiusIndicator().showProfile(

@@ -74,7 +74,16 @@
 
   "mobwalk.config.debug.comment.crouchCycleProfile": "If enabled, while crouching with a wand, right-clicking air cycles the mob profile.",
 
-  "mobwalk.config.debug.comment.shadeByDepth": "If enabled, colors surfaces by the BFS flood depth from the seed. Mostly for debugging connectivity, as the rainbow hues are distracting.",
+  "mobwalk.config.debug.comment.shadeByDepth": "If enabled, colors surfaces by their breadth-first flood depth from the block you clicked. Mostly for debugging connectivity, as the rainbow hues are distracting.",
 
-  "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the outermost flood-radius ring in grey (inconclusive neighbor relationships)."
+  "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the outermost flood-radius ring in grey, where the flood stopped before checking those surfaces' neighbors. Grey means unchecked, not unwalkable.",
+
+  "mobwalk.hud.flood_radius": "Flood radius: %s",
+  "mobwalk.hud.profile": "Profile: %s",
+  "mobwalk.hud.no_profiles_active": "no profiles active",
+
+  "mobwalk.command.dump.no_selection": "flood-debug: no selection",
+  "mobwalk.command.dump.counts": "flood-debug: merged=%s occluders=%s skirts=%s holes=%s hazards=%s (see latest.log)"
+
+
 }
