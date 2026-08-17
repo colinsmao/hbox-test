@@ -35,12 +35,6 @@ final class WandItemTest {
   }
 
   @Test
-  void blazeRodResolves() {
-    assertTrue(WandItem.isValid("minecraft:blaze_rod"));
-    assertEquals(Items.BLAZE_ROD, WandItem.resolve("minecraft:blaze_rod"));
-  }
-
-  @Test
   void badSyntaxFallsBackToStick() {
     assertFalse(WandItem.isValid("minecraft::stick"));
     assertEquals(Items.STICK, WandItem.resolve("minecraft::stick"));

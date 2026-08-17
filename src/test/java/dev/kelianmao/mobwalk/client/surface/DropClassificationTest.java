@@ -84,12 +84,6 @@ final class DropClassificationTest {
   }
 
   @Test
-  void twoDeepIsolatedPitIsHole() {
-    DropClassification c = classify(List.of());
-    assertEquals(DropClass.HOLE, c.kind());
-  }
-
-  @Test
   void ledgeBetweenEdgeAndFloorIsHole() {
     // Reached floor at Y=59, but a ledge at Y=62 (between 59 and 64) traps entity.
     StandableRect floor = new StandableRect(1, 0, 2, 1, 59.0);

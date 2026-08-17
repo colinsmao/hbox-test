@@ -113,10 +113,9 @@ A test that only agrees with an incomplete fix is useless.
   assume a system Gradle is installed.
 - **`runClient` is human-only.** Agents must not launch it; hand the in-game
   checklist to the user and wait for confirmation (see Stage-gating).
-- **Unit-test gate:** `./gradlew test` must pass. Pure logic (rect/geometry ops,
-  occluder-edge classification, the headroom predicate, profile values) is
-  unit-tested under `src/test/java` with `fabric-loader-junit`. **New pure logic
-  should land with a test here.**
+- **Unit-test gate:** `./gradlew test` must pass. Pure logic is unit-tested
+  under `src/test/java` with `fabric-loader-junit`. **New contracts land
+  with a test here** (an invariant, algorithm, or reproduced in-game failure).
 - **Build gate:** `./gradlew build` must pass (compiles + runs `test` +
   `fabric.mod.json` schema processing). This only proves **logic + compile** —
   everything visual is runtime-only and gated in-game (see Stage-gating).

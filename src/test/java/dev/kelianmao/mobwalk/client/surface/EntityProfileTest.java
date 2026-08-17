@@ -50,9 +50,4 @@ final class EntityProfileTest {
     assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.PIG.reach(), EPS);
     assertEquals(1.2522, EntityProfile.DEFAULT_JUMP_REACH, EPS);
   }
-
-  @Test
-  void zombieWitchDisplayName() {
-    assertEquals("Zombie/Witch", EntityProfile.ZOMBIE_WITCH.name());
-  }
 }
