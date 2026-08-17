@@ -158,7 +158,7 @@ sidesteps most quoting issues; reserve the shell for real commands (`git`, `gh`,
 ## Subagents
 
 - **Allowed subagent models only:** inherit the parent (omit `model`),
-  `composer-2.5`, or `cursor-grok-4.5-high`. Enforced by the
+  `composer-2.5`, or `cursor-grok-4.6-high`. Enforced by the
   `subagentStart` hook in `.cursor/hooks.json`.
 
 ## Key constraints (all work)

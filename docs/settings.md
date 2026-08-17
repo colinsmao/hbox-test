@@ -82,17 +82,19 @@ then clamps / soft-disables / reselects.
 
 ### Built-in Profiles
 
-On/Off + locked Name / Width / Height / Vertical Reach for Point, Player, Ravager,
+On/Off + locked Name / Width / Height / Vertical Reach for Player, Ravager,
 Warden, Zombie/Witch, Skeleton, Cow, Sheep, Pig — rebuilt from
 `ProfileRoster.BUILTIN_SEEDS` plus slim JSON on load.
 
 - **Roster order** follows current table row order (reorder is real for cycle /
 fallback). Sanitize keeps known rows in table order and appends any missing seeds.
-- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Point / Skeleton /
-Cow / Sheep / Pig Off. Geometry is code-owned (seed sizes); only enables and order are
+- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Skeleton / Cow /
+Sheep / Pig Off. Geometry is code-owned (seed sizes); only enables and order are
 player-editable.
 - **Hand-edit recovery:** unknown ids dropped; missing seed ids re-appended with
 default enables on load/sync.
+- **Debug Point:** Point is seed index 0, and `ProfileRoster.firstSeed` starts a seed
+walk there while Debug `showPointProfile` is on (at index 1 otherwise).
 
 ### Custom Profiles
 
@@ -188,10 +190,13 @@ name: `"Debug"`.
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
 | `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: fill precedence continues to hazard color / `walkableColor`. Cutoff ring (when shown) still greys via frontier greying. |
 | `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the merge frontier band fully grey (`Palette.colorAtDepth` when `frontier`). When off: frontier tops are not drawn. |
+| `showPointProfile` | `ConfigBoolean` | `false` | When on: the Point builtin (zero width/height) is listed in Edit Built-in Profiles, inserted Off as the first row, and can be enabled like any builtin. When off: Point is dropped from the roster and table, and an active Point falls back to the next enabled profile. Has a value-change callback (`refreshBuiltinTableDefaults` + `onProfilesChanged`) so the table, roster, cycle, current flood, and open settings screen update live. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,
 `Configs.showCutoffRing()` — read live each use (no value-change callbacks).
+`Configs.showPointProfile()` feeds `ProfileRoster.firstSeed` / `sanitize` and the
+builtin table defaults.
 
 ## Lang convention (`name.*` / `comment.*`)
 

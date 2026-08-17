@@ -78,6 +78,8 @@
 
   "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the outermost flood-radius ring in grey, where the flood stopped before checking those surfaces' neighbors. Grey means unchecked, not unwalkable.",
 
+  "mobwalk.config.debug.comment.showPointProfile": "If enabled, lists the Point built-in profile, which is a debugging tool with unfixed edge cases.",
+
   "mobwalk.hud.flood_radius": "Flood radius: %s",
   "mobwalk.hud.profile": "Profile: %s",
   "mobwalk.hud.no_profiles_active": "no profiles active",
