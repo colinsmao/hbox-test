@@ -66,7 +66,10 @@ public final class ProfileRoster {
     new BuiltinSeed("ravager", EntityProfile.RAVAGER, true),
     new BuiltinSeed("warden", EntityProfile.WARDEN, true),
     new BuiltinSeed("zombie", EntityProfile.ZOMBIE_WITCH, true),
-    new BuiltinSeed("skeleton", EntityProfile.SKELETON, false)
+    new BuiltinSeed("skeleton", EntityProfile.SKELETON, false),
+    new BuiltinSeed("cow", EntityProfile.COW, false),
+    new BuiltinSeed("sheep", EntityProfile.SHEEP, false),
+    new BuiltinSeed("pig", EntityProfile.PIG, false)
   );
 
   /** Ghast-scale cap: flood neighbour search is {@code floor(W)+1}. */
@@ -83,7 +86,7 @@ public final class ProfileRoster {
     this.customs = List.copyOf(customs);
   }
 
-  /** Fresh roster: six builtins with seed default enables, no customs. */
+  /** Fresh roster: seed builtins with default enables, no customs. */
   public static ProfileRoster defaults() {
     List<Entry> builtins = new ArrayList<>(BUILTIN_SEEDS.size());
     for (BuiltinSeed seed : BUILTIN_SEEDS) {

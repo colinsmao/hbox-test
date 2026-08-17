@@ -19,6 +19,9 @@ final class EntityProfileTest {
     assertEquals(2.9, EntityProfile.WARDEN.height(), EPS);
     assertEquals(1.95, EntityProfile.ZOMBIE_WITCH.height(), EPS);
     assertEquals(1.99, EntityProfile.SKELETON.height(), EPS);
+    assertEquals(1.4, EntityProfile.COW.height(), EPS);
+    assertEquals(1.3, EntityProfile.SHEEP.height(), EPS);
+    assertEquals(0.9, EntityProfile.PIG.height(), EPS);
   }
 
   @Test
@@ -29,6 +32,9 @@ final class EntityProfileTest {
     assertEquals(0.9, EntityProfile.WARDEN.width(), EPS);
     assertEquals(0.6, EntityProfile.ZOMBIE_WITCH.width(), EPS);
     assertEquals(0.6, EntityProfile.SKELETON.width(), EPS);
+    assertEquals(0.9, EntityProfile.COW.width(), EPS);
+    assertEquals(0.9, EntityProfile.SHEEP.width(), EPS);
+    assertEquals(0.9, EntityProfile.PIG.width(), EPS);
   }
 
   @Test
@@ -39,6 +45,9 @@ final class EntityProfileTest {
     assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.WARDEN.reach(), EPS);
     assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.ZOMBIE_WITCH.reach(), EPS);
     assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.SKELETON.reach(), EPS);
+    assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.COW.reach(), EPS);
+    assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.SHEEP.reach(), EPS);
+    assertEquals(EntityProfile.DEFAULT_JUMP_REACH, EntityProfile.PIG.reach(), EPS);
     assertEquals(1.2522, EntityProfile.DEFAULT_JUMP_REACH, EPS);
   }
 

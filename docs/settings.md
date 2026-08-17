@@ -52,7 +52,7 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `showSurfaces` | `ConfigOptionList` | `While Holding Wand` (`Configs.ShowSurfaces`) | Gates `CollisionSurfaceOverlay.isVisible()` each frame: **Never**, **While Holding Wand** (draw only while the wand is held in either hand), **Always** (draw whenever a selection exists). Snapshot stays; mode alone does not re-flood. Cycle labels from lang `showSurfaces.*`; tooltip lists all three modes. |
 | `wandItem` | `ConfigString` | `minecraft:stick` | Item used as the wand (select / clear / crouch gestures). Current resolved `Item` is refreshed on change/load via `WandItem` against `BuiltInRegistries.ITEM`; malformed or unknown ids fall back to stick while the typed string stays in the field. Row uses `ItemIdConfigOption` (live invalid hover tooltip). |
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
-| `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
+| `builtinProfiles` | `ConfigTable` (UI only) | nine builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
 | `swimmableFluids` | `ConfigBoolean` | `true` | When on, vanilla water and lava (`FluidTags`) emit non-occluding fluid surfaces in the flood (see [geometry.md](geometry.md) → Fluid surfaces). Off restores pre-fluid hole beams on pools. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
@@ -83,13 +83,14 @@ then clamps / soft-disables / reselects.
 ### Built-in Profiles
 
 On/Off + locked Name / Width / Height / Vertical Reach for Point, Player, Ravager,
-Warden, Zombie/Witch, Skeleton — rebuilt from `ProfileRoster.BUILTIN_SEEDS` plus
-slim JSON on load.
+Warden, Zombie/Witch, Skeleton, Cow, Sheep, Pig — rebuilt from
+`ProfileRoster.BUILTIN_SEEDS` plus slim JSON on load.
 
 - **Roster order** follows current table row order (reorder is real for cycle /
 fallback). Sanitize keeps known rows in table order and appends any missing seeds.
-- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Point / Skeleton
-Off. Geometry is code-owned (seed sizes); only enables and order are player-editable.
+- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Point / Skeleton /
+Cow / Sheep / Pig Off. Geometry is code-owned (seed sizes); only enables and order are
+player-editable.
 - **Hand-edit recovery:** unknown ids dropped; missing seed ids re-appended with
 default enables on load/sync.
 

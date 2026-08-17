@@ -27,7 +27,8 @@ walkable terrain within a BFS hop-count flood radius, painting every surface the
 could stand on. The flood is **entity-size aware** — width dilation closes gaps
 smaller than the entity, and height headroom drops floors under low ceilings — for the
 profile chosen in settings (builtin roster: Point / Player / Ravager / Warden /
-Zombie-Witch / Skeleton, plus enable toggles and uncapped custom profiles). The
+Zombie-Witch / Skeleton / Cow / Sheep / Pig, plus enable toggles and uncapped custom
+profiles). The
 geometry and the output-sensitive flood live in `[geometry.md](geometry.md)`.
 
 Each reached surface draws as a filled top quad colored at draw with edge markers that read the

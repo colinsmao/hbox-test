@@ -22,9 +22,9 @@ final class ProfileRosterTest {
   private static final double EPS = 1.0e-9;
 
   @Test
-  void defaultsSixBuiltinsDefaultEnables() {
+  void defaultsNineBuiltinsDefaultEnables() {
     ProfileRoster roster = ProfileRoster.defaults();
-    assertEquals(6, roster.builtins().size());
+    assertEquals(9, roster.builtins().size());
     assertEquals(0, roster.customs().size());
     assertFalse(enabled(roster, "point"));
     assertTrue(enabled(roster, "player"));
@@ -32,6 +32,9 @@ final class ProfileRosterTest {
     assertTrue(enabled(roster, "warden"));
     assertTrue(enabled(roster, "zombie"));
     assertFalse(enabled(roster, "skeleton"));
+    assertFalse(enabled(roster, "cow"));
+    assertFalse(enabled(roster, "sheep"));
+    assertFalse(enabled(roster, "pig"));
     assertEquals(
       List.of("player", "ravager", "warden", "zombie"),
       roster.enabledEntries().stream().map(ProfileRoster.Entry::id).toList()
@@ -43,6 +46,9 @@ final class ProfileRosterTest {
     ProfileRoster roster = ProfileRoster.defaults();
     assertEquals(EntityProfile.WARDEN, roster.findById("warden").orElseThrow().profile());
     assertEquals(EntityProfile.ZOMBIE_WITCH, roster.findById("zombie").orElseThrow().profile());
+    assertEquals(EntityProfile.COW, roster.findById("cow").orElseThrow().profile());
+    assertEquals(EntityProfile.SHEEP, roster.findById("sheep").orElseThrow().profile());
+    assertEquals(EntityProfile.PIG, roster.findById("pig").orElseThrow().profile());
     assertEquals(0.6, EntityProfile.SKELETON.width(), EPS);
     assertEquals(1.99, EntityProfile.SKELETON.height(), EPS);
   }
@@ -395,13 +401,18 @@ final class ProfileRosterTest {
       "player"
     );
     assertTrue(result.repaired());
-    assertEquals(6, result.roster().builtins().size());
+    assertEquals(9, result.roster().builtins().size());
     assertEquals(
-      List.of("player", "point", "ravager", "warden", "zombie", "skeleton"),
+      List.of(
+        "player", "point", "ravager", "warden", "zombie", "skeleton", "cow", "sheep", "pig"
+      ),
       result.roster().builtins().stream().map(ProfileRoster.Entry::id).toList()
     );
     assertTrue(enabled(result.roster(), "player"));
     assertFalse(enabled(result.roster(), "point"));
+    assertFalse(enabled(result.roster(), "cow"));
+    assertFalse(enabled(result.roster(), "sheep"));
+    assertFalse(enabled(result.roster(), "pig"));
   }
 
   @Test
@@ -416,7 +427,9 @@ final class ProfileRosterTest {
     assertFalse(result.repaired());
     ProfileRoster roster = result.roster();
     assertEquals(
-      List.of("player", "point", "ravager", "warden", "zombie", "skeleton"),
+      List.of(
+        "player", "point", "ravager", "warden", "zombie", "skeleton", "cow", "sheep", "pig"
+      ),
       roster.builtins().stream().map(ProfileRoster.Entry::id).toList()
     );
     assertEquals(
@@ -458,12 +471,14 @@ final class ProfileRosterTest {
     return roster.findById(id).orElseThrow().enabled();
   }
 
-  /** Enables in builtin seed order. */
+  /** Enables in builtin seed order; omitted trailing flags stay Off. */
   private static ProfileRoster withBuiltinEnables(
     boolean point, boolean player, boolean ravager,
     boolean warden, boolean zombie, boolean skeleton
   ) {
-    boolean[] flags = {point, player, ravager, warden, zombie, skeleton};
+    boolean[] flags = new boolean[ProfileRoster.BUILTIN_SEEDS.size()];
+    boolean[] given = {point, player, ravager, warden, zombie, skeleton};
+    System.arraycopy(given, 0, flags, 0, given.length);
     List<RawBuiltinRow> rows = new ArrayListRows(flags);
     return ProfileRoster.sanitize(rows, List.of(), "player").roster();
   }

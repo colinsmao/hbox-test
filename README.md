@@ -34,8 +34,7 @@ The wand is a stick by default, and you can set it to any item.
 - **Sneak + right-click air**: switch to the next mob.
 - **Sneak**: see the painted surfaces through walls.
 
-Five mobs are built in (Player, Ravager, Warden, Zombie/Witch, and
-Skeleton), and you can add your own with a width, height, and vertical reach.
+Some mobs are built in (eg Player, Ravager, Warden), and you can add your own with a width, height, and vertical reach.
 Surfaces show while you hold the wand, or can be set to always show.
 
 More details of each setting may be found in the menu tooltips.
