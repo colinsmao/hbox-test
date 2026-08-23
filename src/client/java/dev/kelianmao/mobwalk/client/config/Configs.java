@@ -41,6 +41,7 @@ import fi.dy.masa.malilib.config.options.table.type.EntryTypes;
 import fi.dy.masa.malilib.config.options.table.type.LabelEntry;
 import fi.dy.masa.malilib.config.options.table.type.StringEntry;
 import fi.dy.masa.malilib.util.FileUtils;
+import fi.dy.masa.malilib.util.GuiUtils;
 import fi.dy.masa.malilib.util.StringUtils;
 import fi.dy.masa.malilib.util.data.Color4f;
 import fi.dy.masa.malilib.util.data.json.JsonUtils;
@@ -60,7 +61,7 @@ public final class Configs implements IConfigHandler {
   private static final int CONFIG_VERSION = 3;
 
   /** Cached roster rebuilt from builtin slim state + custom table. */
-  private static ProfileRoster cachedRoster = ProfileRoster.defaults();
+  private static ProfileRoster cachedRoster = ProfileRoster.defaults(false);
   /** Current wand item resolved from {@link Generic#WAND_ITEM}; refreshed on change/load. */
   private static Item cachedWandItem = Items.STICK;
   /** Guards re-entrant setTable while seeding a newly ADDed custom row. */
@@ -191,10 +192,7 @@ public final class Configs implements IConfigHandler {
     private Profiles() {}
 
     private static ConfigTable buildBuiltinTable() {
-      TableRow[] rows = new TableRow[ProfileRoster.BUILTIN_SEEDS.size()];
-      for (int i = 0; i < ProfileRoster.BUILTIN_SEEDS.size(); i++) {
-        rows[i] = builtinRow(ProfileRoster.BUILTIN_SEEDS.get(i));
-      }
+      List<TableRow> rows = defaultBuiltinRows(false);
       return new ConfigTable.Builder(
         "builtinProfiles",
         EntryTypes.BOOLEAN,
@@ -207,9 +205,19 @@ public final class Configs implements IConfigHandler {
         .setShowEntryNumbers(false)
         .setDisplayString(StringUtils.translate(BUILTIN_BUTTON_KEY))
         .setLabels(translatedColumnLabels())
-        .setDefaultValue(rows)
+        .setDefaultValue(rows.toArray(TableRow[]::new))
         .build()
         .apply(PROFILES_KEY);
+    }
+
+    static List<TableRow> defaultBuiltinRows(boolean showPointProfile) {
+      List<ProfileRoster.BuiltinSeed> seeds = ProfileRoster.BUILTIN_SEEDS;
+      int first = ProfileRoster.firstSeed(showPointProfile);
+      List<TableRow> rows = new ArrayList<>(seeds.size() - first);
+      for (int i = first; i < seeds.size(); i++) {
+        rows.add(builtinRow(seeds.get(i)));
+      }
+      return rows;
     }
 
     private static ConfigTable buildCustomTable() {
@@ -318,13 +326,16 @@ public final class Configs implements IConfigHandler {
       new ConfigBoolean("shadeByDepth", false).apply(DEBUG_KEY);
     public static final ConfigBoolean SHOW_CUTOFF_RING =
       new ConfigBoolean("showCutoffRing", true).apply(DEBUG_KEY);
+    public static final ConfigBoolean SHOW_POINT_PROFILE =
+      new ConfigBoolean("showPointProfile", false).apply(DEBUG_KEY);
 
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
       CROUCH_SEE_THROUGH,
       CROUCH_SCROLL_RADIUS,
       CROUCH_CYCLE_PROFILE,
       SHADE_BY_DEPTH,
-      SHOW_CUTOFF_RING
+      SHOW_CUTOFF_RING,
+      SHOW_POINT_PROFILE
     );
 
     private Debug() {}
@@ -452,6 +463,7 @@ public final class Configs implements IConfigHandler {
     });
     Profiles.BUILTIN_PROFILES.setValueChangeCallback(cfg -> onProfilesChanged());
     Profiles.CUSTOM_PROFILES.setValueChangeCallback(cfg -> onCustomProfilesChanged());
+    Debug.SHOW_POINT_PROFILE.setValueChangeCallback(cfg -> onShowPointProfileChanged());
   }
 
   private static void refreshWandItem() {
@@ -500,6 +512,31 @@ public final class Configs implements IConfigHandler {
     }
     rememberCustomRows();
     onProfilesChanged();
+  }
+
+  private static void onShowPointProfileChanged() {
+    refreshBuiltinTableDefaults();
+    onProfilesChanged();
+    // Hiding Point clamps mobProfile, whose widget caches its label and sits on the same
+    // open screen as this toggle (a table popup instead re-inits the screen on close).
+    if (GuiUtils.getCurrentScreen() instanceof GuiConfigs gui) {
+      gui.refreshOptionWidgets();
+    }
+  }
+
+  /**
+   * Builtin RESET compares live rows to {@code defaultTable}. Point belongs in
+   * that default only while Debug {@code showPointProfile} is on.
+   */
+  private static void refreshBuiltinTableDefaults() {
+    List<TableRow> rows = Profiles.defaultBuiltinRows(showPointProfile());
+    try {
+      var defaultField = ConfigTable.class.getDeclaredField("defaultTable");
+      defaultField.setAccessible(true);
+      defaultField.set(Profiles.BUILTIN_PROFILES, ImmutableList.copyOf(rows));
+    } catch (ReflectiveOperationException e) {
+      MobWalk.LOGGER.warn("Could not refresh builtinProfiles default rows", e);
+    }
   }
 
   private static void onProfilesChanged() {
@@ -705,6 +742,10 @@ public final class Configs implements IConfigHandler {
     return Debug.SHOW_CUTOFF_RING.getBooleanValue();
   }
 
+  public static boolean showPointProfile() {
+    return Debug.SHOW_POINT_PROFILE.getBooleanValue();
+  }
+
   @Override
   public void load() {
     loadFromFile();
@@ -718,7 +759,7 @@ public final class Configs implements IConfigHandler {
   private static void loadFromFile() {
     Path configFile = FileUtils.getConfigDirectory().resolve(CONFIG_FILE_NAME);
     if (!Files.isRegularFile(configFile)) {
-      applyRoster(ProfileRoster.defaults());
+      applyRoster(ProfileRoster.defaults(showPointProfile()));
       refreshWandItem();
       return;
     }
@@ -728,9 +769,10 @@ public final class Configs implements IConfigHandler {
       ConfigUtils.readConfigBase(root, "Generic", Generic.FILE_OPTIONS);
       ConfigUtils.readConfigBase(root, "Appearance", Appearance.OPTIONS);
       ConfigUtils.readConfigBase(root, "Debug", Debug.OPTIONS);
+      refreshBuiltinTableDefaults();
       loadProfiles(root);
     } else {
-      applyRoster(ProfileRoster.defaults());
+      applyRoster(ProfileRoster.defaults(showPointProfile()));
     }
     refreshWandItem();
   }
@@ -744,7 +786,8 @@ public final class Configs implements IConfigHandler {
     List<ProfileRoster.RawCustomRow> rawCustoms = readRawCustomsFromTable();
     ProfileRoster.SanitizeResult result =
       ProfileRoster.sanitize(
-        rawBuiltins, rawCustoms, activeProfileId(), cachedRoster.customs()
+        rawBuiltins, rawCustoms, activeProfileId(), cachedRoster.customs(),
+        showPointProfile()
       );
     cachedRoster = result.roster();
     if (result.repaired()) {
@@ -765,7 +808,7 @@ public final class Configs implements IConfigHandler {
 
   private static void loadProfiles(JsonObject root) {
     if (!root.has("Profiles") || !root.get("Profiles").isJsonObject()) {
-      applyRoster(ProfileRoster.defaults());
+      applyRoster(ProfileRoster.defaults(showPointProfile()));
       return;
     }
     JsonObject profiles = root.getAsJsonObject("Profiles");
@@ -778,7 +821,8 @@ public final class Configs implements IConfigHandler {
     List<ProfileRoster.RawCustomRow> rawCustoms = readRawCustomsFromTable();
     ProfileRoster.SanitizeResult result =
       ProfileRoster.sanitize(
-        rawBuiltins, rawCustoms, activeProfileId(), cachedRoster.customs()
+        rawBuiltins, rawCustoms, activeProfileId(), cachedRoster.customs(),
+        showPointProfile()
       );
     applyRoster(result.roster());
   }

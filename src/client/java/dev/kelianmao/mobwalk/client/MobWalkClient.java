@@ -45,15 +45,15 @@ public final class MobWalkClient implements ClientModInitializer {
           FloodDebugCounts counts = collision.dumpFloodDebug();
           if (counts == null) {
             client.player.sendSystemMessage(
-              Component.literal("flood-debug: no selection"));
+              Component.translatable("mobwalk.command.dump.no_selection"));
           } else {
-            client.player.sendSystemMessage(Component.literal(
-              "flood-debug: merged=" + counts.merged()
-                + " occluders=" + counts.occluders()
-                + " skirts=" + counts.skirts()
-                + " holes=" + counts.holes()
-                + " hazards=" + counts.hazards()
-                + " (see latest.log)"));
+            client.player.sendSystemMessage(Component.translatable(
+              "mobwalk.command.dump.counts",
+              counts.merged(),
+              counts.occluders(),
+              counts.skirts(),
+              counts.holes(),
+              counts.hazards()));
           }
           return 1;
         }))));

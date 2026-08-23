@@ -2,8 +2,9 @@
 
 **This is the technical reference** for agents and maintainers working on the
 config stack (MaLiLib registration, JSON, option types, how to add options).
-**Player-facing settings help belongs elsewhere** (a publish-time README or wiki);
-read this file when you need implementation detail.
+**Player-facing help lives in [`../README.md`](../README.md)** (what the mod does,
+install, controls) and in the per-option `comment.*` tooltips; read this file when
+you need implementation detail.
 
 General project facts live in `[project.md](project.md)`; rules in
 `[../AGENTS.md](../AGENTS.md)`. How overlays are *drawn* lives in
@@ -51,7 +52,7 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `showSurfaces` | `ConfigOptionList` | `While Holding Wand` (`Configs.ShowSurfaces`) | Gates `CollisionSurfaceOverlay.isVisible()` each frame: **Never**, **While Holding Wand** (draw only while the wand is held in either hand), **Always** (draw whenever a selection exists). Snapshot stays; mode alone does not re-flood. Cycle labels from lang `showSurfaces.*`; tooltip lists all three modes. |
 | `wandItem` | `ConfigString` | `minecraft:stick` | Item used as the wand (select / clear / crouch gestures). Current resolved `Item` is refreshed on change/load via `WandItem` against `BuiltInRegistries.ITEM`; malformed or unknown ids fall back to stick while the typed string stays in the field. Row uses `ItemIdConfigOption` (live invalid hover tooltip). |
 | `mobProfile` | `ConfigOptionList` | `Player` (`RosterProfileOption`) | Cycles **enabled** roster ids (builtins then customs, table order). Value-change callback clamps to an enabled id via `resolveActiveId`, then `reselectWithMobProfile` when a selection is active. |
-| `builtinProfiles` | `ConfigTable` (UI only) | six builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
+| `builtinProfiles` | `ConfigTable` (UI only) | nine builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
 | `swimmableFluids` | `ConfigBoolean` | `true` | When on, vanilla water and lava (`FluidTags`) emit non-occluding fluid surfaces in the flood (see [geometry.md](geometry.md) → Fluid surfaces). Off restores pre-fluid hole beams on pools. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
@@ -81,16 +82,19 @@ then clamps / soft-disables / reselects.
 
 ### Built-in Profiles
 
-On/Off + locked Name / Width / Height / Vertical Reach for Point, Player, Ravager,
-Warden, Zombie/Witch, Skeleton — rebuilt from `ProfileRoster.BUILTIN_SEEDS` plus
-slim JSON on load.
+On/Off + locked Name / Width / Height / Vertical Reach for Player, Ravager,
+Warden, Zombie/Witch, Skeleton, Cow, Sheep, Pig — rebuilt from
+`ProfileRoster.BUILTIN_SEEDS` plus slim JSON on load.
 
 - **Roster order** follows current table row order (reorder is real for cycle /
 fallback). Sanitize keeps known rows in table order and appends any missing seeds.
-- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Point / Skeleton
-Off. Geometry is code-owned (seed sizes); only enables and order are player-editable.
+- **Default enables:** Player / Ravager / Warden / Zombie/Witch On; Skeleton / Cow /
+Sheep / Pig Off. Geometry is code-owned (seed sizes); only enables and order are
+player-editable.
 - **Hand-edit recovery:** unknown ids dropped; missing seed ids re-appended with
 default enables on load/sync.
+- **Debug Point:** Point is seed index 0, and `ProfileRoster.firstSeed` starts a seed
+walk there while Debug `showPointProfile` is on (at index 1 otherwise).
 
 ### Custom Profiles
 
@@ -186,10 +190,13 @@ name: `"Debug"`.
 | `crouchCycleProfile` | `ConfigBoolean` | `true` | When on: wand + crouch + right-click air advances `Configs.MOB_PROFILE` and pings the HUD. When off: air-click still clears the selection; the profile stays put. |
 | `shadeByDepth` | `ConfigBoolean` | `false` | When on: tops/skirts use the cyclic BFS-depth hue (`Palette` / `depthColor`). When off: fill precedence continues to hazard color / `walkableColor`. Cutoff ring (when shown) still greys via frontier greying. |
 | `showCutoffRing` | `ConfigBoolean` | `true` | When on: draw the merge frontier band fully grey (`Palette.colorAtDepth` when `frontier`). When off: frontier tops are not drawn. |
+| `showPointProfile` | `ConfigBoolean` | `false` | When on: the Point builtin (zero width/height) is listed in Edit Built-in Profiles, inserted Off as the first row, and can be enabled like any builtin. When off: Point is dropped from the roster and table, and an active Point falls back to the next enabled profile. Has a value-change callback (`refreshBuiltinTableDefaults` + `onProfilesChanged`) so the table, roster, cycle, current flood, and open settings screen update live. |
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,
 `Configs.showCutoffRing()` — read live each use (no value-change callbacks).
+`Configs.showPointProfile()` feeds `ProfileRoster.firstSeed` / `sanitize` and the
+builtin table defaults.
 
 ## Lang convention (`name.*` / `comment.*`)
 
@@ -211,6 +218,14 @@ Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
   “the mod” / “the overlay” as subject. **Debug** is the odd tab for debug aids;
   it is not required to be a pure mod-action or player-action group.
 - Do not ship `prettyName.*` unless a toggle message needs custom phrasing.
+
+Messages outside the config screen are lang entries too: the HUD readout under
+`mobwalk.hud.*` (`flood_radius`, `profile`, `no_profiles_active`, formatted with
+`%s`) and client-command chat under `mobwalk.command.*`. `RadiusIndicatorOverlay`
+resolves its own text through `StringUtils.translate`; `/mobwalk dump` sends
+`Component.translatable`. `LangKeysTest` pins that those keys exist and keep their
+placeholders. Profile names stay stored strings — built-in names double as Name
+cells in the Profiles table and custom names are player-typed.
 
 ## Adding an option
 

@@ -49,4 +49,10 @@ public record EntityProfile(String name, double width, double height, double rea
   public static final EntityProfile ZOMBIE_WITCH =
     new EntityProfile("Zombie/Witch", 0.6, 1.95, DEFAULT_JUMP_REACH);
   public static final EntityProfile SKELETON = new EntityProfile("Skeleton", 0.6, 1.99, DEFAULT_JUMP_REACH);
+  /** JE adult cow: {@code 0.9 × 1.4}. */
+  public static final EntityProfile COW = new EntityProfile("Cow", 0.9, 1.4, DEFAULT_JUMP_REACH);
+  /** JE adult sheep: {@code 0.9 × 1.3}. */
+  public static final EntityProfile SHEEP = new EntityProfile("Sheep", 0.9, 1.3, DEFAULT_JUMP_REACH);
+  /** JE adult pig: {@code 0.9 × 0.9}. */
+  public static final EntityProfile PIG = new EntityProfile("Pig", 0.9, 0.9, DEFAULT_JUMP_REACH);
 }

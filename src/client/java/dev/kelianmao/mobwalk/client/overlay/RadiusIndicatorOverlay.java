@@ -1,6 +1,7 @@
 package dev.kelianmao.mobwalk.client.overlay;
 
 
+import fi.dy.masa.malilib.util.StringUtils;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -9,7 +10,8 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 /**
  * A transient HUD readout shown near the crosshair for a short time after a stick
  * action: the flood selection radius ({@link #show}, shift+scroll) or the active
- * entity profile ({@link #showProfile}, sneak+right-click at nothing). Text only,
+ * entity profile ({@link #showProfile} / {@link #showNoProfiles}, sneak+right-click
+ * at nothing). Message text comes from {@code mobwalk.hud.*} in the lang file. Text only,
  * no background; it fades out and then hides itself. Replaces the original demo
  * HUD box from Milestone 1.
  *
@@ -28,12 +30,20 @@ public final class RadiusIndicatorOverlay implements Overlay {
 
   /** Show the indicator with the given radius, resetting its fade timer. */
   public void show(int radius) {
-    showMessage("Flood radius: " + radius);
+    showMessage(StringUtils.translate("mobwalk.hud.flood_radius", radius));
   }
 
   /** Show the indicator with the active profile name, resetting its fade timer. */
   public void showProfile(String name) {
-    showMessage("Profile: " + name);
+    showMessage(StringUtils.translate("mobwalk.hud.profile", name));
+  }
+
+  /**
+   * Show the indicator for a roster with every profile disabled. Reads as a
+   * profile name so the readout keeps one shape.
+   */
+  public void showNoProfiles() {
+    showProfile(StringUtils.translate("mobwalk.hud.no_profiles_active"));
   }
 
   private void showMessage(String message) {

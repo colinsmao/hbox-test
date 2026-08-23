@@ -11,7 +11,6 @@ Durable knowledge lives in `docs/`, so this file is cleared once the plan lands.
 ## Ideas / backlog
 - Chunked / multi-tick flood so it doesn't stutter.
 - Auto update (eg flood from feet every N ticks)
-- Settings tooltip UX pass (tone/length).
 - Probably out of scope:
   - ladders/vines
   - soul sand through 0.5 blocks

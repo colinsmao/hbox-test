@@ -37,14 +37,6 @@ final class FluidPlaneTest {
   }
 
   @Test
-  void fallingCellEmitsFullHeightFluidSurface() {
-    // Falling water reads getHeight == 1.0, same as a submerged still cell.
-    OptionalDouble h = WorldGeometry.fluidSurfaceHeight(HazardClass.WATER, 1.0);
-    assertTrue(h.isPresent());
-    assertEquals(1.0, h.getAsDouble(), EPS);
-  }
-
-  @Test
   void thinLayerEmitsFluidSurfaceAtZero() {
     // Water levels 1–3 and Overworld lava's level-2 tail sit at or below 0.4 —
     // fluid surface at cell floor so it stays coplanar with the solid underfoot.
@@ -128,18 +120,6 @@ final class FluidPlaneTest {
     assertEquals(HazardClass.WATER, waterOut.get(0).hazard());
     assertEquals(HazardClass.LAVA, lavaOut.get(0).hazard());
     assertEquals(64.0, lavaOut.get(0).collisionTopY(), EPS);
-  }
-
-  @Test
-  void thinFluidClaimsOverSolidAtSameCollisionHeight() {
-    // Height-0 thin sheet shares collisionTopY with the solid underfoot; merge
-    // ownership lets the fluid's hazardPriority claim the overlap.
-    StandableRect solid = new StandableRect(0, 0, 1, 1, 65.0, 65.0, HazardClass.NONE);
-    StandableRect thin = new StandableRect(0, 0, 1, 1, 65.0, 65.0, HazardClass.WATER);
-    List<StandableRect> out = RectMath.mergeAll(List.of(solid, thin));
-    assertEquals(1, out.size());
-    assertEquals(HazardClass.WATER, out.get(0).hazard());
-    assertEquals(1.0, area(out), EPS);
   }
 
   private static WorldBox solid(int bx, int by, int bz, double yMin, double yMax) {

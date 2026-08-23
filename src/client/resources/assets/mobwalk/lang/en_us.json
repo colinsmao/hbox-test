@@ -66,7 +66,7 @@
 
   "mobwalk.config.appearance.comment.upwardSkirtHeight": "How tall upward wall-edge markers rise from walkable edges, in blocks. 0 hides them.",
 
-  "mobwalk.config.appearance.comment.drawOnVisibleFace": "If enabled, draws walkable surfaces on a block's visible face. Mostly affects blocks that have a larger visual size than hitbox, like soul sand, so the drawn surfaces aren't buried. This does mean the drawn walkable surfaces will not be truly aligned to hitboxes, but you will be able to see all surfaces properly. The actual geometry calculations still use the real hitboxes.",
+  "mobwalk.config.appearance.comment.drawOnVisibleFace": "If enabled, draws walkable surfaces on a block's visible face. Mostly affects blocks that have a larger visual size than hitbox, like soul sand, so the drawn surfaces aren't buried.\nThis does mean the drawn walkable surfaces will not be truly aligned to hitboxes, but you will be able to see all surfaces properly. The actual geometry calculations still use the real hitboxes.",
 
   "mobwalk.config.debug.comment.crouchSeeThroughWalls": "If enabled, while crouching, shows walkable surfaces through walls.",
 
@@ -74,7 +74,18 @@
 
   "mobwalk.config.debug.comment.crouchCycleProfile": "If enabled, while crouching with a wand, right-clicking air cycles the mob profile.",
 
-  "mobwalk.config.debug.comment.shadeByDepth": "If enabled, colors surfaces by the BFS flood depth from the seed. Mostly for debugging connectivity, as the rainbow hues are distracting.",
+  "mobwalk.config.debug.comment.shadeByDepth": "If enabled, colors surfaces by their breadth-first flood depth from the block you clicked. Mostly for debugging connectivity, as the rainbow hues are distracting.",
 
-  "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the outermost flood-radius ring in grey (inconclusive neighbor relationships)."
+  "mobwalk.config.debug.comment.showCutoffRing": "If enabled, shows the outermost flood-radius ring in grey, where the flood stopped before checking those surfaces' neighbors. Grey means unchecked, not unwalkable.",
+
+  "mobwalk.config.debug.comment.showPointProfile": "If enabled, lists the Point built-in profile, which is a debugging tool with unfixed edge cases.",
+
+  "mobwalk.hud.flood_radius": "Flood radius: %s",
+  "mobwalk.hud.profile": "Profile: %s",
+  "mobwalk.hud.no_profiles_active": "no profiles active",
+
+  "mobwalk.command.dump.no_selection": "flood-debug: no selection",
+  "mobwalk.command.dump.counts": "flood-debug: merged=%s occluders=%s skirts=%s holes=%s hazards=%s (see latest.log)"
+
+
 }

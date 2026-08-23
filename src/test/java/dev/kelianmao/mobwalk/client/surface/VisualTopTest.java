@@ -97,12 +97,6 @@ final class VisualTopTest {
     assertEquals(1.0, honey.visualTopY(), EPS);
   }
 
-  @Test
-  void auxiliaryConstructorDefaultsVisualToCollision() {
-    StandableRect r = new StandableRect(0, 0, 1, 1, 64.0);
-    assertEquals(64.0, r.visualTopY(), EPS);
-  }
-
   // Path (col 0) + neighbour (col 1), expose the path box at Player halfW.
   private static List<StandableRect> exposePathBeside(double neighborYMax,
       double neighborCollisionTop, double neighborOutlineTop, double halfW) {

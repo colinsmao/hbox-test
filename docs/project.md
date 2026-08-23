@@ -26,8 +26,9 @@ stick; configurable item id in settings) and the mod floods outward over
 walkable terrain within a BFS hop-count flood radius, painting every surface the chosen entity
 could stand on. The flood is **entity-size aware** — width dilation closes gaps
 smaller than the entity, and height headroom drops floors under low ceilings — for the
-profile chosen in settings (builtin roster: Point / Player / Ravager / Warden /
-Zombie-Witch / Skeleton, plus enable toggles and uncapped custom profiles). The
+profile chosen in settings (builtin roster: Player / Ravager / Warden /
+Zombie-Witch / Skeleton / Cow / Sheep / Pig, plus the debug-only Point behind Debug
+`showPointProfile`, enable toggles, and uncapped custom profiles). The
 geometry and the output-sensitive flood live in `[geometry.md](geometry.md)`.
 
 Each reached surface draws as a filled top quad colored at draw with edge markers that read the
@@ -121,9 +122,10 @@ it.
 
 `fabric.mod.json` sets `"environment": "client"`, declares a `client` entrypoint
 (`dev.kelianmao.mobwalk.client.MobWalkClient`) and a `modmenu` entrypoint
-(`dev.kelianmao.mobwalk.client.config.MobWalkModMenuIntegration`), and
-depends on `fabricloader >=0.19.2`, `minecraft ~26.1.2`, `java >=25`,
-`fabric-api`, and `malilib`; it suggests `modmenu`.
+(`dev.kelianmao.mobwalk.client.config.MobWalkModMenuIntegration`), points `icon`
+at `assets/mobwalk/icon.png`, and depends on `fabricloader >=0.19.2`,
+`minecraft ~26.1.2`, `java >=25`, `fabric-api`, and `malilib`; it suggests
+`modmenu`.
 
 ## Target versions
 
@@ -178,6 +180,10 @@ names, and pointers to the file-specific gotchas in the code.
 decision, the entity-width dilation model, and the entity-height headroom rule.
 - **Settings (MaLiLib config):** `[settings.md](settings.md)` — technical
 reference for the config stack, live Generic/Debug options, screen layout
-(flat list + LABEL sections), and MaLiLib option types (player-facing
-settings help is a separate publish-time doc).
+(flat list + LABEL sections), and MaLiLib option types.
+
+Player-facing copy lives in `[../README.md](../README.md)` — what the mod does,
+requirements, install, and the wand controls, written for someone playing the
+game. Per-option help lives in the `comment.*` tooltips in
+`assets/mobwalk/lang/en_us.json`, so the README stays short.
 

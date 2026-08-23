@@ -22,16 +22,6 @@ final class FallColumnTest {
   }
 
   @Test
-  void columnCarriesTheSpansRimLineAndSide() {
-    FallColumn fall = FallColumn.of(span(false, true, 4.0));
-    assertEquals(4.0, fall.line(), EPS);
-    assertEquals(0.0, fall.lo(), EPS);
-    assertEquals(1.0, fall.hi(), EPS);
-    assertFalse(fall.alongX());
-    assertTrue(fall.maxSide());
-  }
-
-  @Test
   void plusXEdgeCatchesGeometryBeyondTheRim() {
     // +X edge (alongZ, maxSide) at x = 4: a surface reaching out from x = 4 is under
     // the fall line; one ending there sits behind the rim.

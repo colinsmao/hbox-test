@@ -413,6 +413,16 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
     }
   }
 
+  /**
+   * Rebuild the option widgets so they re-read their config values, keeping the scroll
+   * position — for a change that alters another option's value while this screen is open.
+   */
+  void refreshOptionWidgets() {
+    if (this.getListWidget() != null) {
+      this.getListWidget().refreshEntries();
+    }
+  }
+
   /** Rebuild the options list after a confirmed ConfigTable RESET. */
   void reloadConfigList() {
     this.reCreateListWidget();

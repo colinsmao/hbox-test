@@ -60,14 +60,23 @@ public final class ProfileRoster {
     ProfileRoster roster, boolean repaired, Optional<String> activeId
   ) {}
 
+  /** Point is the debug baseline at index 0; the mobs a player sees start at index 1. */
   public static final List<BuiltinSeed> BUILTIN_SEEDS = List.of(
     new BuiltinSeed("point", EntityProfile.POINT, false),
     new BuiltinSeed("player", EntityProfile.PLAYER, true),
     new BuiltinSeed("ravager", EntityProfile.RAVAGER, true),
     new BuiltinSeed("warden", EntityProfile.WARDEN, true),
     new BuiltinSeed("zombie", EntityProfile.ZOMBIE_WITCH, true),
-    new BuiltinSeed("skeleton", EntityProfile.SKELETON, false)
+    new BuiltinSeed("skeleton", EntityProfile.SKELETON, false),
+    new BuiltinSeed("cow", EntityProfile.COW, false),
+    new BuiltinSeed("sheep", EntityProfile.SHEEP, false),
+    new BuiltinSeed("pig", EntityProfile.PIG, false)
   );
+
+  /** Where a {@link #BUILTIN_SEEDS} walk starts: Point joins on Debug {@code showPointProfile}. */
+  public static int firstSeed(boolean showPointProfile) {
+    return showPointProfile ? 0 : 1;
+  }
 
   /** Ghast-scale cap: flood neighbour search is {@code floor(W)+1}. */
   public static final double MAX_CUSTOM_WIDTH = 4.0;
@@ -83,10 +92,17 @@ public final class ProfileRoster {
     this.customs = List.copyOf(customs);
   }
 
-  /** Fresh roster: six builtins with seed default enables, no customs. */
+  /** Fresh roster with seed default enables, no customs, no debug Point. */
   public static ProfileRoster defaults() {
-    List<Entry> builtins = new ArrayList<>(BUILTIN_SEEDS.size());
-    for (BuiltinSeed seed : BUILTIN_SEEDS) {
+    return defaults(false);
+  }
+
+  /** Fresh roster: seeds from {@link #firstSeed} with default enables, no customs. */
+  public static ProfileRoster defaults(boolean showPointProfile) {
+    int first = firstSeed(showPointProfile);
+    List<Entry> builtins = new ArrayList<>(BUILTIN_SEEDS.size() - first);
+    for (int i = first; i < BUILTIN_SEEDS.size(); i++) {
+      BuiltinSeed seed = BUILTIN_SEEDS.get(i);
       builtins.add(new Entry(seed.id(), seed.profile(), seed.defaultEnabled(), true));
     }
     return new ProfileRoster(builtins, List.of());
@@ -213,7 +229,9 @@ public final class ProfileRoster {
    * Repair raw table snapshots into a valid roster. Builtin geometry is always
    * taken from {@link #BUILTIN_SEEDS}; enables and <b>row order</b> follow the
    * raw builtin list (unknown/duplicate rows dropped; missing seeds appended in
-   * seed order). Customs are uncapped in count; sizes clamp non-finite / negative
+   * seed order). Point joins on {@code showPointProfile} (inserted first and Off when
+   * a row for it is missing); the hot path drops Point rows. Customs are
+   * uncapped in count; sizes clamp non-finite / negative
    * values, and width is capped at {@link #MAX_CUSTOM_WIDTH}. Blank custom names
    * restore the previous name at the same index when provided, else {@code "Custom"}.
    * Trailing spaces are stripped; new or renamed customs that collide are rewritten
@@ -225,7 +243,7 @@ public final class ProfileRoster {
     List<RawCustomRow> rawCustoms,
     String activeId
   ) {
-    return sanitize(rawBuiltins, rawCustoms, activeId, null);
+    return sanitize(rawBuiltins, rawCustoms, activeId, null, false);
   }
 
   /**
@@ -238,8 +256,23 @@ public final class ProfileRoster {
     String activeId,
     List<Entry> previousCustoms
   ) {
+    return sanitize(rawBuiltins, rawCustoms, activeId, previousCustoms, false);
+  }
+
+  /**
+   * Like {@link #sanitize(List, List, String, List)} with Debug
+   * {@code showPointProfile}: when true, Point joins the roster.
+   */
+  public static SanitizeResult sanitize(
+    List<RawBuiltinRow> rawBuiltins,
+    List<RawCustomRow> rawCustoms,
+    String activeId,
+    List<Entry> previousCustoms,
+    boolean showPointProfile
+  ) {
     boolean repaired = false;
-    List<Entry> builtins = new ArrayList<>(BUILTIN_SEEDS.size());
+    int first = firstSeed(showPointProfile);
+    List<Entry> builtins = new ArrayList<>(BUILTIN_SEEDS.size() - first);
     java.util.LinkedHashSet<String> seenIds = new java.util.LinkedHashSet<>();
 
     if (rawBuiltins == null) {
@@ -250,11 +283,17 @@ public final class ProfileRoster {
           repaired = true;
           continue;
         }
-        BuiltinSeed seed = findSeedByName(row.name());
-        if (seed == null) {
+        int seedIndex = findSeedIndexByName(row.name());
+        if (seedIndex < 0) {
           repaired = true;
           continue;
         }
+        // A Point row saved while the debug toggle was on.
+        if (seedIndex < first) {
+          repaired = true;
+          continue;
+        }
+        BuiltinSeed seed = BUILTIN_SEEDS.get(seedIndex);
         if (!seenIds.add(seed.id())) {
           repaired = true;
           continue;
@@ -269,10 +308,17 @@ public final class ProfileRoster {
       }
     }
 
-    for (BuiltinSeed seed : BUILTIN_SEEDS) {
+    for (int i = first; i < BUILTIN_SEEDS.size(); i++) {
+      BuiltinSeed seed = BUILTIN_SEEDS.get(i);
       if (seenIds.add(seed.id())) {
         repaired = true;
-        builtins.add(new Entry(seed.id(), seed.profile(), seed.defaultEnabled(), true));
+        Entry entry = new Entry(seed.id(), seed.profile(), seed.defaultEnabled(), true);
+        if (i == 0) {
+          // Point leads the table when the debug toggle brings it back.
+          builtins.add(0, entry);
+        } else {
+          builtins.add(entry);
+        }
       }
     }
 
@@ -361,16 +407,17 @@ public final class ProfileRoster {
     return new SanitizeResult(roster, repaired, resolved);
   }
 
-  private static BuiltinSeed findSeedByName(String name) {
+  /** Seed index for a raw row name, or {@code -1} when no builtin matches. */
+  private static int findSeedIndexByName(String name) {
     if (name == null || name.isBlank()) {
-      return null;
+      return -1;
     }
-    for (BuiltinSeed seed : BUILTIN_SEEDS) {
-      if (namesMatch(name, seed)) {
-        return seed;
+    for (int i = 0; i < BUILTIN_SEEDS.size(); i++) {
+      if (namesMatch(name, BUILTIN_SEEDS.get(i))) {
+        return i;
       }
     }
-    return null;
+    return -1;
   }
 
   /** True when the raw name is already the canonical display name. */

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // subagentStart hook: only allow subagents that inherit the parent model, or
-// explicitly use composer-2.5 / cursor-grok-4.5-high (AGENTS.md -> Subagents).
+// explicitly use composer-2.5 / cursor-grok-4.6-high (AGENTS.md -> Subagents).
 "use strict";
 
 function readStdin() {
@@ -21,7 +21,7 @@ try {
 const subagentModel = String(input.subagent_model || "").trim();
 const parentModel = String(input.model || "").trim();
 
-const ALLOWED = new Set(["composer-2.5", "cursor-grok-4.5-high"]);
+const ALLOWED = new Set(["composer-2.5", "cursor-grok-4.6-high"]);
 
 function deny(reason) {
   process.stdout.write(
@@ -44,7 +44,7 @@ function isFastSuffixed(model) {
 
 if (isFastSuffixed(subagentModel)) {
   deny(
-    "Subagent model gate (AGENTS.md -> Subagents): `-fast` models are not allowed for subagents. Omit `model` to inherit the parent, or use `composer-2.5` / `cursor-grok-4.5-high`."
+    "Subagent model gate (AGENTS.md -> Subagents): `-fast` models are not allowed for subagents. Omit `model` to inherit the parent, or use `composer-2.5` / `cursor-grok-4.6-high`."
   );
 }
 
@@ -64,5 +64,5 @@ if (ALLOWED.has(subagentModel)) {
 deny(
   "Subagent model gate (AGENTS.md -> Subagents): `" +
     subagentModel +
-    "` is not allowed. Omit `model` to inherit the parent, or use `composer-2.5` / `cursor-grok-4.5-high`."
+    "` is not allowed. Omit `model` to inherit the parent, or use `composer-2.5` / `cursor-grok-4.6-high`."
 );

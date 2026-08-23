@@ -3,7 +3,7 @@
   "id": "mobwalk",
   "version": "${version}",
   "name": "MobWalk",
-  "description": "A client-side mod that overlays where a chosen mob hitbox can walk, showing standable surfaces, drops, and reachable holes.",
+  "description": "Shows where a chosen mob can stand and walk, marking inescapable holes, and hazards like lava and soul sand.",
   "authors": [
     "kelianmao"
   ],
@@ -11,7 +11,8 @@
     "homepage": "https://modrinth.com/mod/mobwalk",
     "sources": "https://github.com/kelianmao/mobwalk"
   },
-  "license": "CC0-1.0",
+  "license": "MIT",
+  "icon": "assets/mobwalk/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [

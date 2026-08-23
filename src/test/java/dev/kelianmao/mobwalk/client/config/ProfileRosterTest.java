@@ -21,30 +21,18 @@ import org.junit.jupiter.api.Test;
 final class ProfileRosterTest {
   private static final double EPS = 1.0e-9;
 
+  /** The {@code showPointProfile ? 0 : 1} seed skip is only correct while Point leads. */
   @Test
-  void defaultsSixBuiltinsDefaultEnables() {
-    ProfileRoster roster = ProfileRoster.defaults();
-    assertEquals(6, roster.builtins().size());
-    assertEquals(0, roster.customs().size());
-    assertFalse(enabled(roster, "point"));
-    assertTrue(enabled(roster, "player"));
-    assertTrue(enabled(roster, "ravager"));
-    assertTrue(enabled(roster, "warden"));
-    assertTrue(enabled(roster, "zombie"));
-    assertFalse(enabled(roster, "skeleton"));
-    assertEquals(
-      List.of("player", "ravager", "warden", "zombie"),
-      roster.enabledEntries().stream().map(ProfileRoster.Entry::id).toList()
-    );
+  void pointIsTheFirstBuiltinSeed() {
+    assertEquals("point", ProfileRoster.BUILTIN_SEEDS.getFirst().id());
+    assertFalse(ProfileRoster.BUILTIN_SEEDS.getFirst().defaultEnabled());
   }
 
   @Test
-  void builtinGeometryMatchesSeeds() {
-    ProfileRoster roster = ProfileRoster.defaults();
-    assertEquals(EntityProfile.WARDEN, roster.findById("warden").orElseThrow().profile());
-    assertEquals(EntityProfile.ZOMBIE_WITCH, roster.findById("zombie").orElseThrow().profile());
-    assertEquals(0.6, EntityProfile.SKELETON.width(), EPS);
-    assertEquals(1.99, EntityProfile.SKELETON.height(), EPS);
+  void defaultsHidePointUnlessShown() {
+    assertTrue(ProfileRoster.defaults(false).findById("point").isEmpty());
+    assertEquals("point", ProfileRoster.defaults(true).builtins().getFirst().id());
+    assertFalse(enabled(ProfileRoster.defaults(true), "point"));
   }
 
   @Test
@@ -57,7 +45,7 @@ final class ProfileRosterTest {
   @Test
   void resolveActiveFallsBackWhenDisabled() {
     ProfileRoster roster = ProfileRoster.defaults();
-    // Point is off → first enabled is player
+    // Hidden Point, a disabled builtin, and an unknown id all fall back to first enabled.
     assertEquals(Optional.of("player"), roster.resolveActiveId("point"));
     assertEquals(Optional.of("player"), roster.resolveActiveId("skeleton"));
     assertEquals(Optional.of("player"), roster.resolveActiveId("nope"));
@@ -67,7 +55,7 @@ final class ProfileRosterTest {
   void disableActiveFallsBackToFirstRemaining() {
     // Player off; others default → first remaining enabled is ravager
     ProfileRoster roster = withBuiltinEnables(
-      false, false, true, true, true, false
+      false, true, true, true, false
     );
     assertEquals(Optional.of("ravager"), roster.resolveActiveId("player"));
   }
@@ -75,7 +63,7 @@ final class ProfileRosterTest {
   @Test
   void emptyEnabledIsSoftDisabled() {
     ProfileRoster roster = withBuiltinEnables(
-      false, false, false, false, false, false
+      false, false, false, false, false
     );
     assertFalse(roster.hasEnabledProfile());
     assertTrue(roster.enabledEntries().isEmpty());
@@ -99,7 +87,7 @@ final class ProfileRosterTest {
   @Test
   void cycleSingleEnabledIsNoOp() {
     ProfileRoster roster = withBuiltinEnables(
-      false, true, false, false, false, false
+      true, false, false, false, false
     );
     assertEquals(Optional.of("player"), roster.cycle("player", true));
     assertEquals(Optional.of("player"), roster.cycle("ravager", true));
@@ -240,8 +228,8 @@ final class ProfileRosterTest {
   @Test
   void disabledBuiltinStillForcesCustomSuffix() {
     List<RawBuiltinRow> builtins = defaultRawBuiltins();
-    EntityProfile ravager = ProfileRoster.BUILTIN_SEEDS.get(2).profile();
-    builtins.set(2, new RawBuiltinRow(
+    EntityProfile ravager = EntityProfile.RAVAGER;
+    builtins.set(1, new RawBuiltinRow(
       ravager.name(), ravager.width(), ravager.height(), ravager.reach(), false
     ));
     SanitizeResult result = ProfileRoster.sanitize(
@@ -375,7 +363,7 @@ final class ProfileRosterTest {
       new RawBuiltinRow("Zombie/Witch", 0.6, 1.95, EntityProfile.DEFAULT_JUMP_REACH, true),
       new RawBuiltinRow("Skeleton", 0.6, 1.99, EntityProfile.DEFAULT_JUMP_REACH, true)
     );
-    SanitizeResult result = ProfileRoster.sanitize(broken, List.of(), "player");
+    SanitizeResult result = ProfileRoster.sanitize(broken, List.of(), "player", null, true);
     assertTrue(result.repaired());
     ProfileRoster roster = result.roster();
     assertEquals(EntityProfile.POINT, roster.findById("point").orElseThrow().profile());
@@ -388,42 +376,24 @@ final class ProfileRosterTest {
   }
 
   @Test
-  void sanitizeWrongBuiltinCountAppendsMissingInSeedOrder() {
-    SanitizeResult result = ProfileRoster.sanitize(
-      List.of(new RawBuiltinRow("Player", 0.6, 1.8, EntityProfile.DEFAULT_JUMP_REACH, true)),
-      List.of(),
-      "player"
-    );
-    assertTrue(result.repaired());
-    assertEquals(6, result.roster().builtins().size());
-    assertEquals(
-      List.of("player", "point", "ravager", "warden", "zombie", "skeleton"),
-      result.roster().builtins().stream().map(ProfileRoster.Entry::id).toList()
-    );
-    assertTrue(enabled(result.roster(), "player"));
-    assertFalse(enabled(result.roster(), "point"));
-  }
-
-  @Test
   void sanitizePreservesRawBuiltinOrderForCycle() {
     List<RawBuiltinRow> reordered = defaultRawBuiltins();
-    // Player then Point … (swap first two)
-    RawBuiltinRow point = reordered.get(0);
-    RawBuiltinRow player = reordered.get(1);
-    reordered.set(0, player);
-    reordered.set(1, point);
+    // Ravager then Player … (swap first two)
+    RawBuiltinRow player = reordered.get(0);
+    RawBuiltinRow ravager = reordered.get(1);
+    reordered.set(0, ravager);
+    reordered.set(1, player);
     SanitizeResult result = ProfileRoster.sanitize(reordered, List.of(), "player");
     assertFalse(result.repaired());
     ProfileRoster roster = result.roster();
+    assertEquals("ravager", roster.builtins().get(0).id());
+    assertEquals("player", roster.builtins().get(1).id());
     assertEquals(
-      List.of("player", "point", "ravager", "warden", "zombie", "skeleton"),
-      roster.builtins().stream().map(ProfileRoster.Entry::id).toList()
-    );
-    assertEquals(
-      List.of("player", "ravager", "warden", "zombie"),
+      List.of("ravager", "player", "warden", "zombie"),
       roster.enabledEntries().stream().map(ProfileRoster.Entry::id).toList()
     );
-    assertEquals(Optional.of("ravager"), roster.cycle("player", true));
+    // Cycle follows the swapped table order, not seed order.
+    assertEquals(Optional.of("warden"), roster.cycle("player", true));
   }
 
   @Test
@@ -448,29 +418,64 @@ final class ProfileRosterTest {
   @Test
   void sanitizeAcceptsZombieAlias() {
     List<RawBuiltinRow> rows = defaultRawBuiltins();
-    rows.set(4, new RawBuiltinRow("Zombie", 0.6, 1.95, EntityProfile.DEFAULT_JUMP_REACH, false));
+    rows.set(3, new RawBuiltinRow("Zombie", 0.6, 1.95, EntityProfile.DEFAULT_JUMP_REACH, false));
     SanitizeResult result = ProfileRoster.sanitize(rows, List.of(), "ravager");
     assertFalse(enabled(result.roster(), "zombie"));
     assertEquals(EntityProfile.ZOMBIE_WITCH, result.roster().findById("zombie").orElseThrow().profile());
+  }
+
+  /** Config saved while the debug toggle was on, loaded with it off. */
+  @Test
+  void hiddenPointIsDroppedAndNeverAppended() {
+    List<RawBuiltinRow> rows = defaultRawBuiltins();
+    rows.addFirst(pointRow(true));
+    SanitizeResult result =
+      ProfileRoster.sanitize(rows, List.of(), "point", null, false);
+    ProfileRoster roster = result.roster();
+    assertTrue(result.repaired());
+    assertEquals(Optional.empty(), roster.findById("point"));
+    assertEquals(Optional.of("player"), roster.resolveActiveId("point"));
+    assertEquals(Optional.of("player"), result.activeId());
+  }
+
+  @Test
+  void shownPointIsAppendedFirstAndOff() {
+    SanitizeResult result =
+      ProfileRoster.sanitize(defaultRawBuiltins(), List.of(), "player", null, true);
+    ProfileRoster roster = result.roster();
+    assertTrue(result.repaired());
+    assertEquals("point", roster.builtins().getFirst().id());
+    assertFalse(enabled(roster, "point"));
   }
 
   private static boolean enabled(ProfileRoster roster, String id) {
     return roster.findById(id).orElseThrow().enabled();
   }
 
-  /** Enables in builtin seed order. */
+  /** Enables in builtin seed order (hot path, no Point); omitted trailing flags stay Off. */
   private static ProfileRoster withBuiltinEnables(
-    boolean point, boolean player, boolean ravager,
-    boolean warden, boolean zombie, boolean skeleton
+    boolean player, boolean ravager, boolean warden, boolean zombie, boolean skeleton
   ) {
-    boolean[] flags = {point, player, ravager, warden, zombie, skeleton};
-    List<RawBuiltinRow> rows = new ArrayListRows(flags);
+    boolean[] flags = new boolean[hotPathSeeds().size()];
+    boolean[] given = {player, ravager, warden, zombie, skeleton};
+    System.arraycopy(given, 0, flags, 0, given.length);
+    List<RawBuiltinRow> rows = rawBuiltins(flags);
     return ProfileRoster.sanitize(rows, List.of(), "player").roster();
   }
 
+  /**
+   * Seeds a player sees: everything after the debug Point, whose index 0 slot is pinned
+   * by {@link #pointIsTheFirstBuiltinSeed}. Spelled out rather than read from
+   * {@code firstSeed} so these fixtures stay independent of the code under test.
+   */
+  private static List<ProfileRoster.BuiltinSeed> hotPathSeeds() {
+    return ProfileRoster.BUILTIN_SEEDS.subList(1, ProfileRoster.BUILTIN_SEEDS.size());
+  }
+
+  /** Canonical rows for the hot-path seeds with their default enables. */
   private static List<RawBuiltinRow> defaultRawBuiltins() {
     List<RawBuiltinRow> rows = new java.util.ArrayList<>();
-    for (ProfileRoster.BuiltinSeed seed : ProfileRoster.BUILTIN_SEEDS) {
+    for (ProfileRoster.BuiltinSeed seed : hotPathSeeds()) {
       EntityProfile p = seed.profile();
       rows.add(new RawBuiltinRow(
         p.name(), p.width(), p.height(), p.reach(), seed.defaultEnabled()
@@ -479,13 +484,20 @@ final class ProfileRosterTest {
     return rows;
   }
 
-  private static final class ArrayListRows extends java.util.ArrayList<RawBuiltinRow> {
-    ArrayListRows(boolean[] flags) {
-      for (int i = 0; i < ProfileRoster.BUILTIN_SEEDS.size(); i++) {
-        ProfileRoster.BuiltinSeed seed = ProfileRoster.BUILTIN_SEEDS.get(i);
-        EntityProfile p = seed.profile();
-        add(new RawBuiltinRow(p.name(), p.width(), p.height(), p.reach(), flags[i]));
-      }
+  /** Canonical rows for the hot-path seeds with the given enables. */
+  private static List<RawBuiltinRow> rawBuiltins(boolean[] enables) {
+    List<ProfileRoster.BuiltinSeed> seeds = hotPathSeeds();
+    List<RawBuiltinRow> rows = new java.util.ArrayList<>(seeds.size());
+    for (int i = 0; i < seeds.size(); i++) {
+      EntityProfile p = seeds.get(i).profile();
+      rows.add(new RawBuiltinRow(p.name(), p.width(), p.height(), p.reach(), enables[i]));
     }
+    return rows;
+  }
+
+  /** A canonical row for the debug Point seed at index 0. */
+  private static RawBuiltinRow pointRow(boolean enabled) {
+    EntityProfile p = ProfileRoster.BUILTIN_SEEDS.getFirst().profile();
+    return new RawBuiltinRow(p.name(), p.width(), p.height(), p.reach(), enabled);
   }
 }

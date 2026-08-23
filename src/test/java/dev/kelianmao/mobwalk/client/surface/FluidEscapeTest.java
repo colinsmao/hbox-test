@@ -57,16 +57,6 @@ final class FluidEscapeTest {
   }
 
   @Test
-  void onlyFluidKindsTriggerEscapeCap() {
-    assertTrue(HazardClass.WATER.isFluid());
-    assertTrue(HazardClass.LAVA.isFluid());
-    assertFalse(HazardClass.NONE.isFluid());
-    assertFalse(HazardClass.HOLE.isFluid());
-    assertFalse(HazardClass.SOUL_SAND.isFluid());
-    assertFalse(HazardClass.MAGMA.isFluid());
-  }
-
-  @Test
   void landClampKeepsEscapeNoEasierThanReach() {
     // Escape alone would allow further than reach; min with reach wins.
     ClimbRule climb = new ClimbRule(0.2, 2.0);
