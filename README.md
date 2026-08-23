@@ -5,8 +5,8 @@ A client-side Fabric mod that shows where a chosen mob can safely stand and walk
 Right-click a block with the wand and MobWalk paints every surface the chosen mob
 could reach from there, and marks inescapable holes and hazards such as soul sand.
 
-![img1](https://raw.githubusercontent.com/kelianmao/mobwalk/main/images/img1.png)
-![img2](https://raw.githubusercontent.com/kelianmao/mobwalk/main/images/img2.png)
+![img1](https://raw.githubusercontent.com/colinsmao/mobwalk/main/images/img1.png)
+![img2](https://raw.githubusercontent.com/colinsmao/mobwalk/main/images/img2.png)
 
 Every color, and whether each hazard is marked at all, is configurable.
 
