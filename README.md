@@ -5,15 +5,8 @@ A client-side Fabric mod that shows where a chosen mob can safely stand and walk
 Right-click a block with the wand and MobWalk paints every surface the chosen mob
 could reach from there, and marks inescapable holes and hazards such as soul sand.
 
-<!-- Screenshots: add them here as ![alt](https://raw.githubusercontent.com/kelianmao/mobwalk/main/docs/images/FILE.png) so they render on Modrinth too. -->
-
-- **Green** - surfaces the mob can stand on, with a band hanging down the side of
-  a drop and rising up against a wall.
-- **Red beams** - holes: drops that a mob walking off that edge could not climb
-  back out of.
-- **Blue** and **orange** - water and lava, painted as swimmable and marked as
-  hazards.
-- **Brown** and **gold** - soul sand and magma blocks.
+![img1](https://raw.githubusercontent.com/kelianmao/mobwalk/main/images/img1.png)
+![img2](https://raw.githubusercontent.com/kelianmao/mobwalk/main/images/img2.png)
 
 Every color, and whether each hazard is marked at all, is configurable.
 
@@ -39,11 +32,17 @@ Surfaces show while you hold the wand, or can be set to always show.
 
 More details of each setting may be found in the menu tooltips.
 
+## Known limitations
+
+- Classification near the edge of the flood fill may be inaccurate, due to missing neighbors.
+- An unreachable ledge between two reachable surfaces may be marked as a "hole", since technically it is unreachable from both directions.
+- Frame stutter on usage with large flood radius; optimizations planned.
+
 ## AI usage
 
 The code was written with Cursor, primarily using Opus and Grok. Mainly because
 it saves me having to learn the Fabric API. I also used this project to learn how to
-use coding agents. Planning artefacts etc can be found in git history.
+use coding agents. Planning artefacts can be found in git history.
 
 90%+ of the actual design and scope is mine: the walkability geometry and logic,
 what gets drawn and how, all the settings options, etc. After all, that's the fun part.
@@ -54,4 +53,4 @@ Also, even Opus still sucks at abstract planning.
 `./gradlew build` puts the jar in `build/libs/`. [`AGENTS.md`](AGENTS.md) holds the
 working rules and [`docs/project.md`](docs/project.md) the project facts.
 
-Released under CC0-1.0.
+Released under MIT.
