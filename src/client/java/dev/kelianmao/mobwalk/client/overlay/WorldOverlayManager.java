@@ -6,14 +6,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
-import java.util.OptionalInt;
 
 import dev.kelianmao.mobwalk.MobWalk;
 
+import com.mojang.blaze3d.IndexType;
+import com.mojang.blaze3d.PrimitiveTopology;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
@@ -115,7 +115,7 @@ public final class WorldOverlayManager {
   // button does not spam. Deliberately not Fabric's UseItemCallback: that
   // re-fires every tick while held for items with no use cooldown (e.g. a stick).
   private static void onClientTick(Minecraft client) {
-    boolean down = client.screen == null && client.options.keyUse.isDown();
+    boolean down = client.gui.screen() == null && client.options.keyUse.isDown();
     if (down && !usePressedLastTick && client.player != null) {
       for (WorldOverlay overlay : OVERLAYS) {
         overlay.onUseItem(client.player);
@@ -209,10 +209,9 @@ public final class WorldOverlayManager {
       );
     }
 
-    CommandEncoder commandEncoder = RenderSystem.getDevice().createCommandEncoder();
-
-    try (GpuBuffer.MappedView mappedView = commandEncoder.mapBuffer(
-        layer.vertexBuffer.currentBuffer().slice(0, builtBuffer.vertexBuffer().remaining()), false, true)) {
+    try (GpuBufferSlice.MappedView mappedView = layer.vertexBuffer.currentBuffer()
+        .slice(0, builtBuffer.vertexBuffer().remaining())
+        .map(false, true)) {
       MemoryUtil.memCopy(builtBuffer.vertexBuffer(), mappedView.data());
     }
 
@@ -223,35 +222,50 @@ public final class WorldOverlayManager {
       MeshData.DrawState drawParameters, GpuBuffer vertices, VertexFormat format) {
     RenderPipeline pipeline = layer.pipeline;
     GpuBuffer indices;
-    VertexFormat.IndexType indexType;
+    IndexType indexType;
+    boolean closeIndices = false;
 
-    if (pipeline.getVertexFormatMode() == VertexFormat.Mode.QUADS) {
+    if (pipeline.getPrimitiveTopology() == PrimitiveTopology.QUADS) {
       builtBuffer.sortQuads(layer.allocator, RenderSystem.getProjectionType().vertexSorting());
-      indices = pipeline.getVertexFormat().uploadImmediateIndexBuffer(builtBuffer.indexBuffer());
+      indices = RenderSystem.getDevice().createBuffer(
+        () -> MobWalk.MOD_ID + " world overlay indices",
+        GpuBuffer.USAGE_INDEX,
+        builtBuffer.indexBuffer()
+      );
+      closeIndices = true;
       indexType = builtBuffer.drawState().indexType();
     } else {
-      RenderSystem.AutoStorageIndexBuffer shapeIndexBuffer = RenderSystem.getSequentialBuffer(pipeline.getVertexFormatMode());
+      RenderSystem.AutoStorageIndexBuffer shapeIndexBuffer = RenderSystem.getSequentialBuffer(pipeline.getPrimitiveTopology());
       indices = shapeIndexBuffer.getBuffer(drawParameters.indexCount());
       indexType = shapeIndexBuffer.type();
     }
 
+    // Snapshot the model-view instead of passing the live shared Matrix4fStack:
+    // the dynamic-transform write must not entangle our world pass with vanilla's
+    // singleton stack, or later first-person screen overlays (fire, etc.) inherit
+    // our camera transform and render world-anchored instead of on the screen.
+    Matrix4f modelView = new Matrix4f(RenderSystem.getModelViewStack());
     GpuBufferSlice dynamicTransforms = RenderSystem.getDynamicUniforms()
-      .writeTransform(RenderSystem.getModelViewMatrix(), COLOR_MODULATOR, MODEL_OFFSET, TEXTURE_MATRIX);
+      .writeTransform(modelView, COLOR_MODULATOR, MODEL_OFFSET, TEXTURE_MATRIX);
     try (RenderPass renderPass = RenderSystem.getDevice()
         .createCommandEncoder()
         .createRenderPass(
           () -> MobWalk.MOD_ID + " world overlay rendering",
-          client.getMainRenderTarget().getColorTextureView(), OptionalInt.empty(),
-          client.getMainRenderTarget().getDepthTextureView(), OptionalDouble.empty())) {
+          client.gameRenderer.mainRenderTarget().getColorTextureView(), Optional.empty(),
+          client.gameRenderer.mainRenderTarget().getDepthTextureView(), OptionalDouble.empty())) {
       renderPass.setPipeline(pipeline);
 
       RenderSystem.bindDefaultUniforms(renderPass);
       renderPass.setUniform("DynamicTransforms", dynamicTransforms);
 
-      renderPass.setVertexBuffer(0, vertices);
+      renderPass.setVertexBuffer(0, vertices.slice());
       renderPass.setIndexBuffer(indices, indexType);
 
-      renderPass.drawIndexed(0, 0, drawParameters.indexCount(), 1);
+      renderPass.drawIndexed(drawParameters.indexCount(), 1, 0, 0, 0);
+    } finally {
+      if (closeIndices) {
+        indices.close();
+      }
     }
 
     builtBuffer.close();
@@ -278,7 +292,7 @@ public final class WorldOverlayManager {
 
     BufferBuilder begin() {
       if (buffer == null) {
-        buffer = new BufferBuilder(allocator, pipeline.getVertexFormatMode(), pipeline.getVertexFormat());
+        buffer = new BufferBuilder(allocator, pipeline.getPrimitiveTopology(), pipeline.getVertexFormatBinding(0));
       }
       return buffer;
     }

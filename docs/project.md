@@ -123,8 +123,8 @@ it.
 `fabric.mod.json` sets `"environment": "client"`, declares a `client` entrypoint
 (`dev.kelianmao.mobwalk.client.MobWalkClient`) and a `modmenu` entrypoint
 (`dev.kelianmao.mobwalk.client.config.MobWalkModMenuIntegration`), points `icon`
-at `assets/mobwalk/icon.png`, and depends on `fabricloader >=0.19.2`,
-`minecraft ~26.1.2`, `java >=25`, `fabric-api`, and `malilib`; it suggests
+at `assets/mobwalk/icon.png`, and depends on `fabricloader >=0.19.3`,
+`minecraft ~26.2`, `java >=25`, `fabric-api`, and `malilib`; it suggests
 `modmenu`.
 
 ## Target versions
@@ -137,16 +137,16 @@ sources — live in `AGENTS.md` under **Key constraints**.)
 
 | Component     | Version          |
 | ------------- | ---------------- |
-| Minecraft     | `26.1.2`         |
-| Fabric Loader | `0.19.2`         |
-| Fabric Loom   | `1.16-SNAPSHOT`  |
-| Fabric API    | `0.149.1+26.1.2` |
-| MaLiLib       | `0.28.9`         |
-| ModMenu       | `18.0.0` (dev)   |
+| Minecraft     | `26.2`           |
+| Fabric Loader | `0.19.3`         |
+| Fabric Loom   | `1.17-SNAPSHOT`  |
+| Fabric API    | `0.158.0+26.2`   |
+| MaLiLib       | `0.29.4`         |
+| ModMenu       | `20.0.1` (dev)   |
 | JDK           | `25`             |
 
 
-Authoritative sources (pin the version selector to `26.1.2`):
+Authoritative sources (pin the version selector to `26.2`):
 
 - Guides: [https://docs.fabricmc.net/develop](https://docs.fabricmc.net/develop) — e.g. "Drawing to the GUI" and
 "Rendering in the World".
@@ -159,9 +159,9 @@ Authoritative sources (pin the version selector to `26.1.2`):
 
 1. `./gradlew build`, then grab `build/libs/mobwalk-1.0.0.jar` (ignore
   any `*-sources.jar`).
-2. Install **Fabric Loader** for Minecraft `26.1.2` via the official installer
+2. Install **Fabric Loader** for Minecraft `26.2` via the official installer
   ([https://fabricmc.net/use/installer/](https://fabricmc.net/use/installer/)).
-3. Download **Fabric API** `0.149.1+26.1.2` from Modrinth/CurseForge.
+3. Download **Fabric API** `0.158.0+26.2` from Modrinth/CurseForge.
 4. Drop both the Fabric API jar and the `mobwalk` jar into the `mods/`
   folder of the relevant `.minecraft` profile, then launch that Fabric profile.
 
@@ -173,7 +173,7 @@ Subsystem-specific depth lives in its own doc so `AGENTS.md` stays lean. Read th
 relevant guide **before** touching that area; add a new guide as the project grows.
 
 - **Rendering (HUD + in-world):** `[rendering.md](rendering.md)` — the HUD/world
-render APIs, the `Overlay` / `WorldOverlay` frameworks, `26.1.2` rendering class
+render APIs, the `Overlay` / `WorldOverlay` frameworks, `26.2` rendering class
 names, and pointers to the file-specific gotchas in the code.
 - **Surface / collision geometry:** `[geometry.md](geometry.md)` — the
 `StandableRect` representation, the rect/double-space (not pixel-raster)

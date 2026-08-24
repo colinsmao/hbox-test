@@ -12,7 +12,7 @@ Every color, and whether each hazard is marked at all, is configurable.
 
 ## Requirements
 
-- Minecraft `26.1.2` with [Fabric Loader](https://fabricmc.net/use/installer/)
+- Minecraft `26.2` with [Fabric Loader](https://fabricmc.net/use/installer/)
 - [Fabric API](https://modrinth.com/mod/fabric-api), [MaLiLib](https://modrinth.com/mod/malilib), and [ModMenu](https://modrinth.com/mod/modmenu)
 
 MobWalk is purely client-side.

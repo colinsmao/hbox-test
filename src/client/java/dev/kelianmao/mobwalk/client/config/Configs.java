@@ -264,23 +264,23 @@ public final class Configs implements IConfigHandler {
 
   public static final class Appearance {
     public static final ConfigColor WALKABLE_COLOR =
-      new ConfigColor("walkableColor", "#B055AA55").apply(APPEARANCE_KEY);
+      new ConfigColor("walkableColor", "#7F55AA55").apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_WATER_HAZARD =
       new ConfigBoolean("showWaterHazard", true).apply(APPEARANCE_KEY);
     public static final ConfigColor WATER_HAZARD_COLOR =
-      new ConfigColor("waterHazardColor", "#B03A9AE0").apply(APPEARANCE_KEY);
+      new ConfigColor("waterHazardColor", "#7F3A9AE0").apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_LAVA_HAZARD =
       new ConfigBoolean("showLavaHazard", true).apply(APPEARANCE_KEY);
     public static final ConfigColor LAVA_HAZARD_COLOR =
-      new ConfigColor("lavaHazardColor", "#B0E07020").apply(APPEARANCE_KEY);
+      new ConfigColor("lavaHazardColor", "#7FE07020").apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_SOUL_SAND_HAZARD =
       new ConfigBoolean("showSoulSandHazard", true).apply(APPEARANCE_KEY);
     public static final ConfigColor SOUL_SAND_HAZARD_COLOR =
-      new ConfigColor("soulSandHazardColor", "#B08B5A2B").apply(APPEARANCE_KEY);
+      new ConfigColor("soulSandHazardColor", "#7F8B5A2B").apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_MAGMA_HAZARD =
       new ConfigBoolean("showMagmaHazard", true).apply(APPEARANCE_KEY);
     public static final ConfigColor MAGMA_HAZARD_COLOR =
-      new ConfigColor("magmaHazardColor", "#B0E0C028").apply(APPEARANCE_KEY);
+      new ConfigColor("magmaHazardColor", "#7FE0C028").apply(APPEARANCE_KEY);
     public static final ConfigBoolean DRAW_ON_VISIBLE_FACE =
       new ConfigBoolean("drawOnVisibleFace", true).apply(APPEARANCE_KEY);
     public static final ConfigBoolean SHOW_BEAMS_THROUGH_WALLS =
@@ -288,7 +288,7 @@ public final class Configs implements IConfigHandler {
     public static final ConfigBoolean SHOW_HOLE_BEAMS =
       new ConfigBoolean("showHoleBeams", true).apply(APPEARANCE_KEY);
     public static final ConfigColor HOLE_BEAM_COLOR =
-      new ConfigColor("holeBeamColor", "#80F2261A").apply(APPEARANCE_KEY);
+      new ConfigColor("holeBeamColor", "#7FF2261A").apply(APPEARANCE_KEY);
     public static final ConfigDouble DOWN_SKIRT_HEIGHT =
       new ConfigDouble("downSkirtHeight", 2.0, 0.0, 4.0, true).apply(APPEARANCE_KEY);
     public static final ConfigDouble UPWARD_SKIRT_HEIGHT =
@@ -953,7 +953,7 @@ public final class Configs implements IConfigHandler {
       return;
     }
     client.execute(() -> {
-      if (client.screen instanceof CustomProfilesTableEdit edit) {
+      if (client.gui.screen() instanceof CustomProfilesTableEdit edit) {
         edit.initGui();
       }
     });
