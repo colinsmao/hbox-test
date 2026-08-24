@@ -7,7 +7,7 @@ guidance (versions, build/run, conventions, git) lives in
 source files. This doc captures the subsystem design and the API facts that the
 compiler and stale training data won't hand you.
 
-> All version-specific facts below are for Minecraft `26.1.2`. The rendering API
+> All version-specific facts below are for Minecraft `26.2`. The rendering API
 > churns hard between releases, so **verify class/package names against the
 > resolved jars and live docs** (<https://docs.fabricmc.net/develop>,
 > <https://maven.fabricmc.net/docs>), not memory.
@@ -34,8 +34,9 @@ Config UI, persistence, and MaLiLib option types live in
   `attachElementBefore(VanillaHudElements.CHAT, id, element)`) so the overlay
   inherits that element's render condition (respects the F1 "hide HUD" toggle).
   `addFirst`/`addLast` do not inherit one.
-- The `HudElement` functional method in `26.1.2` is
-  `extractRenderState(GuiGraphicsExtractor, DeltaTracker)`.
+- The `HudElement` functional method in `26.2` is
+  `extractRenderState(GuiGraphicsExtractor, DeltaTracker)` (attached as
+  `OverlayManager::render`).
 - **Framework:** `Overlay` is a small interface (`id()`,
   `render(GuiGraphicsExtractor, DeltaTracker)`, `isVisible()`).
   `OverlayManager.bootstrap()` registers built-in widgets and attaches a
@@ -317,14 +318,20 @@ the published snapshots into `SurfaceEmitter.emit`.
   `CollisionSurfaceOverlay` publishes a `volatile` hazard list beside holes;
   `SurfaceEmitter.emitBeams` draws both lists via `emitBeam`.
 
-## `26.1.2` rendering API names (verified against the resolved jars)
+## `26.2` rendering API names (verified against the resolved jars)
 
-- Draw context is **`net.minecraft.client.gui.GuiGraphicsExtractor`** (not
-  `GuiGraphics`).
-- Text is drawn with **`text(Font, String, x, y, color, dropShadow)`** (not
-  `drawTextWithShadow`/`drawString`).
-- Identifiers are **`net.minecraft.resources.Identifier`** via
-  `Identifier.fromNamespaceAndPath(...)` (not `ResourceLocation`).
+- Draw context is **`net.minecraft.client.gui.GuiGraphicsExtractor`**. Text is
+  drawn with **`text(Font, String, x, y, color, dropShadow)`**. Identifiers are
+  **`net.minecraft.resources.Identifier`** via
+  `Identifier.fromNamespaceAndPath(...)`.
+- The current screen lives on **`Minecraft.getInstance().gui.screen()`** (set
+  via `gui.setScreen(...)`).
+- Custom filled pipelines start from **`RenderPipelines.DEBUG_FILLED_SNIPPET`**.
+  Topology is **`PrimitiveTopology.QUADS`**; the vertex format is
+  **`pipeline.getVertexFormatBinding(0)`**. **`RenderPass.drawIndexed`** is
+  `(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)`. Vertex
+  uploads map through **`GpuBufferSlice.map`**. The color/depth target is
+  **`client.gameRenderer.mainRenderTarget()`**.
 
 ## Where the file-specific gotchas live (inline comments)
 
