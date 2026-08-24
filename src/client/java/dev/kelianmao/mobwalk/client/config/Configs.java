@@ -296,6 +296,9 @@ public final class Configs implements IConfigHandler {
 
     public static final ImmutableList<IConfigBase> OPTIONS = ImmutableList.of(
       WALKABLE_COLOR,
+      SHOW_BEAMS_THROUGH_WALLS,
+      SHOW_HOLE_BEAMS,
+      HOLE_BEAM_COLOR,
       SHOW_WATER_HAZARD,
       WATER_HAZARD_COLOR,
       SHOW_LAVA_HAZARD,
@@ -304,9 +307,6 @@ public final class Configs implements IConfigHandler {
       SOUL_SAND_HAZARD_COLOR,
       SHOW_MAGMA_HAZARD,
       MAGMA_HAZARD_COLOR,
-      SHOW_BEAMS_THROUGH_WALLS,
-      SHOW_HOLE_BEAMS,
-      HOLE_BEAM_COLOR,
       DOWN_SKIRT_HEIGHT,
       UPWARD_SKIRT_HEIGHT,
       DRAW_ON_VISIBLE_FACE

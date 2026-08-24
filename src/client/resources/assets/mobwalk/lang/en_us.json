@@ -40,7 +40,7 @@
 
   "mobwalk.config.appearance.comment.walkableColor": "Color and transparency of walkable surfaces.",
 
-  "mobwalk.config.appearance.comment.showBeamsThroughWalls": "If enabled, shows beams through solid blocks.",
+  "mobwalk.config.appearance.comment.showBeamsThroughWalls": "If enabled, shows hazard beams through solid blocks.",
 
   "mobwalk.config.appearance.comment.showHoleBeams": "If enabled, draws vertical beams at holes (drops a mob cannot escape).",
 
