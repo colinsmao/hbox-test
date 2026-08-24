@@ -1,0 +1,8 @@
+---------------------------------------------------------------------------------------------------
+Version: 1.0.0
+Date: 23. 08. 2026
+  Major Features:
+    - Initial release. A client-side overlay that paints where a chosen mob can stand and walk from a wand-selected block.
+    - Marks inescapable holes and hazards (water, lava, soul sand, magma).
+    - Built-in mobs such as Player, Ravager, and Warden, plus custom profiles (width, height, and vertical reach).
+    - Colors, hazard markers, the wand item, and visibility are all configurable.

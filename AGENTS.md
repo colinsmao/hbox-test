@@ -230,6 +230,9 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
 ## Documentation & conventions
 
 - **Indentation is two spaces** (Java, Gradle, JSON under `src/`).
+- **Changelogs follow Factorio format.** Player-facing version history lives in
+  [`changelog.txt`](changelog.txt) at the repo root, in the
+  [Factorio changelog format](https://lua-api.factorio.com/latest/auxiliary/changelog-format.html).
 - **Prose: positive facts; keep corrections honest.** Write what something *is* /
   *does*. Prefer "Client chat command `/mobwalk dump`" over "chat command only (no
   keybind)". When a claim goes stale, replace that sentence with a shorter accurate
