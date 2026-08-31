@@ -365,7 +365,7 @@ air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner squ
 
 ## How it is computed: the output-sensitive (lazy) flood
 
-`select` runs **`FloodJob`**: a surface BFS that exposes geometry only as it
+`select` arms **`FloodJob`**: a surface BFS that exposes geometry only as it
 reaches it, so cost tracks the reachable set (and its occluder shells) rather
 than the window volume — a large win in caves / against walls, and asymptotically
 on open ground. Adjacency uses `RectMath.footprintAdjacent`; reach is the
@@ -377,8 +377,9 @@ milestones).
   next depth ring, and the `reached` node list — as fields, so a flood can span
   calls. `seed()` arms it from the click origin (ring 0 from the seed block's own
   tops, ring 1 pre-seeded from the abutting ones), each `stepRing()` expands exactly
-  the current depth, and `runToCompletion()` drains every ring in one call, which is
-  what `select` does today. Call `k` completes ring `k-1`, so after `k` steps
+  the current depth, and `advanceRings(budgetNanos)` fits as many whole rings as a
+  wall-time budget allows — every remaining ring, at an unlimited budget.
+  Call `k` completes ring `k-1`, so after `k` steps
   `reached` holds exactly the surfaces at depth `<= k-1` — itself a valid flood at
   that radius, which is what lets a caller yield between rings. Rings reproduce the
   order a single FIFO queue gave: BFS over unit-weight edges leaves a queue in
@@ -390,7 +391,18 @@ milestones).
   port) are captured at construction, so a job in flight is immutable with respect
   to settings and a radius/profile change is answered by a fresh job. Contract:
   `FloodRingContractTest` (ring-per-step membership, slice-granularity invariance,
-  stepping past completion, an origin over nothing).
+  a zero budget buying exactly one ring, a partly advanced flood draining to the
+  same result, stepping past completion, an origin over nothing).
+- **Spread across frames.** `select` arms a job and returns; each frame spends
+  the General `floodBudgetMs` budget on it (`SurfaceSelection.advance`), and the frame
+  that empties the queue runs `finish()` — merge plus the four edge passes — and
+  swaps the published snapshot. Since yields land only on completed rings, the
+  finalize always sees a valid flood rather than a jagged wavefront, and the whole
+  compute is one monotonic queue (no ring is ever re-expanded). Where the yields
+  fall never changes the output for a fixed world; a world edit mid-flood is the
+  one divergence, since the append-only index keeps whatever a column held when it
+  was first scanned. Driver and lifetime rules live in
+  [`rendering.md`](rendering.md).
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the

@@ -18,7 +18,9 @@
 
   "mobwalk.config.generic.comment.mobProfile": "Which mob's hitbox and vertical reach to use when calculating walkable area. Cycles enabled mob profiles only. Does NOT account for horizontal movement when jumping (ie parkour).",
 
-  "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block, in flood steps. Large values may impact performance, especially with a large mob hitbox (must check farther per step).",
+  "mobwalk.config.generic.comment.floodRadius": "How far the selection spreads from the clicked block, in mob radii. Large values may impact performance, especially with a large mob hitbox.",
+
+  "mobwalk.config.generic.comment.floodBudgetMs": "How long the mod may spend calculating a selection each frame, in milliseconds. Higher values finish sooner but cost more frame rate while calculating.\nA value of 0 calculates the whole selection on the frame you click, which may cause a stutter.\nNote: there may be desyncs if world state changes between frames; use 0 if this is unacceptable.",
 
   "mobwalk.config.generic.comment.swimmableFluids": "If enabled, water and lava are treated as walkable to approximate swimming.",
 

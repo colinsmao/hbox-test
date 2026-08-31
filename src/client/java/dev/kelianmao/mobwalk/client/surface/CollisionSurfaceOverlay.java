@@ -41,10 +41,14 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * switches to the collision height, which re-floods since the visible top is
  * gathered compute-side (gated on the flag; see {@code WorldGeometry.visibleTop}).
  *
- * <p>The selection is published into a {@code volatile} snapshot on every wand
- * action ({@link #publish}); {@link #extract} does no per-frame geometry work
- * (it only tracks visibility/crouch and resets on a level change), and
- * {@link #emit} forwards the snapshot to {@link SurfaceEmitter} each frame.
+ * <p>A wand action <b>arms</b> the flood and {@link #extract} expands it under
+ * the General flood budget ({@link #advanceFlood}), publishing the finished
+ * selection into a {@code volatile} snapshot ({@link #publish}) on the frame it
+ * completes; the previous selection stays drawn until that swap, and a new
+ * trigger cancels whatever was in flight. A budget of {@code 0} means unlimited,
+ * which finishes the flood on the frame after the click. Driving it from the
+ * frame spends the budget evenly across frames, so a flood costs a uniform
+ * frame-rate dip; {@link #emit} forwards the snapshot to {@link SurfaceEmitter}.
  */
 public final class CollisionSurfaceOverlay implements WorldOverlay {
   // Cap the downward walk so looking at tall grass over a hole can't scan into
@@ -54,6 +58,13 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // Flood radius lives in Configs.Generic.FLOOD_RADIUS (slider + shift+scroll).
   // Past this the scroll steps by 2, keeping the high end usable.
   private static final int COARSE_RADIUS = 10;
+
+  // General floodBudgetMs is in milliseconds; the job measures in nanoseconds.
+  private static final long NANOS_PER_MS = 1_000_000L;
+
+  // General floodBudgetMs uses 0 as the sentinel for "no limit" — the opposite of
+  // SurfaceSelection.advance's 0, which buys the minimum of one ring.
+  private static final int UNLIMITED_BUDGET_MS = 0;
 
   // The computed surfaces, recomputed from scratch on each wand action
   // (onUseItem (re)selects/clears/cycles; radius/profile callbacks re-flood).
@@ -95,15 +106,17 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     Player player = client.player;
     Level level = client.level;
 
-    // The selection is published on every wand action (publish()), so extract
-    // does no per-frame geometry work. It samples draw visibility + crouch and
-    // resets on a level-identity change (world unload, dimension switch, reconnect).
+    // Extract owns the flood: a level-identity change (world unload, dimension
+    // switch, reconnect) drops both the job and the drawn selection, then this
+    // frame's slice of the budget goes to whatever is still in flight. Advancing
+    // before the visibility sample lets a flood that completes here draw here.
     if (level != lastLevel) {
       cache.clear();
       lastSeed = null;
       lastLevel = level;
       published = SelectionSnapshot.EMPTY;
     }
+    advanceFlood();
 
     Item wand = Configs.wandItem();
     boolean holding = player != null
@@ -120,10 +133,38 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   }
 
   // Publish the current selection into the volatile snapshot emit() reads. Called
-  // after every mutation (select/clear/radius/profile) so per-frame work is nil;
+  // when a flood completes and after every clear, so per-frame work is nil;
   // editing painted terrain therefore needs a re-click to refresh (intended).
   private void publish() {
     published = cache.snapshot();
+  }
+
+  /**
+   * Spend this frame's slice of the General flood budget on the selection in
+   * flight, publishing it on the frame it completes (the previous one stays
+   * drawn until then). Harmless with nothing armed.
+   *
+   * <p>Reading the option live each frame is what lets a budget change apply to
+   * the flood already running, and it is the only place the setting's
+   * {@code 0}-means-unlimited sentinel is translated for
+   * {@link SurfaceSelection#advance}.
+   */
+  private void advanceFlood() {
+    int budgetMs = Configs.floodBudgetMs();
+    long budgetNanos = budgetMs == UNLIMITED_BUDGET_MS
+      ? Long.MAX_VALUE
+      : budgetMs * NANOS_PER_MS;
+    if (cache.advance(budgetNanos)) {
+      publish();
+    }
+  }
+
+  // Arm a flood from `start`; the frame driver expands it from there. At an
+  // unlimited budget that is the next frame, which is the first one that could
+  // have drawn it anyway, so the selection still lands in one step.
+  private void armFlood(Level level, BlockPos start, EntityProfile profile) {
+    cache.select(level, start, Configs.floodRadius(), profile, Configs.drawOnVisibleFace(),
+      Configs.swimmableFluids(), Configs.fluidEscapeHeight());
   }
 
   // Walk down from the targeted block until a non-empty collision shape is
@@ -154,14 +195,15 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     Level level = Minecraft.getInstance().level;
     var profile = Configs.mobProfile();
     if (level != null && lastSeed != null && profile.isPresent()) {
-      cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
-        Configs.swimmableFluids(), Configs.fluidEscapeHeight());
-      publish();
+      armFlood(level, lastSeed, profile.get());
     }
   }
 
-  /** Soft-disabled roster: drop any leftover selection so draw stays off. */
-  public void clearSelectionForSoftDisable() {
+  /**
+   * Drop any selection and the flood behind it, so draw stays off: used by a
+   * soft-disabled roster and on disconnect.
+   */
+  public void clearSelection() {
     cache.clear();
     lastSeed = null;
     publish();
@@ -206,8 +248,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       } else {
         var profile = Configs.mobProfile();
         if (profile.isPresent()) {
-          cache.select(level, start, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
-            Configs.swimmableFluids(), Configs.fluidEscapeHeight());
+          armFlood(level, start, profile.get());
           lastSeed = start;
         }
       }
@@ -263,21 +304,16 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   }
 
   /**
-   * One-shot flood geometry dump for {@code /mobwalk dump}: re-selects from
-   * {@code lastSeed} with debug logging armed. Returns null if there is no
-   * selection; otherwise the post-dump counts for the chat summary.
+   * Flood geometry dump for {@code /mobwalk dump}: a pure read of the last
+   * completed selection, logged with the parameters that produced it. Returns
+   * null if there is no selection; otherwise the counts for the chat summary.
    */
   public FloodDebugCounts dumpFloodDebug() {
-    Level level = Minecraft.getInstance().level;
-    var profile = Configs.mobProfile();
-    if (level == null || lastSeed == null || profile.isEmpty()) {
+    SelectionSnapshot dumped = cache.snapshot();
+    if (dumped.isEmpty()) {
       return null;
     }
-    cache.requestDebugDump();
-    cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
-      Configs.swimmableFluids(), Configs.fluidEscapeHeight());
-    publish();
-    SelectionSnapshot dumped = cache.snapshot();
+    cache.dumpLastSelection();
     return new FloodDebugCounts(
       dumped.rects().size(),
       dumped.occluders().size(),

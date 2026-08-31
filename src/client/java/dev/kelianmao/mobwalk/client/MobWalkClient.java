@@ -29,9 +29,13 @@ public final class MobWalkClient implements ClientModInitializer {
     WorldOverlayManager.bootstrap();
     InitializationHandler.getInstance().registerInitializationHandler(new InitHandler());
 
-    // Flush live options (scroll radius, profile cycle, …) on leave-world /
-    // Save and Quit to Title. Config-screen close still saves via MaLiLib.
-    ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> Configs.saveToDisk());
+    // Leave-world / Save and Quit to Title: flush live options (scroll radius,
+    // profile cycle, …) — config-screen close still saves via MaLiLib — and drop
+    // the selection, since the frame driver stops running once the world does.
+    ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+      Configs.saveToDisk();
+      WorldOverlayManager.collisionSurface().clearSelection();
+    });
 
     // /mobwalk dump — one-shot flood geometry dump to latest.log + short chat line.
     ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->

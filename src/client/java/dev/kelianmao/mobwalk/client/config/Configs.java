@@ -136,6 +136,10 @@ public final class Configs implements IConfigHandler {
     public static final ConfigTable CUSTOM_PROFILES = Profiles.CUSTOM_PROFILES;
     public static final ConfigInteger FLOOD_RADIUS =
       new ConfigInteger("floodRadius", 20, 0, 30, true).apply(GENERIC_KEY);
+    // Sits beside the radius: that sets how much work a flood is, this sets how
+    // fast the frame driver pays for it.
+    public static final ConfigInteger FLOOD_BUDGET_MS =
+      new ConfigInteger("floodBudgetMs", 10, 0, 50, true).apply(GENERIC_KEY);
     public static final ConfigBoolean SWIMMABLE_FLUIDS =
       new ConfigBoolean("swimmableFluids", true).apply(GENERIC_KEY);
     public static final ConfigDouble FLUID_ESCAPE_HEIGHT =
@@ -149,6 +153,7 @@ public final class Configs implements IConfigHandler {
       BUILTIN_PROFILES,
       CUSTOM_PROFILES,
       FLOOD_RADIUS,
+      FLOOD_BUDGET_MS,
       SWIMMABLE_FLUIDS,
       FLUID_ESCAPE_HEIGHT
     );
@@ -159,6 +164,7 @@ public final class Configs implements IConfigHandler {
       WAND_ITEM,
       MOB_PROFILE,
       FLOOD_RADIUS,
+      FLOOD_BUDGET_MS,
       SWIMMABLE_FLUIDS,
       FLUID_ESCAPE_HEIGHT
     );
@@ -546,7 +552,7 @@ public final class Configs implements IConfigHandler {
       return;
     }
     if (!hasEnabledProfile()) {
-      collision.clearSelectionForSoftDisable();
+      collision.clearSelection();
     } else {
       collision.reselectWithMobProfile();
     }
@@ -744,6 +750,16 @@ public final class Configs implements IConfigHandler {
 
   public static boolean showPointProfile() {
     return Debug.SHOW_POINT_PROFILE.getBooleanValue();
+  }
+
+  /**
+   * Wall time a flood may spend per frame, in milliseconds: a flood in progress
+   * adds this to each frame, so it reads as an even frame-rate dip and lands
+   * after {@code total / (budget * fps)} seconds. {@code 0} means unlimited,
+   * which completes the flood on the frame after the click that armed it.
+   */
+  public static int floodBudgetMs() {
+    return Generic.FLOOD_BUDGET_MS.getIntegerValue();
   }
 
   @Override

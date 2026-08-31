@@ -15,7 +15,8 @@ import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
 
 /**
  * The resumable contract of {@link FloodJob}: {@code stepRing} advances the flood
- * exactly one depth ring, and where a caller yields never changes the result.
+ * exactly one depth ring, {@code advanceRings} fits whole rings into a wall-time
+ * budget, and where a caller yields never changes the result.
  * Drives the BFS itself through a synthetic world (the {@link ColumnBoxes} seam),
  * so the loop is under test rather than the per-box passes it calls
  * ({@code exposeBox} is {@code HeadroomTest}, the merge is {@code MergeContractTest}).
@@ -58,6 +59,13 @@ final class FloodRingContractTest {
 
   private static FloodJob job(ColumnBoxes world, int depthLimit) {
     return new FloodJob(world, 0, 0, 0, depthLimit, EntityProfile.POINT, FLUID_ESCAPE, -8, 8);
+  }
+
+  // Every ring in one call: the reference whole run that sliced runs are held to.
+  private static List<StandableRect> runWhole(FloodJob job) {
+    job.seed();
+    job.advanceRings(Long.MAX_VALUE);
+    return job.merged();
   }
 
   private static Set<Tile> tiles(List<StandableRect> rects) {
@@ -129,7 +137,7 @@ final class FloodRingContractTest {
   @Test
   void sliceGranularityDoesNotChangeTheResult() {
     ColumnBoxes world = worldOf(unevenGround());
-    List<StandableRect> wholeFlood = job(world, 3).runToCompletion();
+    List<StandableRect> wholeFlood = runWhole(job(world, 3));
     assertFalse(wholeFlood.isEmpty(), "the fixture floods");
 
     // Two jobs stepped one ring at a time, interleaved with each other: state is
@@ -152,7 +160,7 @@ final class FloodRingContractTest {
   @Test
   void steppingPastCompletionChangesNothing() {
     FloodJob job = job(worldOf(plane(2, 0)), 1);
-    List<StandableRect> flooded = job.runToCompletion();
+    List<StandableRect> flooded = runWhole(job);
     List<StandableRect> reached = job.preMergeReached();
     assertFalse(reached.isEmpty());
 
@@ -160,6 +168,54 @@ final class FloodRingContractTest {
     assertTrue(job.stepRing());
     assertEquals(reached, job.preMergeReached(), "extra steps reach nothing further");
     assertEquals(flooded, job.merged());
+  }
+
+  @Test
+  void aZeroBudgetAdvancesOneRingPerCall() {
+    // The clock is read once per ring, after the ring is done, so the smallest
+    // budget still buys a whole ring — never a partial wavefront.
+    FloodJob job = job(worldOf(plane(4, 0)), 3);
+    job.seed();
+
+    assertFalse(job.advanceRings(0));
+    assertEquals(1, job.depth());
+    assertEquals(Set.of(new Tile(0, 0)), tiles(job.preMergeReached()));
+
+    assertFalse(job.advanceRings(0));
+    assertEquals(2, job.depth());
+    assertEquals(manhattanBall(1), tiles(job.preMergeReached()));
+
+    assertFalse(job.advanceRings(0));
+    assertEquals(3, job.depth());
+
+    assertTrue(job.advanceRings(0), "ring 3 is the depth limit, so it finishes the flood");
+    assertEquals(manhattanBall(3), tiles(job.preMergeReached()));
+  }
+
+  @Test
+  void anUnlimitedBudgetCompletesInOneCall() {
+    ColumnBoxes world = worldOf(unevenGround());
+    FloodJob job = job(world, 3);
+    job.seed();
+
+    assertTrue(job.advanceRings(Long.MAX_VALUE));
+    assertEquals(runWhole(job(world, 3)), job.merged());
+  }
+
+  @Test
+  void aPartlyAdvancedFloodDrainsToTheSameResult() {
+    // Resuming under a budget large enough to finish answers what running the
+    // whole flood in one go would have: where a driver yielded leaves no trace.
+    ColumnBoxes world = worldOf(unevenGround());
+    List<StandableRect> wholeFlood = runWhole(job(world, 3));
+
+    FloodJob job = job(world, 3);
+    job.seed();
+    job.stepRing();
+    job.stepRing();
+
+    assertTrue(job.advanceRings(Long.MAX_VALUE), "the drain finishes the remaining rings");
+    assertEquals(wholeFlood, job.merged());
   }
 
   @Test
@@ -171,6 +227,6 @@ final class FloodRingContractTest {
     assertTrue(job.stepRing());
     assertTrue(job.preMergeReached().isEmpty());
     assertTrue(job.merged().isEmpty());
-    assertTrue(job(worldOf(plane(4, -3)), 3).runToCompletion().isEmpty());
+    assertTrue(runWhole(job(worldOf(plane(4, -3)), 3)).isEmpty());
   }
 }

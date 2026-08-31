@@ -18,7 +18,7 @@ import net.minecraft.world.level.Level;
  * by the overlay. In-memory only, not persisted.
  *
  * <p><b>v4 model: dilated arrangement &rarr; merge &rarr; flood (geometric
- * adjacency).</b> {@link #select} works in three phases:
+ * adjacency).</b> A flood works in three phases:
  * <ol>
  * <li><b>Dilated arrangement</b> ({@link #exposeBox}): gather every collision box
  *     in a window of half-extent {@code radius} blocks (plus a {@code floor(W)+1}
@@ -66,8 +66,8 @@ import net.minecraft.world.level.Level;
  * unchanged (a drop {@code > reach} or a disconnected patch is never reached).
  *
  * <p>Not thread-safe by design. It is mutated only on the client thread
- * ({@code select}/{@code clear}); the render thread reads only the immutable
- * {@link #snapshot()} the overlay publishes into a {@code volatile} field.
+ * ({@code select}/{@code advance}/{@code clear}); the render thread reads only the
+ * immutable {@link #snapshot()} the overlay publishes into a {@code volatile} field.
  */
 public final class SurfaceSelection {
   // A dilated standable surface tagged with its source cell, the lazy flood's
@@ -193,34 +193,49 @@ public final class SurfaceSelection {
   // Tolerance for the double coordinate compares (box edges are multiples of 1/16).
   private static final double EPS = RectMath.EPS;
 
-  // Everything the last select produced (draw set + the edge passes derived from
+  // Everything the last flood produced (draw set + the edge passes derived from
   // it), as one immutable object; see SelectionSnapshot for what each list holds.
-  // Replaced wholesale each select — never mutated in place — so the overlay can
+  // Replaced wholesale each flood — never mutated in place — so the overlay can
   // publish it to the render thread with a single reference write.
   private SelectionSnapshot snapshot = SelectionSnapshot.EMPTY;
 
-  // One-shot geometry dump for /mobwalk dump: when set, the next select() logs
-  // reached/merged/occluders/skirts/holes/hazards then clears the flag. Armed by
-  // requestDebugDump() only.
-  private boolean debugDumpOnce = false;
-  // Pre-merge reached tops captured only when debugDumpOnce is set.
-  private List<StandableRect> debugReachedPreMerge = List.of();
+  // The flood in flight, or null when idle. It owns every piece of BFS state, so
+  // dropping this reference cancels the flood and releases its world index.
+  private FloodJob active;
+  // What that flood (or the last completed one) was asked for: finish() runs the
+  // post-BFS passes a frame or more after select armed the job, so it reads the
+  // parameters the BFS actually ran with rather than current settings.
+  private FloodParams params;
 
-  /** Arm a one-shot pipeline dump on the next {@link #select}. */
-  public void requestDebugDump() {
-    debugDumpOnce = true;
+  // Retained from the last completed flood so /mobwalk dump is a pure read of
+  // persisted state: the pre-merge reached tops, plus the collision-rim occluders
+  // whenever the paint rim diverges from them (the snapshot carries the paint rim).
+  private List<StandableRect> lastReached = List.of();
+  private List<SkirtSpan> lastCollisionOccluders;
+  // Compute time and frame count of that flood, so a dump reports what a flood of
+  // this size costs on this machine — the measurement the budget is sized against.
+  private long elapsedNanos;
+  private int frames;
+
+  // Every input of one flood, captured when it is armed.
+  private record FloodParams(Level level, BlockPos start, int radius, EntityProfile profile,
+      boolean computeVisualTop, boolean swimmableFluids, double fluidEscape) {
   }
 
   /**
-   * Replace the selection with the merged standable surfaces reachable from the
-   * click origin at {@code start}, within BFS hop-count {@code radius} of that
-   * origin, for the entity's width/reach, across footprint-adjacent height-gated
-   * steps. The origin is the clicked block's raw dilated collision footprints
-   * (non-emitted); only exposed tops enter the painted set (depth 0 on the seed
-   * block's own exposed tops, depth 1 on other tops adjacent to the origin).
+   * Arm a flood of the standable surfaces reachable from the click origin at
+   * {@code start}, within BFS hop-count {@code radius} of that origin, for the
+   * entity's width/reach, across footprint-adjacent height-gated steps. The origin
+   * is the clicked block's raw dilated collision footprints (non-emitted); only
+   * exposed tops enter the painted set (depth 0 on the seed block's own exposed
+   * tops, depth 1 on other tops adjacent to the origin).
    *
-   * <p>Runs the output-sensitive {@link FloodJob} (on-demand column/row
-   * exposure), then computes occluders, down-skirts, and holes.
+   * <p><b>Arming returns immediately</b>: it builds and seeds the output-sensitive
+   * {@link FloodJob} (on-demand column/row exposure), and {@link #advance} expands
+   * it a ring at a time until the BFS completes, at which point {@link #finish}
+   * computes occluders, down-skirts, and holes and replaces {@link #snapshot()}.
+   * The previous selection therefore stays published for the whole compute. Any
+   * flood already in flight is cancelled here — latest arm wins.
    *
    * <p>{@code computeVisualTop} controls whether the extra visible/outline-top
    * read (for render-taller-than-collide blocks; see {@code WorldGeometry.visibleTop} /
@@ -232,20 +247,50 @@ public final class SurfaceSelection {
    */
   public void select(Level level, BlockPos start, int radius, EntityProfile profile,
       boolean computeVisualTop, boolean swimmableFluids, double fluidEscape) {
-    boolean dump = debugDumpOnce;
-    debugReachedPreMerge = List.of();
-    FloodJob job = new FloodJob(level, start, radius, profile, computeVisualTop,
+    params = new FloodParams(level, start, radius, profile, computeVisualTop, swimmableFluids,
+      fluidEscape);
+    active = new FloodJob(level, start, radius, profile, computeVisualTop,
       swimmableFluids, fluidEscape);
-    List<StandableRect> rects = job.runToCompletion();
-    if (dump) {
-      debugReachedPreMerge = job.preMergeReached();
+    active.seed();
+    elapsedNanos = 0;
+    frames = 0;
+  }
+
+  /**
+   * Spend up to {@code budgetNanos} of wall time expanding the flood in flight,
+   * always finishing the ring in progress. Returns whether this call completed the
+   * flood, i.e. ran {@link #finish} and made a new {@link #snapshot()}.
+   */
+  public boolean advance(long budgetNanos) {
+    if (active == null) {
+      return false;
     }
+    frames++;
+    long began = System.nanoTime();
+    boolean done = active.advanceRings(budgetNanos);
+    elapsedNanos += System.nanoTime() - began;
+    if (done) {
+      finish();
+    }
+    return done;
+  }
+
+  // The BFS is complete: merge it, run the edge passes over the whole reached set,
+  // and swap the snapshot in one reference write. The job is dropped first so its
+  // world index is released; its pre-merge reached list is kept for the dump.
+  private void finish() {
+    FloodJob job = active;
+    active = null;
+    Level level = params.level();
+    EntityProfile profile = params.profile();
+    boolean swimmableFluids = params.swimmableFluids();
+    List<StandableRect> rects = job.merged();
     List<SkirtSpan> collisionOccluders =
       OccluderSkirts.compute(level, rects, profile, swimmableFluids, false);
     List<SkirtSpan> dropEdges = DownSkirts.compute(rects, collisionOccluders, false);
     // Dual rim (same as downs): collision for holes; visual for paint when raised.
     boolean raisedVisual = false;
-    if (computeVisualTop) {
+    if (params.computeVisualTop()) {
       for (StandableRect r : rects) {
         if (Math.abs(r.visualTopY() - r.collisionTopY()) > EPS) {
           raisedVisual = true;
@@ -265,24 +310,34 @@ public final class SurfaceSelection {
     snapshot = new SelectionSnapshot(rects, paintOccluders, paintDownSkirts,
       HoleBeams.compute(level, rects, dropEdges, profile, swimmableFluids),
       HazardBeams.compute(rects));
-    if (dump) {
-      logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape,
-        raisedVisual ? collisionOccluders : null);
-      debugDumpOnce = false;
-      debugReachedPreMerge = List.of();
-    }
+    lastReached = job.preMergeReached();
+    lastCollisionOccluders = raisedVisual ? collisionOccluders : null;
   }
 
-  private void logFloodDebug(EntityProfile profile, BlockPos start, int radius,
-      boolean computeVisualTop, double fluidEscape, List<SkirtSpan> collisionOccluders) {
+  /**
+   * Log the last completed flood — its parameters and cost, the pre-merge reached
+   * tops, the merged rects, and every derived span — for {@code /mobwalk dump}.
+   * Reads persisted state, so it reports the selection as it was computed.
+   */
+  public void dumpLastSelection() {
+    if (params == null) {
+      return;
+    }
+    logFloodDebug();
+  }
+
+  private void logFloodDebug() {
+    EntityProfile profile = params.profile();
     MobWalk.LOGGER.info(
-      "[flood-debug] profile={} W={} H={} reach={} fluidEscape={} seed={} radius={} visualTop={}",
-      profile.name(), profile.width(), profile.height(), profile.reach(), fluidEscape,
-      start, radius, computeVisualTop);
-    logFloodDebugRects("reached", debugReachedPreMerge);
+      "[flood-debug] profile={} W={} H={} reach={} fluidEscape={} seed={} radius={} visualTop={}"
+        + " elapsedMs={} frames={}",
+      profile.name(), profile.width(), profile.height(), profile.reach(), params.fluidEscape(),
+      params.start(), params.radius(), params.computeVisualTop(),
+      Math.round(elapsedNanos / 10_000.0) / 100.0, frames);
+    logFloodDebugRects("reached", lastReached);
     logFloodDebugRects("merged", snapshot.rects());
-    if (collisionOccluders != null) {
-      logFloodDebugOccluders("occluders-collision", collisionOccluders);
+    if (lastCollisionOccluders != null) {
+      logFloodDebugOccluders("occluders-collision", lastCollisionOccluders);
       logFloodDebugOccluders("occluders-paint", snapshot.occluders());
     } else {
       logFloodDebugOccluders("occluders", snapshot.occluders());
@@ -328,13 +383,16 @@ public final class SurfaceSelection {
     }
   }
 
+  /** Empty the selection and cancel any flood in flight, releasing its state. */
   public void clear() {
     snapshot = SelectionSnapshot.EMPTY;
-    debugDumpOnce = false;
-    debugReachedPreMerge = List.of();
+    active = null;
+    params = null;
+    lastReached = List.of();
+    lastCollisionOccluders = null;
   }
 
-  /** The last select's output: reached surfaces plus their skirt and beam spans. */
+  /** The last flood's output: reached surfaces plus their skirt and beam spans. */
   public SelectionSnapshot snapshot() {
     return snapshot;
   }
@@ -805,7 +863,8 @@ public final class SurfaceSelection {
    * current depth. Call {@code k} completes ring {@code k-1}, so after {@code k}
    * steps {@code reached} holds exactly the surfaces at depth {@code <= k-1} — a
    * valid flood at that radius, which is what lets a caller yield between rings.
-   * {@link #runToCompletion} drains every ring in one call.
+   * {@link #advanceRings} fits as many whole rings as a wall-time budget allows,
+   * which at an unlimited budget is every remaining ring in one call.
    *
    * <p>Rings preserve the order a single FIFO queue produced: BFS over
    * unit-weight edges leaves a queue in nondecreasing depth, and within one depth
@@ -904,13 +963,21 @@ public final class SurfaceSelection {
       return depth;
     }
 
-    /** Drain every ring in one call: today's synchronous flood. */
-    List<StandableRect> runToCompletion() {
-      seed();
-      while (!stepRing()) {
-        // stepRing expands one depth ring per call.
-      }
-      return merged();
+    /**
+     * Expand rings until the flood is done or {@code budgetNanos} of wall time is
+     * spent, and return whether it is done. The clock is read once per ring, so a
+     * yield always lands on a completed ring: the budget bounds how many rings a
+     * call takes, never the cost of the ring in progress. A zero budget therefore
+     * advances exactly one ring per call.
+     */
+    boolean advanceRings(long budgetNanos) {
+      long began = System.nanoTime();
+      do {
+        if (stepRing()) {
+          return true;
+        }
+      } while (System.nanoTime() - began < budgetNanos);
+      return false;
     }
 
     /**
