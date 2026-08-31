@@ -365,18 +365,38 @@ air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner squ
 
 ## How it is computed: the output-sensitive (lazy) flood
 
-`select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
+`select` runs **`FloodJob`**: a surface BFS that exposes geometry only as it
 reaches it, so cost tracks the reachable set (and its occluder shells) rather
 than the window volume — a large win in caves / against walls, and asymptotically
 on open ground. Adjacency uses `RectMath.footprintAdjacent`; reach is the
-profile height window in `LazyFlood` (see [`project.md`](project.md)
+profile height window in `FloodJob` (see [`project.md`](project.md)
 milestones).
+
+- **Resumable, one depth ring at a time.** The job is a stateful object holding the
+  whole flood — the `WorldSurfaceIndex`, the `hopCount` visited map, the current and
+  next depth ring, and the `reached` node list — as fields, so a flood can span
+  calls. `seed()` arms it from the click origin (ring 0 from the seed block's own
+  tops, ring 1 pre-seeded from the abutting ones), each `stepRing()` expands exactly
+  the current depth, and `runToCompletion()` drains every ring in one call, which is
+  what `select` does today. Call `k` completes ring `k-1`, so after `k` steps
+  `reached` holds exactly the surfaces at depth `<= k-1` — itself a valid flood at
+  that radius, which is what lets a caller yield between rings. Rings reproduce the
+  order a single FIFO queue gave: BFS over unit-weight edges leaves a queue in
+  nondecreasing depth and, within a depth, in discovery order. That order is worth
+  keeping because the greedy strip merge is order-sensitive.
+- **The job owns every piece of flood state**, which makes its lifetime the unit of
+  consistency: dropping the reference releases the flood whole, index included. Its
+  parameters (origin, depth limit, `halfW`, reach, `ClimbRule`, the `ColumnBoxes`
+  port) are captured at construction, so a job in flight is immutable with respect
+  to settings and a radius/profile change is answered by a fresh job. Contract:
+  `FloodRingContractTest` (ring-per-step membership, slice-granularity invariance,
+  stepping past completion, an origin over nothing).
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the
   flood, on the reached set only (area-preserving, so connectivity is identical with
   or without an early merge).
-- **Neighbour search is column-local.** From a popped surface in cell `c`, candidate
+- **Neighbour search is column-local.** From an expanded surface in cell `c`, candidate
   cells are within Chebyshev `floor(W) + 1` of `c` (`1` for Point/Player, `2` for
   Ravager). This is the cell distance at which two dilated tops can still bridge or
   abut (raw gap `Δ-1 <= W`). It is **not** `ceil(W)`: that is `0` for Point and would
@@ -388,7 +408,7 @@ milestones).
 - **Lazy in Y (`ensureRows`).** A column is scanned only over the narrow block-row
   windows the flood needs near its current height — never the full `[oy-radius-1,
   oy+radius+1]` band. A neighbour cell is scanned for tops within one `reach` step of
-  the popped surface (`collect(cx, cz, h-reach, h+reach)`); each candidate box's
+  the expanded surface (`collect(cx, cz, h-reach, h+reach)`); each candidate box's
   occluder shell is scanned over the rows from `floor(yMax)-1` up to
   `floor(yMax+H)+1` — the upper bound **extended by the headroom `H`** so the
   ceilings/overhangs in the standing column `(T, T+H]` are exposed before

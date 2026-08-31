@@ -1,9 +1,7 @@
 package dev.kelianmao.mobwalk.client.surface;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.BitSet;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +25,7 @@ import net.minecraft.world.level.Level;
  *     occluder margin so every box that can trim an edge candidate is captured —
  *     candidate and occluder each grow by {@code W/2}, so two cells up to
  *     {@code floor(W)+1} apart still interact — the same reach
- *     {@link LazyFlood} uses for neighbour search), grow each box's
+ *     {@link FloodJob} uses for neighbour search), grow each box's
  *     footprint by the entity half-width {@code W/2} (Minkowski sum with the
  *     {@code WxW} square is just the rect grown on every side), and keep a box-top
  *     at height {@code T} over the footprint where <b>no dilated box spans
@@ -109,7 +107,7 @@ public final class SurfaceSelection {
 
   // Shared lazy world-surface index: the per-column collision boxes found so far,
   // which block rows have been queried, and the memoized per-box exposure (tops).
-  // The flood (LazyFlood) owns this index; HoleBeams.gatherLedgesFrom also uses it
+  // The flood (FloodJob) owns this index; HoleBeams.gatherLedgesFrom also uses it
   // so the occluder shell has ONE definition — occluderColumns in XZ, rows
   // floor(yMax)-1 .. floor(yMax+height)+1 in Y (the headroom extension) — and cannot
   // drift between the two callers. Reads the world only through ColumnBoxes.
@@ -221,7 +219,7 @@ public final class SurfaceSelection {
    * (non-emitted); only exposed tops enter the painted set (depth 0 on the seed
    * block's own exposed tops, depth 1 on other tops adjacent to the origin).
    *
-   * <p>Runs the output-sensitive {@link LazyFlood} (on-demand column/row
+   * <p>Runs the output-sensitive {@link FloodJob} (on-demand column/row
    * exposure), then computes occluders, down-skirts, and holes.
    *
    * <p>{@code computeVisualTop} controls whether the extra visible/outline-top
@@ -236,11 +234,11 @@ public final class SurfaceSelection {
       boolean computeVisualTop, boolean swimmableFluids, double fluidEscape) {
     boolean dump = debugDumpOnce;
     debugReachedPreMerge = List.of();
-    LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop,
+    FloodJob job = new FloodJob(level, start, radius, profile, computeVisualTop,
       swimmableFluids, fluidEscape);
-    List<StandableRect> rects = lazy.run();
+    List<StandableRect> rects = job.runToCompletion();
     if (dump) {
-      debugReachedPreMerge = lazy.preMergeReached();
+      debugReachedPreMerge = job.preMergeReached();
     }
     List<SkirtSpan> collisionOccluders =
       OccluderSkirts.compute(level, rects, profile, swimmableFluids, false);
@@ -755,7 +753,7 @@ public final class SurfaceSelection {
   // W = 2*halfW. Tight (Point's W=0 -> the box's own column only) yet conservative
   // (full-block span); the per-box spans-above + subtraction still does the real
   // geometry, so shrinking the window is purely efficiency and result-preserving.
-  // Shared by exposeBox (used by both flood paths) and LazyFlood.ensureOccluders
+  // Shared by exposeBox (used by both flood paths) and FloodJob.ensureOccluders
   // so the occluder index and the scan stay in lock-step.
   private static int[] occluderColumns(WorldBox box, double halfW) {
     double w = 2.0 * halfW;
@@ -789,7 +787,7 @@ public final class SurfaceSelection {
    * factors independently.
    *
    * <p>Nodes are <b>raw</b> dilated surfaces ({@link #exposeBox} output,
-   * pre-merge), each tagged with its source cell. From a popped surface in cell
+   * pre-merge), each tagged with its source cell. From an expanded surface in cell
    * {@code c}, neighbours are sought in cells within Chebyshev {@code R} of
    * {@code c} ({@code R = floor(W)+1}: a bridged/abutting pair sits
    * {@code floor(W)+1} cells apart — {@code 1} for Point/Player, {@code 2} for
@@ -797,9 +795,31 @@ public final class SurfaceSelection {
    * never connect adjacent floor tiles). A neighbour cell's surfaces are computed
    * on demand (with each box's occluder shell — the columns {@link #exposeBox}
    * scans — exposed first, so the spans-above test sees a complete shell) and a
-   * surface is enqueued iff it is unvisited,
+   * surface joins the next ring iff it is unvisited,
    * {@link RectMath#footprintAdjacent}, and {@link ClimbRule#climbs} (the
    * collect height window {@code [h-reach, h+reach]} stays a valid superset).
+   *
+   * <p><b>Resumable, one depth ring at a time.</b> The job is a stateful object
+   * whose BFS state lives in fields, so a flood can span calls: {@link #seed}
+   * arms it from the click origin and each {@link #stepRing} expands exactly the
+   * current depth. Call {@code k} completes ring {@code k-1}, so after {@code k}
+   * steps {@code reached} holds exactly the surfaces at depth {@code <= k-1} — a
+   * valid flood at that radius, which is what lets a caller yield between rings.
+   * {@link #runToCompletion} drains every ring in one call.
+   *
+   * <p>Rings preserve the order a single FIFO queue produced: BFS over
+   * unit-weight edges leaves a queue in nondecreasing depth, and within one depth
+   * in discovery order, which is exactly {@code ring} then {@code nextRing} (the
+   * origin wave likewise contributes all of depth 0 before depth 1). Order matters
+   * because the greedy strip merge is order-sensitive, so keeping it keeps the
+   * drawn rects.
+   *
+   * <p><b>The job owns every piece of flood state</b> — the index, the visited
+   * map, both rings, the reached list — as plain mutable fields. None of it
+   * crosses a thread boundary (unlike the published {@link SelectionSnapshot},
+   * which is bundled precisely so it can), so what it needs is not
+   * torn-read safety but a single lifetime: dropping the job reference releases
+   * the whole flood at once, index included.
    *
    * <p><b>Depth-bounded</b> (debug mode): the flood stops when BFS hop-count
    * exceeds {@code depthLimit} (Flood Radius in settings). There is no spatial
@@ -810,7 +830,10 @@ public final class SurfaceSelection {
    * the flood on the reached set only (area-preserving, so connectivity is
    * unchanged — {@code RectMath.footprintAdjacent} already treats overlap as connected).
    */
-  private static final class LazyFlood {
+  static final class FloodJob {
+    // Every flood parameter is captured here at construction, so a job in flight
+    // is immutable with respect to settings: a profile/radius/fluid change can
+    // only be answered by starting a fresh job, never by mutating this one.
     private final int ox;
     private final int oy;
     private final int oz;
@@ -825,40 +848,83 @@ public final class SurfaceSelection {
     // the flood needs near its current height. The ledge gather uses the same type so
     // the occluder shell is defined once (see WorldSurfaceIndex).
     private final WorldSurfaceIndex surfaces;
-    // Pre-merge BFS reached set (for /mobwalk dump); empty until run() finishes.
-    private List<StandableRect> preMergeReached = List.of();
+    // hopCount doubles as the visited set: a key is present iff visited, and its
+    // value is the BFS hop-count from the click origin (0 = seed-block top). It is
+    // also where merged() reads each reached node's depth back from, so there is no
+    // parallel depth list to keep in lock-step.
+    private final Map<CellSurface, Integer> hopCount = new HashMap<>();
+    // The depth ring being expanded (every node here is at hop-count `depth`) and
+    // the one being discovered (hop-count `depth + 1`).
+    private List<CellSurface> ring = new ArrayList<>();
+    private List<CellSurface> nextRing = new ArrayList<>();
+    // Reached nodes in BFS order, the pre-merge output; grows one whole ring per
+    // stepRing.
+    private final List<CellSurface> reached = new ArrayList<>();
+    private int depth = 0;
+    private boolean done = false;
 
-    LazyFlood(Level level, BlockPos start, int depthLimit, EntityProfile profile,
+    FloodJob(Level level, BlockPos start, int depthLimit, EntityProfile profile,
         boolean computeVisualTop, boolean swimmableFluids, double fluidEscape) {
-      BlockPos origin = start.immutable();
-      this.ox = origin.getX();
-      this.oy = origin.getY();
-      this.oz = origin.getZ();
+      this(WorldGeometry.levelColumnBoxes(level, computeVisualTop, swimmableFluids),
+        start.getX(), start.getY(), start.getZ(), depthLimit, profile, fluidEscape,
+        Math.max(start.getY() - depthLimit - 1, level.getMinY()),
+        Math.min(start.getY() + depthLimit + 1, level.getMaxY()));
+    }
+
+    // World-port constructor: the whole flood reads the world only through
+    // `world` and only inside the block-row band [bandLo,bandHi], so a test can
+    // drive the BFS over a synthetic ColumnBoxes with no Level (the seam
+    // HoleBeams.gatherLedgesFrom gives the ledge gather).
+    FloodJob(ColumnBoxes world, int ox, int oy, int oz, int depthLimit, EntityProfile profile,
+        double fluidEscape, int bandLo, int bandHi) {
+      this.ox = ox;
+      this.oy = oy;
+      this.oz = oz;
       this.depthLimit = depthLimit;
       this.halfW = profile.width() / 2.0;
-      double height = profile.height();
       this.reach = profile.reach();
       this.climb = new ClimbRule(reach, fluidEscape);
       this.neighbour = (int) Math.floor(profile.width()) + 1;
-      int bandLo = Math.max(oy - depthLimit - 1, level.getMinY());
-      int bandHi = Math.min(oy + depthLimit + 1, level.getMaxY());
       this.surfaces = new WorldSurfaceIndex(
-        WorldGeometry.levelColumnBoxes(level, computeVisualTop, swimmableFluids), halfW, height,
-        bandLo, bandHi);
+        world, halfW, profile.height(), bandLo, bandHi);
     }
 
+    // The pre-merge reached surfaces (for /mobwalk dump), as a fresh list. Answers
+    // for whatever rings have completed so far, so it is valid mid-flood too.
     List<StandableRect> preMergeReached() {
-      return preMergeReached;
+      List<StandableRect> out = new ArrayList<>(reached.size());
+      for (CellSurface s : reached) {
+        out.add(s.rect());
+      }
+      return out;
     }
 
-    List<StandableRect> run() {
-      // Click origin: raw pre-occlusion dilated footprints of the clicked block
-      // (never painted). First expansion enters the exposed-top graph at depth 0
-      // (seed-block tops) or depth 1 (other abutting tops).
+    // Rings completed so far, i.e. the next depth to expand.
+    int depth() {
+      return depth;
+    }
+
+    /** Drain every ring in one call: today's synchronous flood. */
+    List<StandableRect> runToCompletion() {
+      seed();
+      while (!stepRing()) {
+        // stepRing expands one depth ring per call.
+      }
+      return merged();
+    }
+
+    /**
+     * Arm the flood from the click origin: the raw pre-occlusion dilated
+     * footprints of the clicked block (never painted) enter the exposed-top graph
+     * at depth 0 (seed-block tops) or depth 1 (other abutting tops), filling ring
+     * 0 and pre-seeding ring 1. An origin over nothing standable finishes the job
+     * outright.
+     */
+    void seed() {
       List<OriginProbe> probes = buildClickProbes();
       if (probes.isEmpty()) {
-        preMergeReached = List.of();
-        return List.of();
+        done = true;
+        return;
       }
       List<OriginCandidate> candidates = new ArrayList<>();
       for (OriginProbe probe : probes) {
@@ -871,63 +937,85 @@ public final class SurfaceSelection {
       }
       List<SeedWaveEntry> initial = assignOriginWave(probes, candidates, climb, depthLimit);
       if (initial.isEmpty()) {
-        preMergeReached = List.of();
-        return List.of();
+        done = true;
+        return;
       }
-      // hopCount doubles as the visited set: a key is present iff visited, and its
-      // value is the BFS hop-count from the click origin (0 = seed-block top).
-      // FIFO + depth-0-before-depth-1 enqueue makes this the shortest distance.
-      Map<CellSurface, Integer> hopCount = new HashMap<>();
-      Deque<CellSurface> queue = new ArrayDeque<>();
+      // Depth-0-before-depth-1 ring placement (and FIFO order within a ring) is
+      // what makes hopCount the shortest distance.
       for (SeedWaveEntry entry : initial) {
         CellSurface s = new CellSurface(entry.rect(), entry.cx(), entry.cz());
         if (hopCount.putIfAbsent(s, entry.depth()) == null) {
-          queue.addLast(s);
+          (entry.depth() == 0 ? ring : nextRing).add(s);
         }
       }
-      // The reached raw (pre-merge) nodes and their depths, in lock-step; the
-      // merged output's per-rect depth is aggregated (min) from these.
-      List<StandableRect> reached = new ArrayList<>();
-      List<Integer> reachedDepths = new ArrayList<>();
-      while (!queue.isEmpty()) {
-        CellSurface s = queue.pollFirst();
-        int d = hopCount.get(s);
-        reached.add(s.rect());
-        reachedDepths.add(d);
-        // At the depth limit: emit this node but don't explore its neighbors.
-        if (d >= depthLimit) {
-          continue;
+    }
+
+    /**
+     * Expand exactly the current depth ring: append its nodes to {@code reached}
+     * and, below the depth limit, discover the next ring. Call {@code k} completes
+     * ring {@code k-1}. Returns whether the flood is finished — including on every
+     * call after that, so a driver can keep stepping harmlessly.
+     */
+    boolean stepRing() {
+      if (done) {
+        return true;
+      }
+      // At the depth limit: emit this ring but don't explore its neighbours.
+      boolean expandRing = depth < depthLimit;
+      for (CellSurface s : ring) {
+        reached.add(s);
+        if (expandRing) {
+          expand(s);
         }
-        double h = s.rect().collisionTopY();
-        for (int cx = s.cx() - neighbour; cx <= s.cx() + neighbour; cx++) {
-          for (int cz = s.cz() - neighbour; cz <= s.cz() + neighbour; cz++) {
-            // A pair connects iff the LOWER of the two can climb to the higher, so
-            // the window spans one climb in each role: up to h+reach for a candidate
-            // this surface climbs to, down to h-reach for one that climbs to this.
-            // Hence a drop deeper than one climb yields no edge (see geometry.md
-            // "Reachability model") — which is what makes reached imply escapable.
-            for (CellSurface t : collect(cx, cz, h - reach, h + reach)) {
-              if (hopCount.containsKey(t)) {
-                continue;
-              }
-              if (RectMath.footprintAdjacent(s.rect(), t.rect())
-                  && climb.climbs(s.rect(), t.rect())) {
-                hopCount.put(t, d + 1);
-                queue.addLast(t);
-              }
+      }
+      ring = nextRing;
+      nextRing = new ArrayList<>();
+      depth++;
+      done = ring.isEmpty();
+      return done;
+    }
+
+    // Discover every unvisited neighbour of one node into the next ring.
+    private void expand(CellSurface s) {
+      double h = s.rect().collisionTopY();
+      for (int cx = s.cx() - neighbour; cx <= s.cx() + neighbour; cx++) {
+        for (int cz = s.cz() - neighbour; cz <= s.cz() + neighbour; cz++) {
+          // A pair connects iff the LOWER of the two can climb to the higher, so
+          // the window spans one climb in each role: up to h+reach for a candidate
+          // this surface climbs to, down to h-reach for one that climbs to this.
+          // Hence a drop deeper than one climb yields no edge (see geometry.md
+          // "Reachability model") — which is what makes reached imply escapable.
+          for (CellSurface t : collect(cx, cz, h - reach, h + reach)) {
+            if (hopCount.containsKey(t)) {
+              continue;
+            }
+            if (RectMath.footprintAdjacent(s.rect(), t.rect())
+                && climb.climbs(s.rect(), t.rect())) {
+              hopCount.put(t, depth + 1);
+              nextRing.add(t);
             }
           }
         }
       }
-      preMergeReached = List.copyOf(reached);
+    }
+
+    /**
+     * Merge the reached set into the drawn rects. Valid on a complete flood: the
+     * frontier band is {@code depth == depthLimit}, so a partial reached set would
+     * label an interior ring as the cutoff edge.
+     */
+    List<StandableRect> merged() {
       // Composite-priority merge: INNER surface classes then FRONTIER surface
       // classes in one priority partition (inner owns dilation overlap), so
       // the frontier ring stays a separate depth band.
-      int[] rawDepths = new int[reachedDepths.size()];
-      for (int i = 0; i < rawDepths.length; i++) {
-        rawDepths[i] = reachedDepths.get(i);
+      List<StandableRect> rects = new ArrayList<>(reached.size());
+      int[] rawDepths = new int[reached.size()];
+      for (int i = 0; i < reached.size(); i++) {
+        CellSurface s = reached.get(i);
+        rects.add(s.rect());
+        rawDepths[i] = hopCount.get(s);
       }
-      return RectMath.mergeCoplanarSplitFrontier(reached, rawDepths, depthLimit);
+      return RectMath.mergeCoplanarSplitFrontier(rects, rawDepths, depthLimit);
     }
 
     // Raw pre-occlusion dilated footprints of collision boxes owned by the

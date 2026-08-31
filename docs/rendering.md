@@ -376,8 +376,9 @@ the published snapshot into `SurfaceEmitter.emit`.
 - `WorldGeometry.java`: adapter over the `ColumnBoxes` port — Minecraft
   block/fluid state → domain `WorldBox` / `HazardClass` (`levelColumnBoxes`,
   `fluidSurfaceHeight`, `visibleTop` memo).
-- `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
-  BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
+- `SurfaceSelection.java`: the output-sensitive `FloodJob` (depth-bounded surface
+  BFS, resumable one depth ring per `stepRing`, on-demand column + row exposure via
+  `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
   `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
   `exposeBox` (the `(T, T+H]` standing-column predicate, calling
