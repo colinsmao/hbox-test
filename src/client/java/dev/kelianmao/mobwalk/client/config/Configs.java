@@ -140,6 +140,8 @@ public final class Configs implements IConfigHandler {
     // fast the frame driver pays for it.
     public static final ConfigInteger FLOOD_BUDGET_MS =
       new ConfigInteger("floodBudgetMs", 10, 0, 50, true).apply(GENERIC_KEY);
+    public static final ConfigBoolean SHOW_FLOOD_PROGRESS =
+      new ConfigBoolean("showFloodProgress", true).apply(GENERIC_KEY);
     public static final ConfigBoolean SWIMMABLE_FLUIDS =
       new ConfigBoolean("swimmableFluids", true).apply(GENERIC_KEY);
     public static final ConfigDouble FLUID_ESCAPE_HEIGHT =
@@ -154,6 +156,7 @@ public final class Configs implements IConfigHandler {
       CUSTOM_PROFILES,
       FLOOD_RADIUS,
       FLOOD_BUDGET_MS,
+      SHOW_FLOOD_PROGRESS,
       SWIMMABLE_FLUIDS,
       FLUID_ESCAPE_HEIGHT
     );
@@ -165,6 +168,7 @@ public final class Configs implements IConfigHandler {
       MOB_PROFILE,
       FLOOD_RADIUS,
       FLOOD_BUDGET_MS,
+      SHOW_FLOOD_PROGRESS,
       SWIMMABLE_FLUIDS,
       FLUID_ESCAPE_HEIGHT
     );
@@ -760,6 +764,14 @@ public final class Configs implements IConfigHandler {
    */
   public static int floodBudgetMs() {
     return Generic.FLOOD_BUDGET_MS.getIntegerValue();
+  }
+
+  /**
+   * Whether the crosshair progress ring is drawn while a flood is calculating.
+   * Read live each HUD frame so a change applies to a flood already running.
+   */
+  public static boolean showFloodProgress() {
+    return Generic.SHOW_FLOOD_PROGRESS.getBooleanValue();
   }
 
   @Override

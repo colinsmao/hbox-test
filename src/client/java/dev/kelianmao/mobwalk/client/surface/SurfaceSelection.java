@@ -284,6 +284,20 @@ public final class SurfaceSelection {
   }
 
   /**
+   * How far the flood in flight has got, or {@code null} with nothing armed —
+   * the idle signal a progress cue gates on, since the driver asks every frame.
+   * The two fractions stay apart so the HUD can weigh expansion against the
+   * finalize passes.
+   */
+  public record FloodProgress(float expansion, float passes) {
+  }
+
+  /** The flood in flight's progress, or {@code null} with nothing armed. */
+  public FloodProgress progress() {
+    return flood == null ? null : new FloodProgress(flood.expansion(), flood.passes());
+  }
+
+  /**
    * Log the last completed flood — its parameters and cost, the pre-merge reached
    * tops, the merged rects, and every derived span — for {@code /mobwalk dump}.
    * Reads persisted state, so it reports the selection as it was computed.
@@ -959,6 +973,36 @@ public final class SurfaceSelection {
         }
       }
       return false;
+    }
+
+    /**
+     * How much of the flood disk has been reached, as {@code 0f..1f}: the area
+     * grows as the square of the ring, so the ring index squared estimates it.
+     * An estimate — a flood that closes early jumps to {@code 1}, which is also
+     * what the finalize passes report, having nothing left to expand.
+     */
+    float expansion() {
+      if (phase != Phase.BFS) {
+        return 1f;
+      }
+      int radius = params.radius();
+      if (radius <= 0) {
+        return 0f;
+      }
+      float ringFraction = Math.min(bfs.depth(), radius) / (float) radius;
+      return ringFraction * ringFraction;
+    }
+
+    /**
+     * How many finalize passes have run, as {@code 0f..1f}. Zero while expanding;
+     * afterwards the {@link Phase} cursor, so skipped paint phases jump a slice.
+     */
+    float passes() {
+      if (phase == Phase.BFS) {
+        return 0f;
+      }
+      return (phase.ordinal() - Phase.MERGE.ordinal())
+        / (float) (Phase.DONE.ordinal() - Phase.MERGE.ordinal());
     }
 
     SelectionSnapshot snapshot() {

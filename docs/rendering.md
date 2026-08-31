@@ -47,6 +47,14 @@ Config UI, persistence, and MaLiLib option types live in
   ~1.5 s after a shift+scroll change, fading out over the last 0.5 s.
   `show(...)` (client thread) writes `volatile` radius/expiry that
   `render`/`isVisible` (render thread) read.
+- **Flood progress ring** (`FloodProgressOverlay`) sits around the crosshair
+  while a flood is armed. `CollisionSurfaceOverlay.advanceFlood` still pushes
+  expansion/pass fractions each frame (a few clamps); `isVisible()` is `armed`
+  and General `showFloodProgress` (default on), so an off toggle skips the
+  `fill`s only. Sweep is `0.75 * (r/R)²` during the BFS, then the remaining
+  quarter ticks with the finalize `Phase` cursor. Samples are exclusive fills
+  on a radius-8 circle centred at `(guiWidth-1)/2 + 0.5`, matching
+  `Hud.extractCrosshair`.
 - **GUI scale:** `Overlay` widgets lay out in GUI coordinates
   (`Window.getGuiScaledWidth` / `getGuiScaledHeight`, default `Font`) under
   `HudElementRegistry`, so they track Video Settings **GUI Scale** (including
@@ -405,6 +413,8 @@ the published snapshot into `SurfaceEmitter.emit`.
   double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
+- `overlay/FloodProgressOverlay.java`: the crosshair ring while a flood computes,
+  driven from `advanceFlood`, gated by General `showFloodProgress`.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the flood-radius option and the HUD indicator — and the

@@ -148,6 +148,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
    * the flood already running, and it is the only place the setting's
    * {@code 0}-means-unlimited sentinel is translated for
    * {@link SurfaceSelection#advance}.
+   *
+   * <p>The same pass feeds the crosshair progress ring, so every way a flood ends
+   * — completion, a re-arm, a clear, a level change — reaches the HUD through the
+   * one null idle reading.
    */
   private void advanceFlood() {
     int budgetMs = Configs.floodBudgetMs();
@@ -156,6 +160,12 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       : budgetMs * NANOS_PER_MS;
     if (cache.advance(budgetNanos)) {
       publish();
+    }
+    SurfaceSelection.FloodProgress progress = cache.progress();
+    if (progress == null) {
+      OverlayManager.floodProgress().hide();
+    } else {
+      OverlayManager.floodProgress().update(progress.expansion(), progress.passes());
     }
   }
 
