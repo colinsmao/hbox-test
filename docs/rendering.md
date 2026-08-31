@@ -142,10 +142,15 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   result is unseen). The hand choice lives in `CollisionSurfaceOverlay.onUseItem`, not
   the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
   stays agnostic to which item (the wand) a widget cares about.
-- **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
-  `SurfaceSelection.allRects()`, colored at draw so no per-rect tag — is
+- **Publish-on-action.** The drawn snapshot — an immutable `SelectionSnapshot` from
+  `SurfaceSelection.snapshot()`, bundling the reached rects (colored at draw, so no
+  per-rect tag) with their occluder/down-skirt/hole/hazard spans — is
   (re)published into a `volatile` field on each wand action (select / clear / radius
-  scroll / profile cycle). `extract` samples the visibility flag and crouch, and does the
+  scroll / profile cycle). One record for all five means a publish is a single
+  reference write, so `emit` always sees one selection's worth of geometry.
+  `SelectionSnapshot.isEmpty()` keys on the rects alone and is the single draw gate,
+  for the visibility flag and `SurfaceEmitter`'s early-out alike.
+  `extract` samples the visibility flag and crouch, and does the
   **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
   dimension change / disconnect all reset it without a manager-side hook). Editing
   painted terrain needs a re-click (publish is action-driven).
@@ -176,15 +181,16 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Threading.** The selection is computed only on the client/extraction thread
   (`select`/`clear`); the render thread reads only the immutable snapshot via the
   `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
-  result list — each action recomputes from scratch. `SurfaceEmitter` receives those
-  published lists as args and never reads the live compute lists.
+  current `SelectionSnapshot` — each action recomputes one from scratch and replaces
+  it wholesale. `SurfaceEmitter` receives that published record as an arg and reads
+  only its lists, which the record's constructor copies so they stay immutable.
 
 ### Per-surface drawing (`SurfaceEmitter.emit`)
 
 Each reached `StandableRect` is drawn as a **top fill**, an optional **border**, and
 **skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
 through-walls, depth-on `SKIRT` occluded). `CollisionSurfaceOverlay.emit` forwards
-the published snapshots into `SurfaceEmitter.emit`.
+the published snapshot into `SurfaceEmitter.emit`.
 
 - **Top fill color precedence.** Tops and skirts share one frame fill palette
   (`Palette.FillColors`, hoisted once in `emit` and passed into `emitSkirts`).
@@ -339,8 +345,9 @@ the published snapshots into `SurfaceEmitter.emit`.
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
   publish-on-action snapshot, the level-identity reset, and the `volatile`
-  snapshot/occluder/down-skirt/hole/hazard/crouch handoff into
-  `SurfaceEmitter`.
+  `SelectionSnapshot` + crouch handoff into `SurfaceEmitter`.
+- `surface/SelectionSnapshot.java`: what each of the five published lists holds, the
+  deep copy that makes them immutable, and why `isEmpty()` keys on the rects alone.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
   fill precedence (`Palette.FillColors` / `resolve`: frontier grey → depth hue →
   hazard show+color → `walkableColor`), the square fading

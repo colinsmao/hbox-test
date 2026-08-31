@@ -11,10 +11,10 @@ import org.joml.Matrix4fc;
 import fi.dy.masa.malilib.util.data.Color4f;
 
 /**
- * Turns published surface snapshots into buffer geometry: tops, borders,
+ * Turns a published {@link SelectionSnapshot} into buffer geometry: tops, borders,
  * downward/upward skirts, and hole beams. Color derivation lives in the nested
- * {@link Palette} helper. Reads only the immutable snapshots + render-time
- * {@link Configs} flags — never {@code SurfaceSelection}'s live lists.
+ * {@link Palette} helper. Reads only the immutable snapshot + render-time
+ * {@link Configs} flags — never {@code SurfaceSelection}'s live state.
  */
 public final class SurfaceEmitter {
   // Lifts the quads just above the block face to avoid z-fighting with the top
@@ -52,14 +52,12 @@ public final class SurfaceEmitter {
 
   /**
    * Emit tops (+ crouch borders), then skirts (up and down), and hole beams from
-   * the published snapshots.
+   * the published snapshot.
    */
   public static void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer,
       BufferBuilder skirtBuffer, BufferBuilder beamBuffer,
-      List<StandableRect> rects, List<SkirtSpan> occluders,
-      List<SkirtSpan> downSkirts, List<BeamSpan> holes, List<BeamSpan> hazards,
-      boolean crouching) {
-    if (rects.isEmpty()) {
+      SelectionSnapshot snapshot, boolean crouching) {
+    if (snapshot.isEmpty()) {
       return;
     }
 
@@ -74,7 +72,7 @@ public final class SurfaceEmitter {
       Configs.showMagmaHazard(), Configs.magmaHazardColor(),
       Configs.showHoleBeams(), Configs.holeBeamColor());
 
-    for (StandableRect rect : rects) {
+    for (StandableRect rect : snapshot.rects()) {
       if (!showCutoff && rect.frontier()) {
         continue;
       }
@@ -105,12 +103,12 @@ public final class SurfaceEmitter {
 
     }
 
-    emitSkirts(skirtBuffer, positionMatrix, downSkirts, shadeByDepth, colors);
-    emitSkirts(skirtBuffer, positionMatrix, occluders, shadeByDepth, colors);
+    emitSkirts(skirtBuffer, positionMatrix, snapshot.downSkirts(), shadeByDepth, colors);
+    emitSkirts(skirtBuffer, positionMatrix, snapshot.occluders(), shadeByDepth, colors);
 
     BufferBuilder beamTarget = Configs.showBeamsThroughWalls() ? beamBuffer : skirtBuffer;
-    emitBeams(beamTarget, positionMatrix, holes, colors);
-    emitBeams(beamTarget, positionMatrix, hazards, colors);
+    emitBeams(beamTarget, positionMatrix, snapshot.holes(), colors);
+    emitBeams(beamTarget, positionMatrix, snapshot.hazards(), colors);
   }
 
   // Per-span Appearance color/toggle from BeamSpan.hazard (HOLE → hole settings;

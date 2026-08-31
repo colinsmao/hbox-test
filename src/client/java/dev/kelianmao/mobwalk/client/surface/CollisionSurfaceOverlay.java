@@ -5,8 +5,6 @@ import dev.kelianmao.mobwalk.client.config.Configs.ShowSurfaces;
 import dev.kelianmao.mobwalk.client.overlay.OverlayManager;
 import dev.kelianmao.mobwalk.client.overlay.WorldOverlay;
 
-import java.util.List;
-
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import org.joml.Matrix4fc;
 
@@ -81,20 +79,10 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // surfaces and sub-rects) but clutter the normal view, so they only draw while
   // crouching. Sampled on the extraction thread, read in emit.
   private volatile boolean crouching = false;
-  private volatile List<StandableRect> snapshot = List.of();
-  // Upward (occluder) skirt spans, published with the snapshot (compute-side, since
-  // they read collision boxes). Read per-frame in emit. See OccluderSkirts.compute.
-  private volatile List<SkirtSpan> occluderSnapshot = List.of();
-  // Downward drop-skirt spans, published with the snapshot (compute-side, once per
-  // select — was a per-frame openSpans scan). Read per-frame in emit. See
-  // DownSkirts.compute.
-  private volatile List<SkirtSpan> downSkirtSnapshot = List.of();
-  // Hole spans (through-walls beam markers), published with the snapshot
-  // (compute-side; the landing scan reads collision boxes). Read per-frame in emit.
-  // See HoleBeams.compute.
-  private volatile List<BeamSpan> holeSnapshot = List.of();
-  // Hazard perimeter beams (WATER/LAVA). See HazardBeams.compute.
-  private volatile List<BeamSpan> hazardSnapshot = List.of();
+  // The drawn selection: everything the last select produced, handed to the render
+  // thread as one immutable object so a publish is a single reference write and emit
+  // can never see new rects beside the previous selection's spans.
+  private volatile SelectionSnapshot published = SelectionSnapshot.EMPTY;
 
   @Override
   public String id() {
@@ -114,11 +102,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       cache.clear();
       lastSeed = null;
       lastLevel = level;
-      snapshot = List.of();
-      occluderSnapshot = List.of();
-      downSkirtSnapshot = List.of();
-      holeSnapshot = List.of();
-      hazardSnapshot = List.of();
+      published = SelectionSnapshot.EMPTY;
     }
 
     Item wand = Configs.wandItem();
@@ -128,7 +112,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     visible = mode != ShowSurfaces.NEVER
       && Configs.hasEnabledProfile()
       && (mode == ShowSurfaces.ALWAYS || holding)
-      && !snapshot.isEmpty();
+      && !published.isEmpty();
     // Through-walls tops + crouch borders share this flag; gated by Debug setting.
     crouching = player != null
       && player.isShiftKeyDown()
@@ -139,11 +123,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // after every mutation (select/clear/radius/profile) so per-frame work is nil;
   // editing painted terrain therefore needs a re-click to refresh (intended).
   private void publish() {
-    snapshot = cache.allRects();
-    occluderSnapshot = cache.allOccluders();
-    downSkirtSnapshot = cache.allDownSkirts();
-    holeSnapshot = cache.allHoles();
-    hazardSnapshot = cache.allHazards();
+    published = cache.snapshot();
   }
 
   // Walk down from the targeted block until a non-empty collision shape is
@@ -297,12 +277,13 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     cache.select(level, lastSeed, Configs.floodRadius(), profile.get(), Configs.drawOnVisibleFace(),
       Configs.swimmableFluids(), Configs.fluidEscapeHeight());
     publish();
+    SelectionSnapshot dumped = cache.snapshot();
     return new FloodDebugCounts(
-      cache.allRects().size(),
-      cache.allOccluders().size(),
-      cache.allDownSkirts().size(),
-      cache.allHoles().size(),
-      cache.allHazards().size());
+      dumped.rects().size(),
+      dumped.occluders().size(),
+      dumped.downSkirts().size(),
+      dumped.holes().size(),
+      dumped.hazards().size());
   }
 
   /** Counts returned by {@link #dumpFloodDebug} for the chat status line. */
@@ -313,6 +294,6 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   public void emit(Matrix4fc positionMatrix, BufferBuilder fillBuffer, BufferBuilder skirtBuffer,
       BufferBuilder beamBuffer) {
     SurfaceEmitter.emit(positionMatrix, fillBuffer, skirtBuffer, beamBuffer,
-      snapshot, occluderSnapshot, downSkirtSnapshot, holeSnapshot, hazardSnapshot, crouching);
+      published, crouching);
   }
 }

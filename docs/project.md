@@ -113,6 +113,7 @@ it.
   │   │   └── WorldOverlay.java / WorldOverlayManager.java
   │   └── surface/                         # compute + selection widget + emit
   │       ├── EntityProfile / StandableRect / SkirtSpan / BeamSpan / FallColumn / ClimbRule
+  │       ├── SelectionSnapshot.java        # the five published outputs, as one record
   │       ├── HazardClass.java / RectMath.java / SurfaceSelection.java / WorldGeometry.java
   │       ├── HoleBeams.java / HazardBeams.java / DownSkirts.java / OccluderSkirts.java
   │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java

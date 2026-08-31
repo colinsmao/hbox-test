@@ -69,7 +69,7 @@ import net.minecraft.world.level.Level;
  *
  * <p>Not thread-safe by design. It is mutated only on the client thread
  * ({@code select}/{@code clear}); the render thread reads only the immutable
- * {@link #allRects()} snapshot the overlay publishes into a {@code volatile} field.
+ * {@link #snapshot()} the overlay publishes into a {@code volatile} field.
  */
 public final class SurfaceSelection {
   // A dilated standable surface tagged with its source cell, the lazy flood's
@@ -195,30 +195,11 @@ public final class SurfaceSelection {
   // Tolerance for the double coordinate compares (box edges are multiples of 1/16).
   private static final double EPS = RectMath.EPS;
 
-  // The reached, merged surfaces from the last select (the draw set). Replaced
-  // wholesale each select; an immutable snapshot is published by the overlay.
-  private List<StandableRect> result = List.of();
-
-  // Upward (occluder) skirt spans for the last select: edge sub-spans of the
-  // reached surfaces where a box rises above the surface (a wall) or hangs within
-  // the entity's headroom (a ceiling). Computed compute-side (it reads collision
-  // boxes), published alongside result. Replaced wholesale each select.
-  private List<SkirtSpan> occluders = List.of();
-
-  // Downward drop-skirt spans for the last select: each merged-rect edge minus its
-  // equal-height merge seams (openSpans) minus the occluder sub-spans above. Once a
-  // per-frame O(n^2) render-side scan; now computed compute-side once per select
-  // (behavior-preserving) so emit just draws published spans, and so Milestone 5's
-  // hole classification can share this same drop-edge pass. Replaced each select.
-  private List<SkirtSpan> downSkirts = List.of();
-
-  // Hole beam spans for the last select: drop sub-spans with no reached surface
-  // below (void, or unreached ground). HazardClass.HOLE. Replaced each select.
-  private List<BeamSpan> holes = List.of();
-
-  // Hazard perimeter beam spans for the last select (WATER/LAVA rect edges minus
-  // same-hazard seams). Replaced each select.
-  private List<BeamSpan> hazards = List.of();
+  // Everything the last select produced (draw set + the edge passes derived from
+  // it), as one immutable object; see SelectionSnapshot for what each list holds.
+  // Replaced wholesale each select — never mutated in place — so the overlay can
+  // publish it to the render thread with a single reference write.
+  private SelectionSnapshot snapshot = SelectionSnapshot.EMPTY;
 
   // One-shot geometry dump for /mobwalk dump: when set, the next select() logs
   // reached/merged/occluders/skirts/holes/hazards then clears the flag. Armed by
@@ -257,34 +238,35 @@ public final class SurfaceSelection {
     debugReachedPreMerge = List.of();
     LazyFlood lazy = new LazyFlood(level, start, radius, profile, computeVisualTop,
       swimmableFluids, fluidEscape);
-    result = lazy.run();
+    List<StandableRect> rects = lazy.run();
     if (dump) {
       debugReachedPreMerge = lazy.preMergeReached();
     }
     List<SkirtSpan> collisionOccluders =
-      OccluderSkirts.compute(level, result, profile, swimmableFluids, false);
-    List<SkirtSpan> dropEdges = DownSkirts.compute(result, collisionOccluders, false);
+      OccluderSkirts.compute(level, rects, profile, swimmableFluids, false);
+    List<SkirtSpan> dropEdges = DownSkirts.compute(rects, collisionOccluders, false);
     // Dual rim (same as downs): collision for holes; visual for paint when raised.
     boolean raisedVisual = false;
     if (computeVisualTop) {
-      for (StandableRect r : result) {
+      for (StandableRect r : rects) {
         if (Math.abs(r.visualTopY() - r.collisionTopY()) > EPS) {
           raisedVisual = true;
           break;
         }
       }
     }
+    List<SkirtSpan> paintOccluders;
+    List<SkirtSpan> paintDownSkirts;
     if (raisedVisual) {
-      List<SkirtSpan> visualOccluders =
-        OccluderSkirts.compute(level, result, profile, swimmableFluids, true);
-      downSkirts = DownSkirts.compute(result, visualOccluders, true);
-      occluders = visualOccluders;
+      paintOccluders = OccluderSkirts.compute(level, rects, profile, swimmableFluids, true);
+      paintDownSkirts = DownSkirts.compute(rects, paintOccluders, true);
     } else {
-      downSkirts = dropEdges;
-      occluders = collisionOccluders;
+      paintOccluders = collisionOccluders;
+      paintDownSkirts = dropEdges;
     }
-    holes = HoleBeams.compute(level, result, dropEdges, profile, swimmableFluids);
-    hazards = HazardBeams.compute(result);
+    snapshot = new SelectionSnapshot(rects, paintOccluders, paintDownSkirts,
+      HoleBeams.compute(level, rects, dropEdges, profile, swimmableFluids),
+      HazardBeams.compute(rects));
     if (dump) {
       logFloodDebug(profile, start, radius, computeVisualTop, fluidEscape,
         raisedVisual ? collisionOccluders : null);
@@ -300,28 +282,28 @@ public final class SurfaceSelection {
       profile.name(), profile.width(), profile.height(), profile.reach(), fluidEscape,
       start, radius, computeVisualTop);
     logFloodDebugRects("reached", debugReachedPreMerge);
-    logFloodDebugRects("merged", result);
+    logFloodDebugRects("merged", snapshot.rects());
     if (collisionOccluders != null) {
       logFloodDebugOccluders("occluders-collision", collisionOccluders);
-      logFloodDebugOccluders("occluders-paint", occluders);
+      logFloodDebugOccluders("occluders-paint", snapshot.occluders());
     } else {
-      logFloodDebugOccluders("occluders", occluders);
+      logFloodDebugOccluders("occluders", snapshot.occluders());
     }
-    MobWalk.LOGGER.info("[flood-debug] downskirts={}", downSkirts.size());
-    for (SkirtSpan s : downSkirts) {
+    MobWalk.LOGGER.info("[flood-debug] downskirts={}", snapshot.downSkirts().size());
+    for (SkirtSpan s : snapshot.downSkirts()) {
       MobWalk.LOGGER.info(
         "[flood-debug]   drop alongX={} maxSide={} line={} [{},{}] baseY={} visualBaseY={} maxExtent={}",
         s.alongX(), s.maxSide(), s.line(), s.lo(), s.hi(),
         s.baseY(), s.visualBaseY(), s.maxExtent());
     }
-    MobWalk.LOGGER.info("[flood-debug] holes={}", holes.size());
-    for (BeamSpan s : holes) {
+    MobWalk.LOGGER.info("[flood-debug] holes={}", snapshot.holes().size());
+    for (BeamSpan s : snapshot.holes()) {
       MobWalk.LOGGER.info(
         "[flood-debug]   hole alongX={} line={} [{},{}] visualBaseY={} hazard={}",
         s.alongX(), s.line(), s.lo(), s.hi(), s.visualBaseY(), s.hazard());
     }
-    MobWalk.LOGGER.info("[flood-debug] hazards={}", hazards.size());
-    for (BeamSpan s : hazards) {
+    MobWalk.LOGGER.info("[flood-debug] hazards={}", snapshot.hazards().size());
+    for (BeamSpan s : snapshot.hazards()) {
       MobWalk.LOGGER.info(
         "[flood-debug]   hazard alongX={} line={} [{},{}] visualBaseY={} hazard={}",
         s.alongX(), s.line(), s.lo(), s.hi(), s.visualBaseY(), s.hazard());
@@ -349,38 +331,14 @@ public final class SurfaceSelection {
   }
 
   public void clear() {
-    result = List.of();
-    occluders = List.of();
-    downSkirts = List.of();
-    holes = List.of();
-    hazards = List.of();
+    snapshot = SelectionSnapshot.EMPTY;
     debugDumpOnce = false;
     debugReachedPreMerge = List.of();
   }
 
-  /** Immutable snapshot of the reached surfaces (colored at draw). */
-  public List<StandableRect> allRects() {
-    return result;
-  }
-
-  /** Published UP skirts (paint rim when raises are active). */
-  public List<SkirtSpan> allOccluders() {
-    return occluders;
-  }
-
-  /** Immutable snapshot of the downward drop-skirt spans for the reached set. */
-  public List<SkirtSpan> allDownSkirts() {
-    return downSkirts;
-  }
-
-  /** Immutable snapshot of hole beam spans ({@link HazardClass#HOLE}) for the reached set. */
-  public List<BeamSpan> allHoles() {
-    return holes;
-  }
-
-  /** Immutable snapshot of hazard perimeter beam spans for the reached set. */
-  public List<BeamSpan> allHazards() {
-    return hazards;
+  /** The last select's output: reached surfaces plus their skirt and beam spans. */
+  public SelectionSnapshot snapshot() {
+    return snapshot;
   }
 
   /**
