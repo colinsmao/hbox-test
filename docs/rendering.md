@@ -157,16 +157,25 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
 - **Chunked flood, driven by the frame.** A wand action (select / radius scroll /
   profile cycle) **arms** a `FloodJob` and returns; `CollisionSurfaceOverlay.extract`
   calls `advanceFlood()` every frame, spending up to General `floodBudgetMs` of wall
-  time expanding whole depth rings, and the frame that completes the BFS runs the
-  edge passes and swaps the snapshot. The previous selection stays drawn until that
-  swap, so a large flood costs frame time instead of a freeze. Because every frame
-  pays the same slice, the cost reads as an even frame-rate dip; throughput is
-  `budget x fps`, so a faster machine finishes sooner. Advancing before the
-  visibility sample lets a flood that completes on a frame draw on it. Latest-wins:
-  arming cancels whatever was in flight, and `clear()` drops it outright.
+  time on it, and the step that finishes the last pass swaps the snapshot. The
+  previous selection stays drawn until that swap, so a large flood costs frame time
+  instead of a freeze. Because every frame pays the same slice, the cost reads as an
+  even frame-rate dip; throughput is `budget x fps`, so a faster machine finishes
+  sooner. Advancing before the visibility sample lets a flood that completes on a
+  frame draw on it. Latest-wins: arming cancels whatever was in flight, and
+  `clear()` drops it outright.
+- **The whole pipeline is budgeted, not just the expansion.** `FloodJob` holds one
+  cursor over the BFS and the passes behind it, and its single wall-clock loop
+  spends the budget on whichever is current — a depth ring while expanding, then one
+  whole pass each for merge, collision occluders, drop edges, the paint rim when
+  raises are active, holes and hazards. Steps are atomic, so the budget bounds how
+  many a frame takes rather than the cost of the one running; the merge is the
+  largest at ~26 ms on a radius-30 flood. Because both stages sit behind that one
+  reference, `select()` and `clear()` cancel a flood outright whichever stage it had
+  reached, with no second field to leave behind still running.
 - **The budget's `0` is translated in one place.** General `floodBudgetMs` reads `0`
   as "no limit", the opposite of `SurfaceSelection.advance`, where a zero budget
-  buys the minimum of one ring; `advanceFlood` maps the sentinel to `Long.MAX_VALUE`
+  buys the minimum of one step; `advanceFlood` maps the sentinel to `Long.MAX_VALUE`
   so an unlimited flood finishes on the frame after the click — the first frame that
   could have drawn it. Reading the option live each frame applies a budget change to
   the flood already running.
@@ -290,14 +299,20 @@ the published snapshot into `SurfaceEmitter.emit`.
   `SKIRT_OFFSET`.
 - **Flood geometry debug dump (`/mobwalk dump`).** Client chat command, and a pure
   read of the last completed selection. It writes a single
-  `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
-  downskirts → holes → hazards), and posts a short chat summary (`merged=… occluders=…
-  skirts=… holes=… hazards=… (see latest.log)`). The header names the flood it
-  describes (origin, radius, profile) and carries its measured cost (`elapsedMs`,
-  `frames`), which is how the General
-  `floodBudgetMs` default is tuned against real terrain. `SurfaceSelection` retains
-  what the snapshot lacks — the pre-merge `reached` tops and, on raised selections,
-  the collision-rim occluders — at the end of every flood to make this a pure read.
+  `[flood-debug]` block to `MobWalk.LOGGER` (header → phases → reached → merged →
+  occluders → downskirts → holes → hazards), and posts a short chat summary
+  (`merged=… occluders=… skirts=… holes=… hazards=… (see latest.log)`). The header
+  names the flood it describes (origin, radius, profile) and carries its measured
+  cost (`elapsedMs`, `frames`); the `phases` line splits that total across `bfs`,
+  `merge`, the two occluder and down-skirt rims, `holes` and `hazards`, with a
+  skipped paint phase reading `0`. Together they are how the General
+  `floodBudgetMs` default is tuned against real terrain, and how a slow flood is
+  attributed to the expansion or to one pass. The block runs one line per rect and
+  per span, so on a large selection the `reached` list makes writing it the
+  expensive part of the command. `SurfaceSelection` retains
+  what the snapshot lacks — the pre-merge `reached` tops, the phase timings, and, on
+  raised selections, the collision-rim occluders — at the end of every flood to make
+  this a pure read.
   Raised selections log `occluders-collision`
   and `occluders-paint`; otherwise one `occluders` list. Empty selection: chat
   `flood-debug: no selection`.
@@ -406,11 +421,11 @@ the published snapshot into `SurfaceEmitter.emit`.
 - `WorldGeometry.java`: adapter over the `ColumnBoxes` port — Minecraft
   block/fluid state → domain `WorldBox` / `HazardClass` (`levelColumnBoxes`,
   `fluidSurfaceHeight`, `visibleTop` memo).
-- `SurfaceSelection.java`: the arm / `advance` / `finish` state machine and the
-  dump state retained at completion, plus the output-sensitive `FloodJob`
-  (depth-bounded surface BFS, resumable one depth ring per `stepRing`, whole rings
-  per wall-time budget in `advanceRings`, on-demand column + row exposure via
-  `ensureRows`, per-box `exposeBox` memo,
+- `SurfaceSelection.java`: the arm / `advance` state machine and the dump state
+  retained at completion; `FloodJob`, one budgeted cursor over the expansion and the
+  edge passes; and the output-sensitive `Bfs`
+  (depth-bounded surface BFS, resumable one depth ring per `stepRing`,
+  on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
   `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
   `exposeBox` (the `(T, T+H]` standing-column predicate, calling

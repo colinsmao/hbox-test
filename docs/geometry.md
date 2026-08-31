@@ -365,44 +365,54 @@ air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner squ
 
 ## How it is computed: the output-sensitive (lazy) flood
 
-`select` arms **`FloodJob`**: a surface BFS that exposes geometry only as it
+`select` arms **`Bfs`**: a surface BFS that exposes geometry only as it
 reaches it, so cost tracks the reachable set (and its occluder shells) rather
 than the window volume — a large win in caves / against walls, and asymptotically
 on open ground. Adjacency uses `RectMath.footprintAdjacent`; reach is the
-profile height window in `FloodJob` (see [`project.md`](project.md)
+profile height window in `Bfs` (see [`project.md`](project.md)
 milestones).
 
-- **Resumable, one depth ring at a time.** The job is a stateful object holding the
+- **Resumable, one depth ring at a time.** `Bfs` is a stateful object holding the
   whole flood — the `WorldSurfaceIndex`, the `hopCount` visited map, the current and
   next depth ring, and the `reached` node list — as fields, so a flood can span
   calls. `seed()` arms it from the click origin (ring 0 from the seed block's own
-  tops, ring 1 pre-seeded from the abutting ones), each `stepRing()` expands exactly
-  the current depth, and `advanceRings(budgetNanos)` fits as many whole rings as a
-  wall-time budget allows — every remaining ring, at an unlimited budget.
-  Call `k` completes ring `k-1`, so after `k` steps
+  tops, ring 1 pre-seeded from the abutting ones), and each `stepRing()` expands
+  exactly the current depth. Call `k` completes ring `k-1`, so after `k` steps
   `reached` holds exactly the surfaces at depth `<= k-1` — itself a valid flood at
   that radius, which is what lets a caller yield between rings. Rings reproduce the
   order a single FIFO queue gave: BFS over unit-weight edges leaves a queue in
   nondecreasing depth and, within a depth, in discovery order. That order is worth
   keeping because the greedy strip merge is order-sensitive.
-- **The job owns every piece of flood state**, which makes its lifetime the unit of
+- **`Bfs` owns every piece of expansion state**, which makes its lifetime the unit of
   consistency: dropping the reference releases the flood whole, index included. Its
   parameters (origin, depth limit, `halfW`, reach, `ClimbRule`, the `ColumnBoxes`
-  port) are captured at construction, so a job in flight is immutable with respect
-  to settings and a radius/profile change is answered by a fresh job. Contract:
+  port) are captured at construction, so a flood in flight is immutable with respect
+  to settings and a radius/profile change is answered by a fresh `Bfs`. Contract:
   `FloodRingContractTest` (ring-per-step membership, slice-granularity invariance,
-  a zero budget buying exactly one ring, a partly advanced flood draining to the
-  same result, stepping past completion, an origin over nothing).
-- **Spread across frames.** `select` arms a job and returns; each frame spends
-  the General `floodBudgetMs` budget on it (`SurfaceSelection.advance`), and the frame
-  that empties the queue runs `finish()` — merge plus the four edge passes — and
-  swaps the published snapshot. Since yields land only on completed rings, the
-  finalize always sees a valid flood rather than a jagged wavefront, and the whole
-  compute is one monotonic queue (no ring is ever re-expanded). Where the yields
-  fall never changes the output for a fixed world; a world edit mid-flood is the
-  one divergence, since the append-only index keeps whatever a column held when it
-  was first scanned. Driver and lifetime rules live in
-  [`rendering.md`](rendering.md).
+  a partly advanced flood draining to the same result, stepping past completion, an
+  origin over nothing) — all driven through `stepRing` with no clock, since where a
+  driver yields is what must not matter.
+- **Spread across frames, expansion and finalize alike.** `select` arms a `FloodJob`
+  and returns; each frame spends the General `floodBudgetMs` budget on it
+  (`SurfaceSelection.advance`), and the step that finishes the last pass swaps the
+  published snapshot. `FloodJob` walks one cursor through the whole pipeline — a
+  depth ring per step while expanding, then one whole pass each for the merge, the
+  collision occluders, the drop edges, the paint rim when raises are active, the
+  holes and the hazards — so the finalize costs frames rather than one hitch at the
+  end. A step is always a whole unit of work, which is what the passes require: they
+  read the complete reached set, and each feeds the next. The expansion stays one
+  monotonic queue (no ring is ever re-expanded). Where the yields fall never changes
+  the output for a fixed world; a world edit mid-flood is the one divergence, since
+  the append-only index keeps whatever a column held when it was first scanned.
+  Holding the expansion and the passes behind that one `FloodJob` reference is also
+  what makes a cancel total — see [`rendering.md`](rendering.md) for the driver and
+  lifetime rules.
+- **Cost is dominated by the expansion.** A radius-30 Ravager flood over broken
+  terrain measures ~269 ms total: ~193 ms of BFS, then ~26 ms merge, ~16 ms holes,
+  ~14 ms for each occluder rim computed, and under 3 ms each for the drop edges and
+  hazards. So the merge is the largest single finalize step, and a selection with no
+  raised visuals saves a whole occluder pass. `/mobwalk dump` prints this split as
+  its `phases` line.
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the

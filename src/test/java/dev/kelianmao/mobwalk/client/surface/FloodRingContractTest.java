@@ -10,13 +10,12 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
-import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.FloodJob;
+import dev.kelianmao.mobwalk.client.surface.SurfaceSelection.Bfs;
 import dev.kelianmao.mobwalk.client.surface.WorldGeometry.ColumnBoxes;
 
 /**
- * The resumable contract of {@link FloodJob}: {@code stepRing} advances the flood
- * exactly one depth ring, {@code advanceRings} fits whole rings into a wall-time
- * budget, and where a caller yields never changes the result.
+ * The resumable contract of {@link Bfs}: {@code stepRing} advances the flood
+ * exactly one depth ring, and where a caller yields never changes the result.
  * Drives the BFS itself through a synthetic world (the {@link ColumnBoxes} seam),
  * so the loop is under test rather than the per-box passes it calls
  * ({@code exposeBox} is {@code HeadroomTest}, the merge is {@code MergeContractTest}).
@@ -57,15 +56,17 @@ final class FloodRingContractTest {
     return out;
   }
 
-  private static FloodJob job(ColumnBoxes world, int depthLimit) {
-    return new FloodJob(world, 0, 0, 0, depthLimit, EntityProfile.POINT, FLUID_ESCAPE, -8, 8);
+  private static Bfs bfsOver(ColumnBoxes world, int depthLimit) {
+    return new Bfs(world, 0, 0, 0, depthLimit, EntityProfile.POINT, FLUID_ESCAPE, -8, 8);
   }
 
-  // Every ring in one call: the reference whole run that sliced runs are held to.
-  private static List<StandableRect> runWhole(FloodJob job) {
-    job.seed();
-    job.advanceRings(Long.MAX_VALUE);
-    return job.merged();
+  // Every ring in one go: the reference whole run that sliced runs are held to.
+  private static List<StandableRect> runWhole(Bfs bfs) {
+    bfs.seed();
+    while (!bfs.stepRing()) {
+      // stepRing expands one depth ring per call.
+    }
+    return bfs.merged();
   }
 
   private static Set<Tile> tiles(List<StandableRect> rects) {
@@ -106,44 +107,44 @@ final class FloodRingContractTest {
   @Test
   void eachStepRingCompletesExactlyOneDepth() {
     // Manhattan ball sizes are 2d^2+2d+1: 1, 5, 13, 25.
-    FloodJob job = job(worldOf(plane(4, 0)), 3);
-    job.seed();
-    assertEquals(0, job.depth(), "seeding arms ring 0 without expanding it");
-    assertTrue(job.preMergeReached().isEmpty(), "nothing is reached before the first step");
+    Bfs bfs = bfsOver(worldOf(plane(4, 0)), 3);
+    bfs.seed();
+    assertEquals(0, bfs.depth(), "seeding arms ring 0 without expanding it");
+    assertTrue(bfs.preMergeReached().isEmpty(), "nothing is reached before the first step");
 
-    assertFalse(job.stepRing());
-    assertEquals(1, job.depth());
-    assertEquals(Set.of(new Tile(0, 0)), tiles(job.preMergeReached()),
+    assertFalse(bfs.stepRing());
+    assertEquals(1, bfs.depth());
+    assertEquals(Set.of(new Tile(0, 0)), tiles(bfs.preMergeReached()),
       "step 1 completes ring 0: the clicked block's own top");
 
-    assertFalse(job.stepRing());
-    assertEquals(2, job.depth());
+    assertFalse(bfs.stepRing());
+    assertEquals(2, bfs.depth());
     assertEquals(
       Set.of(new Tile(0, 0), new Tile(1, 0), new Tile(-1, 0), new Tile(0, 1), new Tile(0, -1)),
-      tiles(job.preMergeReached()),
+      tiles(bfs.preMergeReached()),
       "step 2 adds ring 1: the four edge-sharing neighbours, not the diagonals");
 
-    assertFalse(job.stepRing());
-    assertEquals(3, job.depth());
-    assertEquals(manhattanBall(2), tiles(job.preMergeReached()));
-    assertEquals(13, job.preMergeReached().size(), "one reached node per column, no duplicates");
+    assertFalse(bfs.stepRing());
+    assertEquals(3, bfs.depth());
+    assertEquals(manhattanBall(2), tiles(bfs.preMergeReached()));
+    assertEquals(13, bfs.preMergeReached().size(), "one reached node per column, no duplicates");
 
-    assertTrue(job.stepRing(), "ring 3 is the depth limit, so its nodes are not expanded");
-    assertEquals(4, job.depth());
-    assertEquals(manhattanBall(3), tiles(job.preMergeReached()));
-    assertEquals(25, job.preMergeReached().size());
+    assertTrue(bfs.stepRing(), "ring 3 is the depth limit, so its nodes are not expanded");
+    assertEquals(4, bfs.depth());
+    assertEquals(manhattanBall(3), tiles(bfs.preMergeReached()));
+    assertEquals(25, bfs.preMergeReached().size());
   }
 
   @Test
   void sliceGranularityDoesNotChangeTheResult() {
     ColumnBoxes world = worldOf(unevenGround());
-    List<StandableRect> wholeFlood = runWhole(job(world, 3));
+    List<StandableRect> wholeFlood = runWhole(bfsOver(world, 3));
     assertFalse(wholeFlood.isEmpty(), "the fixture floods");
 
-    // Two jobs stepped one ring at a time, interleaved with each other: state is
-    // per job, so a paused flood resumes to the same output as an unpaused one.
-    FloodJob first = job(world, 3);
-    FloodJob second = job(world, 3);
+    // Two floods stepped one ring at a time, interleaved with each other: state is
+    // per Bfs, so a paused flood resumes to the same output as an unpaused one.
+    Bfs first = bfsOver(world, 3);
+    Bfs second = bfsOver(world, 3);
     first.seed();
     second.seed();
     boolean firstDone = false;
@@ -159,74 +160,44 @@ final class FloodRingContractTest {
 
   @Test
   void steppingPastCompletionChangesNothing() {
-    FloodJob job = job(worldOf(plane(2, 0)), 1);
-    List<StandableRect> flooded = runWhole(job);
-    List<StandableRect> reached = job.preMergeReached();
+    Bfs bfs = bfsOver(worldOf(plane(2, 0)), 1);
+    List<StandableRect> flooded = runWhole(bfs);
+    List<StandableRect> reached = bfs.preMergeReached();
     assertFalse(reached.isEmpty());
 
-    assertTrue(job.stepRing());
-    assertTrue(job.stepRing());
-    assertEquals(reached, job.preMergeReached(), "extra steps reach nothing further");
-    assertEquals(flooded, job.merged());
-  }
-
-  @Test
-  void aZeroBudgetAdvancesOneRingPerCall() {
-    // The clock is read once per ring, after the ring is done, so the smallest
-    // budget still buys a whole ring — never a partial wavefront.
-    FloodJob job = job(worldOf(plane(4, 0)), 3);
-    job.seed();
-
-    assertFalse(job.advanceRings(0));
-    assertEquals(1, job.depth());
-    assertEquals(Set.of(new Tile(0, 0)), tiles(job.preMergeReached()));
-
-    assertFalse(job.advanceRings(0));
-    assertEquals(2, job.depth());
-    assertEquals(manhattanBall(1), tiles(job.preMergeReached()));
-
-    assertFalse(job.advanceRings(0));
-    assertEquals(3, job.depth());
-
-    assertTrue(job.advanceRings(0), "ring 3 is the depth limit, so it finishes the flood");
-    assertEquals(manhattanBall(3), tiles(job.preMergeReached()));
-  }
-
-  @Test
-  void anUnlimitedBudgetCompletesInOneCall() {
-    ColumnBoxes world = worldOf(unevenGround());
-    FloodJob job = job(world, 3);
-    job.seed();
-
-    assertTrue(job.advanceRings(Long.MAX_VALUE));
-    assertEquals(runWhole(job(world, 3)), job.merged());
+    assertTrue(bfs.stepRing());
+    assertTrue(bfs.stepRing());
+    assertEquals(reached, bfs.preMergeReached(), "extra steps reach nothing further");
+    assertEquals(flooded, bfs.merged());
   }
 
   @Test
   void aPartlyAdvancedFloodDrainsToTheSameResult() {
-    // Resuming under a budget large enough to finish answers what running the
-    // whole flood in one go would have: where a driver yielded leaves no trace.
+    // Resuming a paused flood answers what running it in one go would have: where
+    // a driver yielded leaves no trace in the output.
     ColumnBoxes world = worldOf(unevenGround());
-    List<StandableRect> wholeFlood = runWhole(job(world, 3));
+    List<StandableRect> wholeFlood = runWhole(bfsOver(world, 3));
 
-    FloodJob job = job(world, 3);
-    job.seed();
-    job.stepRing();
-    job.stepRing();
+    Bfs bfs = bfsOver(world, 3);
+    bfs.seed();
+    bfs.stepRing();
+    bfs.stepRing();
+    while (!bfs.stepRing()) {
+      // Drain the rings the pause left.
+    }
 
-    assertTrue(job.advanceRings(Long.MAX_VALUE), "the drain finishes the remaining rings");
-    assertEquals(wholeFlood, job.merged());
+    assertEquals(wholeFlood, bfs.merged());
   }
 
   @Test
   void originOverNothingFinishesEmpty() {
     // Clicked cell (0,0,0) is air; the ground sits well below it, so the click
-    // origin has no collision box of its own and the job completes with no nodes.
-    FloodJob job = job(worldOf(plane(4, -3)), 3);
-    job.seed();
-    assertTrue(job.stepRing());
-    assertTrue(job.preMergeReached().isEmpty());
-    assertTrue(job.merged().isEmpty());
-    assertTrue(runWhole(job(worldOf(plane(4, -3)), 3)).isEmpty());
+    // origin has no collision box of its own and the flood completes with no nodes.
+    Bfs bfs = bfsOver(worldOf(plane(4, -3)), 3);
+    bfs.seed();
+    assertTrue(bfs.stepRing());
+    assertTrue(bfs.preMergeReached().isEmpty());
+    assertTrue(bfs.merged().isEmpty());
+    assertTrue(runWhole(bfsOver(worldOf(plane(4, -3)), 3)).isEmpty());
   }
 }

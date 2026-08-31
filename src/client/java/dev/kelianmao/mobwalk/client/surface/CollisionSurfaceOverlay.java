@@ -63,7 +63,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   private static final long NANOS_PER_MS = 1_000_000L;
 
   // General floodBudgetMs uses 0 as the sentinel for "no limit" — the opposite of
-  // SurfaceSelection.advance's 0, which buys the minimum of one ring.
+  // SurfaceSelection.advance's 0, which buys the minimum of one step.
   private static final int UNLIMITED_BUDGET_MS = 0;
 
   // The computed surfaces, recomputed from scratch on each wand action
