@@ -12,7 +12,6 @@ Date: 24. 08. 2026
     - Updated for Minecraft 26.2.
   Graphics:
     - Increase default transparency due to a different rendering appearance in 26.2.
-    - A ring around the crosshair shows while a large selection is calculating (General: Show Flood Progress).
 ---------------------------------------------------------------------------------------------------
 Version: 1.0.0
 Date: 23. 08. 2026
