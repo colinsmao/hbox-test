@@ -10,6 +10,9 @@ could reach from there, and marks inescapable holes and hazards such as soul san
 
 Every color, and whether each hazard is marked at all, is configurable.
 
+Introduction video (YouTube):
+[![Watch the video](https://img.youtube.com/vi/mWUKJwls9XM/maxresdefault.jpg)](https://youtu.be/mWUKJwls9XM)
+
 ## Requirements
 
 - Minecraft `26.2` with [Fabric Loader](https://fabricmc.net/use/installer/)
