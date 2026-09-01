@@ -55,7 +55,8 @@ persisted to `config/mobwalk.json`; General’s `Edit Built-in Profiles` and
 
 ## Status & milestones
 
-Milestones 1–8 are merged. The repo is a
+Milestones 1–10 are merged. Milestone 11 is the chunked flood plus auto-update.
+The repo is a
 client-only Fabric Gradle project generated from `FabricMC/fabric-example-mod` and
 trimmed to client-only (see **Repository layout** below). `./gradlew build` passes
 (produces `build/libs/mobwalk-1.0.0.jar`). Per-area detail lives in the subsystem
@@ -83,6 +84,9 @@ split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygien
 - **M9 — fluid hazards:** swimmable water/lava surfaces, fluid escape height, hazard
 fill colors, and perimeter beams (`HazardBeams`).
 - **M10 — solid hazards:** soul sand / magma hazard marking, similar to fluids.
+- **M11 — chunked flood + auto-update:** budgeted multi-tick flood, progress ring,
+  and General auto-update (**Anchor** keeps a clicked selection current; **Follow Player**
+  paints around you on the interval).
 
 ## Repository layout
 

@@ -195,7 +195,7 @@ public final class Configs implements IConfigHandler {
     public static final ConfigOptionList AUTO_UPDATE =
       new ConfigOptionList("autoUpdate", AutoUpdate.DISABLED).apply(GENERIC_KEY);
     public static final ConfigDouble AUTO_UPDATE_INTERVAL =
-      new ConfigDouble("autoUpdateInterval", 3.0, 0.5, 10.0, true).apply(GENERIC_KEY);
+      new ConfigDouble("autoUpdateInterval", 0.5, 0.5, 10.0, true).apply(GENERIC_KEY);
     /** Slider snap for {@link #AUTO_UPDATE_INTERVAL}; typed values keep any precision in range. */
     static final double AUTO_UPDATE_INTERVAL_SLIDER_STEP = 0.5;
     public static final ConfigBoolean SWIMMABLE_FLUIDS =

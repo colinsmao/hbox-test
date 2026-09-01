@@ -26,6 +26,7 @@ The wand is a stick by default, and you can set it to any item.
 - **Sneak + scroll** while holding the wand: grow or shrink how far it checks.
 - **Sneak + right-click air**: switch to the next mob.
 - **Sneak**: see the painted surfaces through walls.
+- **Auto Update**: Automatically recalculates around the selection or your location.
 
 Some mobs are built in (eg Player, Ravager, Warden), and you can add your own with a width, height, and vertical reach.
 Surfaces show while you hold the wand, or can be set to always show.
@@ -40,12 +41,6 @@ More details of each setting may be found in the menu tooltips.
 - The visual vs collision hitbox of honey is inconsistent horizontally as well as vertically; this is not adjusted for, since usually it is within the dilated radius, so is not visible.
 - Reachability assumes zero horizontal velocity. Otherwise this becomes modeling all of parkour. Most mobs do not make horizontal jumps, so the surfaces found are generally accurate.
 - Soul sand slows through a slab; currently this is not taken into account. (Same with honey etc)
-
-## Planned features
-
-- Update to 26.2; rending API updates
-- Chunked / multi-tick flood so it doesn't stutter.
-- Auto update (eg flood from feet every N ticks)
 
 ## AI usage
 

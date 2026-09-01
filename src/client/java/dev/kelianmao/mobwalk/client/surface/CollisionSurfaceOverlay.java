@@ -42,7 +42,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
  * switches to the collision height, which re-floods since the visible top is
  * gathered compute-side (gated on the flag; see {@code WorldGeometry.visibleTop}).
  *
- * <p>A wand action <b>arms</b> the flood and {@link #extract} expands it under
+ * <p>A wand action or auto-update tick <b>arms</b> the flood and {@link #extract}
+ * expands it under
  * the General flood budget ({@link #advanceFlood}), publishing the finished
  * selection into a {@code volatile} snapshot ({@link #publish}) on the frame it
  * completes; the previous selection stays drawn until that swap, and a new
@@ -76,8 +77,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   private BlockPos lastSeed;
 
   // Ticks since the last auto-update fire (or since the timer last reset).
-  // Counts only while auto-update is eligible; the fire action in 5a is a
-  // radius-HUD ping, replaced by armFlood in 5b.
+  // Counts only while auto-update is eligible and no flood is in flight.
   private int idleTicks;
 
   // Active mob profile comes from Configs.mobProfile() (settings source of
@@ -133,8 +133,8 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   }
 
   // Publish the current selection into the volatile snapshot emit() reads. Called
-  // when a flood completes and after every clear, so per-frame work is nil;
-  // editing painted terrain therefore needs a re-click to refresh (intended).
+  // when a flood completes and after every clear, so per-frame work is nil.
+  // Auto-update re-arms on its interval so world edits show without a re-click.
   private void publish() {
     published = cache.snapshot();
   }
@@ -204,13 +204,42 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       idleTicks = 0;
       return;
     }
+    if (cache.isFlooding()) {
+      idleTicks = 0;
+      return;
+    }
+    Player player = client.player;
+    Level level = client.level;
+    if (player == null || level == null) {
+      idleTicks = 0;
+      return;
+    }
+    BlockPos seed = autoUpdateSeed(level, player);
+    if (seed == null) {
+      idleTicks = 0;
+      return;
+    }
     idleTicks++;
     int intervalTicks = Math.max(1, (int) Math.round(Configs.autoUpdateIntervalSeconds() * 20.0));
     if (idleTicks >= intervalTicks) {
-      // 5a stand-in so cadence and gating are visible; 5b replaces with armFlood.
-      OverlayManager.radiusIndicator().show(Configs.floodRadius());
+      var profile = Configs.mobProfile();
+      if (profile.isPresent()) {
+        armFlood(level, seed, profile.get());
+        lastSeed = seed;
+      }
       idleTicks = 0;
     }
+  }
+
+  // Anchor reuses the last wand seed; Follow Player walks down from the feet
+  // block (same resolveDownward as a click) so pass-through blocks land on
+  // the collision underneath.
+  private BlockPos autoUpdateSeed(Level level, Player player) {
+    return switch (Configs.autoUpdate()) {
+      case FROM_SEED -> lastSeed;
+      case FROM_FEET -> resolveDownward(level, player.blockPosition());
+      case DISABLED -> null;
+    };
   }
 
   // Same showSurfaces + wand + profile tests as isVisible(), without requiring

@@ -163,9 +163,10 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   `extract` samples the visibility flag and crouch, and does the
   **level-identity reset** (a changed/`null` `Level` empties the drawn snapshot, so
   world unload / dimension change / disconnect all reset it without a manager-side
-  hook). Editing painted terrain needs a re-click (publish is action-driven).
+  hook). Auto-update re-arms the same flood on its interval so world edits show
+  without a re-click.
 - **Chunked flood, driven by the frame.** A wand action (select / radius scroll /
-  profile cycle) **arms** a `FloodJob` and returns; `CollisionSurfaceOverlay.extract`
+  profile cycle) or an auto-update tick **arms** a `FloodJob` and returns; `CollisionSurfaceOverlay.extract`
   calls `advanceFlood()` every frame, spending up to General `floodBudgetMs` of wall
   time on it, and the step that finishes the last pass swaps the snapshot. The
   previous selection stays drawn until that swap, so a large flood costs frame time
@@ -399,7 +400,9 @@ the published snapshot into `SurfaceEmitter.emit`.
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the per-frame flood
   driver (`armFlood` + `advanceFlood`, where the budget-`0` sentinel is translated),
-  the auto-update tick timer (`onClientTick`, `idleTicks`), the level-identity reset, and the `volatile`
+  the auto-update tick timer (`onClientTick`, `idleTicks`; cooldown while `isFlooding()`,
+  Anchor from `lastSeed`, Follow Player from `resolveDownward(player.blockPosition())`),
+  the level-identity reset, and the `volatile`
   `SelectionSnapshot` + crouch handoff into `SurfaceEmitter`.
 - `surface/SelectionSnapshot.java`: what each of the five published lists holds, the
   deep copy that makes them immutable, and why `isEmpty()` keys on the rects alone.

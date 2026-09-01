@@ -297,6 +297,11 @@ public final class SurfaceSelection {
     return flood == null ? null : new FloodProgress(flood.expansion(), flood.passes());
   }
 
+  /** Whether a flood is armed (cheaper than {@link #progress()}, which allocates). */
+  public boolean isFlooding() {
+    return flood != null;
+  }
+
   /**
    * Log the last completed flood — its parameters and cost, the pre-merge reached
    * tops, the merged rects, and every derived span — for {@code /mobwalk dump}.
