@@ -122,6 +122,9 @@ public final class WorldOverlayManager {
       }
     }
     usePressedLastTick = down;
+    for (WorldOverlay overlay : OVERLAYS) {
+      overlay.onClientTick(client);
+    }
   }
 
   public static void register(WorldOverlay overlay) {

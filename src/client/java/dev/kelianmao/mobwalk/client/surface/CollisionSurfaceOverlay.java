@@ -1,6 +1,7 @@
 package dev.kelianmao.mobwalk.client.surface;
 
 import dev.kelianmao.mobwalk.client.config.Configs;
+import dev.kelianmao.mobwalk.client.config.Configs.AutoUpdate;
 import dev.kelianmao.mobwalk.client.config.Configs.ShowSurfaces;
 import dev.kelianmao.mobwalk.client.overlay.OverlayManager;
 import dev.kelianmao.mobwalk.client.overlay.WorldOverlay;
@@ -74,6 +75,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
   // same origin. Touched only on the client thread; null when nothing is selected.
   private BlockPos lastSeed;
 
+  // Ticks since the last auto-update fire (or since the timer last reset).
+  // Counts only while auto-update is eligible; the fire action in 5a is a
+  // radius-HUD ping, replaced by armFlood in 5b.
+  private int idleTicks;
+
   // Active mob profile comes from Configs.mobProfile() (settings source of
   // truth). Sneak+air-click may cycle it when Debug crouchCycleProfile is on.
 
@@ -115,17 +121,11 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
       lastSeed = null;
       lastLevel = level;
       published = SelectionSnapshot.EMPTY;
+      idleTicks = 0;
     }
     advanceFlood();
 
-    Item wand = Configs.wandItem();
-    boolean holding = player != null
-      && (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand));
-    ShowSurfaces mode = Configs.showSurfaces();
-    visible = mode != ShowSurfaces.NEVER
-      && Configs.hasEnabledProfile()
-      && (mode == ShowSurfaces.ALWAYS || holding)
-      && !published.isEmpty();
+    visible = surfacesShowable(player) && !published.isEmpty();
     // Through-walls tops + crouch borders share this flag; gated by Debug setting.
     crouching = player != null
       && player.isShiftKeyDown()
@@ -197,6 +197,34 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     return visible;
   }
 
+  @Override
+  public void onClientTick(Minecraft client) {
+    if (Configs.autoUpdate() == AutoUpdate.DISABLED
+        || !surfacesShowable(client.player)) {
+      idleTicks = 0;
+      return;
+    }
+    idleTicks++;
+    int intervalTicks = Math.max(1, (int) Math.round(Configs.autoUpdateIntervalSeconds() * 20.0));
+    if (idleTicks >= intervalTicks) {
+      // 5a stand-in so cadence and gating are visible; 5b replaces with armFlood.
+      OverlayManager.radiusIndicator().show(Configs.floodRadius());
+      idleTicks = 0;
+    }
+  }
+
+  // Same showSurfaces + wand + profile tests as isVisible(), without requiring
+  // a published selection, so Follow Player can self-start with an empty snapshot.
+  private static boolean surfacesShowable(Player player) {
+    Item wand = Configs.wandItem();
+    boolean holding = player != null
+      && (player.getMainHandItem().is(wand) || player.getOffhandItem().is(wand));
+    ShowSurfaces mode = Configs.showSurfaces();
+    return mode != ShowSurfaces.NEVER
+      && Configs.hasEnabledProfile()
+      && (mode == ShowSurfaces.ALWAYS || holding);
+  }
+
   /**
    * Live apply from MaLiLib mob-profile / flood-radius / visible-face controls:
    * re-flood an active selection so the new size or radius shows immediately.
@@ -241,6 +269,7 @@ public final class CollisionSurfaceOverlay implements WorldOverlay {
     } else {
       return;
     }
+    idleTicks = 0;
 
     Minecraft client = Minecraft.getInstance();
     Level level = client.level;

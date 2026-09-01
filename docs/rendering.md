@@ -107,7 +107,8 @@ Config UI, persistence, and MaLiLib option types live in
   `UseItemCallback` — that re-fires every tick while the button is held for
   items with no use cooldown (e.g. a stick), causing spam.
 - **Framework:** `WorldOverlay` splits into `extract(...)` + `emit(...)`
-  (mirroring the extract/draw phases) plus an `onUseItem(...)` hook. The model is
+  (mirroring the extract/draw phases) plus `onUseItem(...)` and `onClientTick(...)`
+  hooks. The model is
   **immediate-mode** (geometry rebuilt every frame), not retained.
   `WorldOverlayManager` owns the `LevelRenderEvents` phases, **two** shared
   pipelines each with its own `BufferBuilder` — a **depth-off `FILLED`** layer
@@ -116,7 +117,8 @@ Config UI, persistence, and MaLiLib option types live in
   drawn last so opaque beams cover skirts; when off, beams share `SKIRT`),
   so `emit(matrix, fillBuffer, skirtBuffer)` writes into both and each layer
   batches into one draw call — the `MeshData` → `MappableRingBuffer` →
-  render-pass GPU handoff (per layer), the use-key rising-edge dispatch, and GPU
+  render-pass GPU handoff (per layer), the use-key rising-edge dispatch, the
+  per-tick `onClientTick` dispatch after it, and GPU
   cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
@@ -397,7 +399,7 @@ the published snapshot into `SurfaceEmitter.emit`.
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
   runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the per-frame flood
   driver (`armFlood` + `advanceFlood`, where the budget-`0` sentinel is translated),
-  the level-identity reset, and the `volatile`
+  the auto-update tick timer (`onClientTick`, `idleTicks`), the level-identity reset, and the `volatile`
   `SelectionSnapshot` + crouch handoff into `SurfaceEmitter`.
 - `surface/SelectionSnapshot.java`: what each of the five published lists holds, the
   deep copy that makes them immutable, and why `isEmpty()` keys on the rects alone.

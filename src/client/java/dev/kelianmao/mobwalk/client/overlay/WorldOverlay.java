@@ -3,6 +3,7 @@ package dev.kelianmao.mobwalk.client.overlay;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import org.joml.Matrix4fc;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.player.Player;
 
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionContext;
@@ -50,5 +51,13 @@ public interface WorldOverlay {
    * the manager stays agnostic to what item a widget cares about.
    */
   default void onUseItem(Player player) {
+  }
+
+  /**
+   * Called every client tick after the use-key rising-edge dispatch. Interval
+   * work belongs here (tick-based, so it pauses with the game); frame-driven
+   * extract stays on the render path.
+   */
+  default void onClientTick(Minecraft client) {
   }
 }

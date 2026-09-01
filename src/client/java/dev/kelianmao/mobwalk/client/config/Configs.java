@@ -123,6 +123,56 @@ public final class Configs implements IConfigHandler {
     }
   }
 
+  /**
+   * When the standable-surface flood re-runs on a timer. MaLiLib cycle values
+   * for Generic {@code autoUpdate}. Display labels live in lang
+   * {@code mobwalk.config.generic.autoUpdate.*}.
+   */
+  public enum AutoUpdate implements IConfigOptionListEntry {
+    DISABLED("disabled"),
+    FROM_SEED("fromSeed"),
+    FROM_FEET("fromFeet");
+
+    private final String id;
+    private final String translationKey;
+
+    AutoUpdate(String id) {
+      this.id = id;
+      this.translationKey = GENERIC_KEY + ".autoUpdate." + id;
+    }
+
+    @Override
+    public String getStringValue() {
+      return id;
+    }
+
+    @Override
+    public String getDisplayName() {
+      return StringUtils.translate(translationKey);
+    }
+
+    @Override
+    public IConfigOptionListEntry cycle(boolean forward) {
+      AutoUpdate[] values = values();
+      int i = ordinal();
+      return values[forward
+        ? (i + 1) % values.length
+        : (i - 1 + values.length) % values.length];
+    }
+
+    @Override
+    public IConfigOptionListEntry fromString(String value) {
+      if (value != null) {
+        for (AutoUpdate mode : values()) {
+          if (mode.id.equalsIgnoreCase(value)) {
+            return mode;
+          }
+        }
+      }
+      return DISABLED;
+    }
+  }
+
   public static final class Generic {
     public static final ConfigOptionList SHOW_SURFACES =
       new ConfigOptionList("showSurfaces", ShowSurfaces.WHILE_HOLDING_WAND).apply(GENERIC_KEY);
@@ -142,6 +192,12 @@ public final class Configs implements IConfigHandler {
       new ConfigInteger("floodBudgetMs", 10, 0, 50, true).apply(GENERIC_KEY);
     public static final ConfigBoolean SHOW_FLOOD_PROGRESS =
       new ConfigBoolean("showFloodProgress", true).apply(GENERIC_KEY);
+    public static final ConfigOptionList AUTO_UPDATE =
+      new ConfigOptionList("autoUpdate", AutoUpdate.DISABLED).apply(GENERIC_KEY);
+    public static final ConfigDouble AUTO_UPDATE_INTERVAL =
+      new ConfigDouble("autoUpdateInterval", 3.0, 0.5, 10.0, true).apply(GENERIC_KEY);
+    /** Slider snap for {@link #AUTO_UPDATE_INTERVAL}; typed values keep any precision in range. */
+    static final double AUTO_UPDATE_INTERVAL_SLIDER_STEP = 0.5;
     public static final ConfigBoolean SWIMMABLE_FLUIDS =
       new ConfigBoolean("swimmableFluids", true).apply(GENERIC_KEY);
     public static final ConfigDouble FLUID_ESCAPE_HEIGHT =
@@ -157,6 +213,8 @@ public final class Configs implements IConfigHandler {
       FLOOD_RADIUS,
       FLOOD_BUDGET_MS,
       SHOW_FLOOD_PROGRESS,
+      AUTO_UPDATE,
+      AUTO_UPDATE_INTERVAL,
       SWIMMABLE_FLUIDS,
       FLUID_ESCAPE_HEIGHT
     );
@@ -169,6 +227,8 @@ public final class Configs implements IConfigHandler {
       FLOOD_RADIUS,
       FLOOD_BUDGET_MS,
       SHOW_FLOOD_PROGRESS,
+      AUTO_UPDATE,
+      AUTO_UPDATE_INTERVAL,
       SWIMMABLE_FLUIDS,
       FLUID_ESCAPE_HEIGHT
     );
@@ -597,6 +657,23 @@ public final class Configs implements IConfigHandler {
       return mode;
     }
     return ShowSurfaces.WHILE_HOLDING_WAND;
+  }
+
+  /** When the flood re-runs on a timer ({@link AutoUpdate}). */
+  public static AutoUpdate autoUpdate() {
+    Object value = Generic.AUTO_UPDATE.getOptionListValue();
+    if (value instanceof AutoUpdate mode) {
+      return mode;
+    }
+    return AutoUpdate.DISABLED;
+  }
+
+  /**
+   * Seconds to wait after a flood finishes before starting the next one when
+   * {@link #autoUpdate()} is not {@link AutoUpdate#DISABLED}. Read live each tick.
+   */
+  public static double autoUpdateIntervalSeconds() {
+    return Generic.AUTO_UPDATE_INTERVAL.getDoubleValue();
   }
 
   /** Current wand item (malformed/unknown ids → stick). Refreshed on change/load. */
