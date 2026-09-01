@@ -30,7 +30,7 @@
   "mobwalk.config.generic.autoUpdate.fromSeed": "Anchor",
   "mobwalk.config.generic.autoUpdate.fromFeet": "Follow Player",
 
-  "mobwalk.config.generic.comment.autoUpdateInterval": "Update interval, in seconds. (after flood completes?)",
+  "mobwalk.config.generic.comment.autoUpdateInterval": "Auto update interval, in seconds.",
 
   "mobwalk.config.generic.comment.swimmableFluids": "If enabled, water and lava are treated as walkable to approximate swimming.",
 

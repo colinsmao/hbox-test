@@ -92,7 +92,8 @@ independent of surface class; a frontier winner uses the depth limit and sets
 
 ## What the selection is (the computed result)
 
-`SurfaceSelection.select(level, seed, radius, profile)` produces the set of
+`SurfaceSelection.select(level, seed, radius, profile)` arms a `FloodJob`; the
+published set is the `SelectionSnapshot` swapped when `advance` finishes —
 **dilated, occlusion-aware standable tops reachable from the seed**, merged into
 maximal rectangles for drawing. Independent of how it is computed, the result is
 defined by four rules:

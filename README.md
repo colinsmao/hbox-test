@@ -37,7 +37,7 @@ More details of each setting may be found in the menu tooltips.
 
 - Classification near the edge of the flood fill may be inaccurate, due to missing neighbors.
 - An unreachable ledge between two reachable surfaces may be marked as a "hole", since technically it is unreachable from both directions.
-- Frame stutter on usage with large flood radius; optimizations planned.
+- Single tick floods over large areas can stutter. Multi-ticks flood may desync.
 - The visual vs collision hitbox of honey is inconsistent horizontally as well as vertically; this is not adjusted for, since usually it is within the dilated radius, so is not visible.
 - Reachability assumes zero horizontal velocity. Otherwise this becomes modeling all of parkour. Most mobs do not make horizontal jumps, so the surfaces found are generally accurate.
 - Soul sand slows through a slab; currently this is not taken into account. (Same with honey etc)
