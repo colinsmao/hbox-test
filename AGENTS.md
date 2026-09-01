@@ -208,6 +208,10 @@ These apply to **any** feature, so they live here rather than in a subsystem gui
   When the human says commit, stage the intentional working-tree changes for that step
   and commit — do not spend a turn auditing which dirty files “belong” unless something
   looks like secrets, generated build output, or clearly unrelated large dirt.
+- **Commit message: a subject line plus one tight paragraph.** The paragraph carries
+  the *why* — the problem the change answers and the reasoning a reader can't get
+  from the diff — as one idea rather than a file-by-file recap. Reach past one
+  paragraph only when the design is genuinely subtle.
 - **Never commit without explicit human approval.** Absolute: do not `git commit` on
   your own initiative, self-approve the commit-gate hook, retry to bypass it, or treat
   a green build/test as approval. Wait for the human to say commit.

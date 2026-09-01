@@ -7,10 +7,13 @@ import java.util.List;
 import net.minecraft.client.gui.screens.Screen;
 
 import fi.dy.masa.malilib.config.IConfigBase;
+import fi.dy.masa.malilib.config.IConfigDouble;
 import fi.dy.masa.malilib.config.IConfigResettable;
+import fi.dy.masa.malilib.config.IConfigSlider;
 import fi.dy.masa.malilib.config.IConfigValue;
 import fi.dy.masa.malilib.config.gui.ConfigOptionChangeListenerTextField;
 import fi.dy.masa.malilib.config.gui.ConfigOptionListenerResetConfig;
+import fi.dy.masa.malilib.config.gui.SliderCallbackDouble;
 import fi.dy.masa.malilib.config.options.table.ConfigTable;
 import fi.dy.masa.malilib.gui.GuiBase;
 import fi.dy.masa.malilib.gui.GuiConfigsBase;
@@ -24,6 +27,7 @@ import fi.dy.masa.malilib.gui.interfaces.IKeybindConfigGui;
 import fi.dy.masa.malilib.gui.widgets.WidgetConfigOption;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptions;
 import fi.dy.masa.malilib.gui.widgets.WidgetListConfigOptionsBase;
+import fi.dy.masa.malilib.gui.widgets.WidgetSlider;
 import fi.dy.masa.malilib.gui.wrappers.TextFieldType;
 import fi.dy.masa.malilib.util.GuiUtils;
 import fi.dy.masa.malilib.util.StringUtils;
@@ -34,8 +38,9 @@ import dev.kelianmao.mobwalk.MobWalk;
  * MaLiLib settings screen (ModMenu Configure entry). Filter tabs: All / General /
  * Appearance / Debug. "Edit Built-in Profiles" / "Edit Custom Profiles" open from
  * General. Those two ConfigTable rows use {@link ConfirmResetConfigOption};
- * {@link Configs.Generic#WAND_ITEM} uses {@link ItemIdConfigOption}; other
- * rows use stock {@link WidgetConfigOption}.
+ * {@link Configs.Generic#WAND_ITEM} uses {@link ItemIdConfigOption};
+ * {@link Configs.Generic#AUTO_UPDATE_INTERVAL} uses {@link SteppedDoubleConfigOption};
+ * other rows use stock {@link WidgetConfigOption}.
  */
 public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab {
   private static ConfigGuiTab tab = ConfigGuiTab.ALL;
@@ -103,6 +108,20 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
         }
         if (config == Configs.Generic.WAND_ITEM) {
           return new ItemIdConfigOption(
+            x,
+            y,
+            this.browserEntryWidth,
+            this.browserEntryHeight,
+            this.maxLabelWidth,
+            this.configWidth,
+            wrapper,
+            listIndex,
+            this.parent,
+            this
+          );
+        }
+        if (config == Configs.Generic.AUTO_UPDATE_INTERVAL) {
+          return new SteppedDoubleConfigOption(
             x,
             y,
             this.browserEntryWidth,
@@ -256,6 +275,75 @@ public final class GuiConfigs extends GuiConfigsBase implements IConfigGuiAllTab
       super.applyNewValueToConfig();
       if (this.textField != null) {
         WandItem.applyInvalidTooltip(this.textField.textField());
+      }
+    }
+  }
+
+  /**
+   * Double slider that snaps to {@link Configs.Generic#AUTO_UPDATE_INTERVAL_SLIDER_STEP}.
+   * The text-field toggle still writes whatever precision {@link IConfigDouble} accepts.
+   */
+  private static final class SteppedDoubleConfigOption extends WidgetConfigOption {
+    SteppedDoubleConfigOption(
+      int x,
+      int y,
+      int width,
+      int height,
+      int labelWidth,
+      int configWidth,
+      ConfigOptionWrapper wrapper,
+      int listIndex,
+      IKeybindConfigGui host,
+      WidgetListConfigOptionsBase<?, ?> parent
+    ) {
+      super(x, y, width, height, labelWidth, configWidth, wrapper, listIndex, host, parent);
+    }
+
+    @Override
+    protected void addConfigSliderEntry(
+      int x,
+      int y,
+      int resetX,
+      int configWidth,
+      int configHeight,
+      IConfigSlider config
+    ) {
+      if (!(config instanceof IConfigDouble doubled)) {
+        super.addConfigSliderEntry(x, y, resetX, configWidth, configHeight, config);
+        return;
+      }
+      ButtonGeneric resetButton = this.createResetButton(resetX, y, (IConfigResettable) config);
+      WidgetSlider slider = new WidgetSlider(
+        x,
+        y,
+        configWidth,
+        configHeight,
+        new SteppedSliderCallbackDouble(
+          doubled, resetButton, Configs.Generic.AUTO_UPDATE_INTERVAL_SLIDER_STEP)
+      );
+      this.addWidget(slider);
+      this.addButton(resetButton, new ConfigOptionListenerResetConfig(
+        (IConfigResettable) config, null, resetButton, null));
+    }
+  }
+
+  private static final class SteppedSliderCallbackDouble extends SliderCallbackDouble {
+    private final double step;
+
+    SteppedSliderCallbackDouble(IConfigDouble config, ButtonBase resetButton, double step) {
+      super(config, resetButton);
+      this.step = step;
+    }
+
+    @Override
+    public void setValueRelative(double relativeValue) {
+      double min = this.config.getMinDoubleValue();
+      double max = this.config.getMaxDoubleValue();
+      double raw = min + relativeValue * (max - min);
+      double snapped = Math.round(raw / this.step) * this.step;
+      this.config.setDoubleValue(Math.min(max, Math.max(min, snapped)));
+      if (this.resetButton != null) {
+        this.resetButton.setEnabled(this.config.isModified());
       }
     }
   }

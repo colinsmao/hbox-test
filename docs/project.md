@@ -55,10 +55,10 @@ persisted to `config/mobwalk.json`; General’s `Edit Built-in Profiles` and
 
 ## Status & milestones
 
-Milestones 1–8 are merged. The repo is a
+Milestones 1–11 are merged. The repo is a
 client-only Fabric Gradle project generated from `FabricMC/fabric-example-mod` and
 trimmed to client-only (see **Repository layout** below). `./gradlew build` passes
-(produces `build/libs/mobwalk-1.0.0.jar`). Per-area detail lives in the subsystem
+(produces `build/libs/mobwalk-1.1.0.jar`). Per-area detail lives in the subsystem
 guides; in-game validation is per plan step plus the cross-cutting gates in
 `AGENTS.md` (**Stage-gating**). The delivery history:
 
@@ -83,6 +83,9 @@ split client into `config` / `overlay` / `surface`, skirt domain cleanup, hygien
 - **M9 — fluid hazards:** swimmable water/lava surfaces, fluid escape height, hazard
 fill colors, and perimeter beams (`HazardBeams`).
 - **M10 — solid hazards:** soul sand / magma hazard marking, similar to fluids.
+- **M11 — chunked flood + auto-update:** budgeted multi-tick flood, progress ring,
+  and General auto-update (**Anchor** keeps a clicked selection current; **Follow Player**
+  paints around you on the interval).
 
 ## Repository layout
 
@@ -110,9 +113,11 @@ it.
   │   │   └── *ProfilesTable* / CustomProfileTableRows.java
   │   ├── overlay/                         # HUD + in-world overlay frameworks
   │   │   ├── Overlay.java / OverlayManager.java / RadiusIndicatorOverlay.java
+  │   │   ├── FloodProgressOverlay.java
   │   │   └── WorldOverlay.java / WorldOverlayManager.java
   │   └── surface/                         # compute + selection widget + emit
   │       ├── EntityProfile / StandableRect / SkirtSpan / BeamSpan / FallColumn / ClimbRule
+  │       ├── SelectionSnapshot.java        # the five published outputs, as one record
   │       ├── HazardClass.java / RectMath.java / SurfaceSelection.java / WorldGeometry.java
   │       ├── HoleBeams.java / HazardBeams.java / DownSkirts.java / OccluderSkirts.java
   │       └── CollisionSurfaceOverlay.java / SurfaceEmitter.java
@@ -157,7 +162,7 @@ Authoritative sources (pin the version selector to `26.2`):
 
 ## Manual install into a real launcher
 
-1. `./gradlew build`, then grab `build/libs/mobwalk-1.0.0.jar` (ignore
+1. `./gradlew build`, then grab `build/libs/mobwalk-1.1.0.jar` (ignore
   any `*-sources.jar`).
 2. Install **Fabric Loader** for Minecraft `26.2` via the official installer
   ([https://fabricmc.net/use/installer/](https://fabricmc.net/use/installer/)).

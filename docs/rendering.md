@@ -47,6 +47,14 @@ Config UI, persistence, and MaLiLib option types live in
   ~1.5 s after a shift+scroll change, fading out over the last 0.5 s.
   `show(...)` (client thread) writes `volatile` radius/expiry that
   `render`/`isVisible` (render thread) read.
+- **Flood progress ring** (`FloodProgressOverlay`) sits around the crosshair
+  while a flood is armed. `CollisionSurfaceOverlay.advanceFlood` still pushes
+  expansion/pass fractions each frame (a few clamps); `isVisible()` is `armed`
+  and General `showFloodProgress` (default on), so an off toggle skips the
+  `fill`s only. Sweep is `0.75 * (r/R)²` during the BFS, then the remaining
+  quarter ticks with the finalize `Phase` cursor. Samples are exclusive fills
+  on a radius-8 circle centred at `(guiWidth-1)/2 + 0.5`, matching
+  `Hud.extractCrosshair`.
 - **GUI scale:** `Overlay` widgets lay out in GUI coordinates
   (`Window.getGuiScaledWidth` / `getGuiScaledHeight`, default `Font`) under
   `HudElementRegistry`, so they track Video Settings **GUI Scale** (including
@@ -99,7 +107,8 @@ Config UI, persistence, and MaLiLib option types live in
   `UseItemCallback` — that re-fires every tick while the button is held for
   items with no use cooldown (e.g. a stick), causing spam.
 - **Framework:** `WorldOverlay` splits into `extract(...)` + `emit(...)`
-  (mirroring the extract/draw phases) plus an `onUseItem(...)` hook. The model is
+  (mirroring the extract/draw phases) plus `onUseItem(...)` and `onClientTick(...)`
+  hooks. The model is
   **immediate-mode** (geometry rebuilt every frame), not retained.
   `WorldOverlayManager` owns the `LevelRenderEvents` phases, **two** shared
   pipelines each with its own `BufferBuilder` — a **depth-off `FILLED`** layer
@@ -108,7 +117,8 @@ Config UI, persistence, and MaLiLib option types live in
   drawn last so opaque beams cover skirts; when off, beams share `SKIRT`),
   so `emit(matrix, fillBuffer, skirtBuffer)` writes into both and each layer
   batches into one draw call — the `MeshData` → `MappableRingBuffer` →
-  render-pass GPU handoff (per layer), the use-key rising-edge dispatch, and GPU
+  render-pass GPU handoff (per layer), the use-key rising-edge dispatch, the
+  per-tick `onClientTick` dispatch after it, and GPU
   cleanup on
   `ClientLifecycleEvents.CLIENT_STOPPING` (chosen over a `GameRenderer#close`
   mixin to avoid mixin plumbing; trade-off: freed at shutdown, not on a
@@ -142,13 +152,49 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   result is unseen). The hand choice lives in `CollisionSurfaceOverlay.onUseItem`, not
   the manager: `WorldOverlay.onUseItem(Player)` takes no hand, so `WorldOverlayManager`
   stays agnostic to which item (the wand) a widget cares about.
-- **Publish-on-action.** The drawn snapshot — an immutable `List<StandableRect>` from
-  `SurfaceSelection.allRects()`, colored at draw so no per-rect tag — is
-  (re)published into a `volatile` field on each wand action (select / clear / radius
-  scroll / profile cycle). `extract` samples the visibility flag and crouch, and does the
-  **level-identity reset** (a changed/`null` `Level` empties it, so world unload /
-  dimension change / disconnect all reset it without a manager-side hook). Editing
-  painted terrain needs a re-click (publish is action-driven).
+- **Publish-on-completion.** The drawn snapshot — an immutable `SelectionSnapshot`
+  from `SurfaceSelection.snapshot()`, bundling the reached rects (colored at draw, so
+  no per-rect tag) with their occluder/down-skirt/hole/hazard spans — is
+  (re)published into a `volatile` field when a flood finishes, and on each clear.
+  One record for all five means a publish is a single
+  reference write, so `emit` always sees one selection's worth of geometry.
+  `SelectionSnapshot.isEmpty()` keys on the rects alone and is the single draw gate,
+  for the visibility flag and `SurfaceEmitter`'s early-out alike.
+  `extract` samples the visibility flag and crouch, and does the
+  **level-identity reset** (a changed/`null` `Level` empties the drawn snapshot, so
+  world unload / dimension change / disconnect all reset it without a manager-side
+  hook). Auto-update re-arms the same flood on its interval so world edits show
+  without a re-click.
+- **Chunked flood, driven by the frame.** A wand action (select / radius scroll /
+  profile cycle) or an auto-update tick **arms** a `FloodJob` and returns; `CollisionSurfaceOverlay.extract`
+  calls `advanceFlood()` every frame, spending up to General `floodBudgetMs` of wall
+  time on it, and the step that finishes the last pass swaps the snapshot. The
+  previous selection stays drawn until that swap, so a large flood costs frame time
+  instead of a freeze. Because every frame pays the same slice, the cost reads as an
+  even frame-rate dip; throughput is `budget x fps`, so a faster machine finishes
+  sooner. Advancing before the visibility sample lets a flood that completes on a
+  frame draw on it. Latest-wins: arming cancels whatever was in flight, and
+  `clear()` drops it outright.
+- **The whole pipeline is budgeted, not just the expansion.** `FloodJob` holds one
+  cursor over the BFS and the passes behind it, and its single wall-clock loop
+  spends the budget on whichever is current — a depth ring while expanding, then one
+  whole pass each for merge, collision occluders, drop edges, the paint rim when
+  raises are active, holes and hazards. Steps are atomic, so the budget bounds how
+  many a frame takes rather than the cost of the one running; the merge is the
+  largest at ~26 ms on a radius-30 flood. Because both stages sit behind that one
+  reference, `select()` and `clear()` cancel a flood outright whichever stage it had
+  reached, with no second field to leave behind still running.
+- **The budget's `0` is translated in one place.** General `floodBudgetMs` reads `0`
+  as "no limit", the opposite of `SurfaceSelection.advance`, where a zero budget
+  buys the minimum of one step; `advanceFlood` maps the sentinel to `Long.MAX_VALUE`
+  so an unlimited flood finishes on the frame after the click — the first frame that
+  could have drawn it. Reading the option live each frame applies a budget change to
+  the flood already running.
+- **Dropping a flood whose world is gone.** Extraction owns the flood, so the
+  level-identity check that empties the drawn snapshot also calls `cache.clear()`,
+  releasing the job's `HashMap`s and world index. Leaving to the main menu stops
+  extraction, so `MobWalkClient` clears the selection on
+  `ClientPlayConnectionEvents.DISCONNECT` alongside the config flush.
 - **Data source is the collision shape, not the visual shape:**
   `BlockState.getCollisionShape(level, pos, CollisionContext.empty())`. Empty shapes
   are pass-through (tall grass, flowers); `onUseItem` resolves the targeted block
@@ -173,18 +219,21 @@ output-sensitive flood) is computed by `SurfaceSelection` and documented in
   30`) — coarse steps keep the high end usable.
   Each change pings `RadiusIndicatorOverlay`. The live option updates immediately;
   JSON is flushed on play disconnect (and on config-screen close).
-- **Threading.** The selection is computed only on the client/extraction thread
-  (`select`/`clear`); the render thread reads only the immutable snapshot via the
-  `volatile` handoff (same pattern as the other widgets). `SurfaceSelection` holds the
-  result list — each action recomputes from scratch. `SurfaceEmitter` receives those
-  published lists as args and never reads the live compute lists.
+- **Threading.** The selection is computed only on the client thread
+  (`select` arms, `advance` expands and finalizes, `clear` cancels); the render
+  thread reads only the immutable snapshot via the `volatile` handoff (same pattern
+  as the other widgets). `SurfaceSelection` holds the current `SelectionSnapshot` —
+  each flood builds one from scratch and replaces it wholesale, so a compute
+  spanning many frames leaves the drawn one untouched until it swaps.
+  `SurfaceEmitter` receives that published record as an arg and reads
+  only its lists, which the record's constructor copies so they stay immutable.
 
 ### Per-surface drawing (`SurfaceEmitter.emit`)
 
 Each reached `StandableRect` is drawn as a **top fill**, an optional **border**, and
 **skirts**, split across the two `WorldOverlayManager` pipelines (depth-off `FILLED`
 through-walls, depth-on `SKIRT` occluded). `CollisionSurfaceOverlay.emit` forwards
-the published snapshots into `SurfaceEmitter.emit`.
+the published snapshot into `SurfaceEmitter.emit`.
 
 - **Top fill color precedence.** Tops and skirts share one frame fill palette
   (`Palette.FillColors`, hoisted once in `emit` and passed into `emitSkirts`).
@@ -259,13 +308,25 @@ the published snapshots into `SurfaceEmitter.emit`.
   walkable fill alpha at the surface; tip samples the Appearance-height curve when
   clipped). Same depth-tested `SKIRT` layer; nudged toward the surface interior by
   `SKIRT_OFFSET`.
-- **Flood geometry debug dump (`/mobwalk dump`).** Client chat command. With a wand
-  selection active it re-runs `select` once with a one-shot flag, writes a single
-  `[flood-debug]` block to `MobWalk.LOGGER` (header → reached → merged → occluders →
-  downskirts → holes → hazards), and posts a short chat summary (`merged=… occluders=…
-  skirts=… holes=… hazards=… (see latest.log)`). Raised selections log `occluders-collision`
+- **Flood geometry debug dump (`/mobwalk dump`).** Client chat command, and a pure
+  read of the last completed selection. It writes a single
+  `[flood-debug]` block to `MobWalk.LOGGER` (header → phases → reached → merged →
+  occluders → downskirts → holes → hazards), and posts a short chat summary
+  (`merged=… occluders=… skirts=… holes=… hazards=… (see latest.log)`). The header
+  names the flood it describes (origin, radius, profile) and carries its measured
+  cost (`elapsedMs`, `frames`); the `phases` line splits that total across `bfs`,
+  `merge`, the two occluder and down-skirt rims, `holes` and `hazards`, with a
+  skipped paint phase reading `0`. Together they are how the General
+  `floodBudgetMs` default is tuned against real terrain, and how a slow flood is
+  attributed to the expansion or to one pass. The block runs one line per rect and
+  per span, so on a large selection the `reached` list makes writing it the
+  expensive part of the command. `SurfaceSelection` retains
+  what the snapshot lacks — the pre-merge `reached` tops, the phase timings, and, on
+  raised selections, the collision-rim occluders — at the end of every flood to make
+  this a pure read.
+  Raised selections log `occluders-collision`
   and `occluders-paint`; otherwise one `occluders` list. Empty selection: chat
-  `flood-debug: no selection`. Armed by `/mobwalk dump`.
+  `flood-debug: no selection`.
 - **Surface-height toggle (Appearance `drawOnVisibleFace`, default on).** Blocks that
   render taller than they collide (soul sand, mud, cactus, honey) would otherwise draw
   their standable top *buried* at the collision height. The Appearance boolean
@@ -337,10 +398,14 @@ the published snapshots into `SurfaceEmitter.emit`.
 
 - `surface/CollisionSurfaceOverlay.java`: the downward resolution + cap, the
   right-click trigger (select/clear) + gated sneak-cycle of the active profile, the
-  runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the
-  publish-on-action snapshot, the level-identity reset, and the `volatile`
-  snapshot/occluder/down-skirt/hole/hazard/crouch handoff into
-  `SurfaceEmitter`.
+  runtime radius + re-flood (`wantsRadiusScroll`/`adjustRadius`), the per-frame flood
+  driver (`armFlood` + `advanceFlood`, where the budget-`0` sentinel is translated),
+  the auto-update tick timer (`onClientTick`, `idleTicks`; cooldown while `isFlooding()`,
+  Anchor from `lastSeed`, Follow Player from `resolveDownward(player.blockPosition())`),
+  the level-identity reset, and the `volatile`
+  `SelectionSnapshot` + crouch handoff into `SurfaceEmitter`.
+- `surface/SelectionSnapshot.java`: what each of the five published lists holds, the
+  deep copy that makes them immutable, and why `isEmpty()` keys on the rects alone.
 - `surface/SurfaceEmitter.java`: crouch-gated through-walls tops + borders, the
   fill precedence (`Palette.FillColors` / `resolve`: frontier grey → depth hue →
   hazard show+color → `walkableColor`), the square fading
@@ -353,6 +418,8 @@ the published snapshots into `SurfaceEmitter.emit`.
   double-sided-winding requirement.
 - `overlay/RadiusIndicatorOverlay.java`: the timer-gated visibility + fade and the
   `volatile` show/render thread handoff.
+- `overlay/FloodProgressOverlay.java`: the crosshair ring while a flood computes,
+  driven from `advanceFlood`, gated by General `showFloodProgress`.
 - `MobWalkClient.java`: the `ClientHotbarScrollEvents.ALLOW` wiring (wand+sneak
   gate, cancels the hotbar slot change) — the composition root that connects the
   scroll input to the flood-radius option and the HUD indicator — and the
@@ -369,8 +436,11 @@ the published snapshots into `SurfaceEmitter.emit`.
 - `WorldGeometry.java`: adapter over the `ColumnBoxes` port — Minecraft
   block/fluid state → domain `WorldBox` / `HazardClass` (`levelColumnBoxes`,
   `fluidSurfaceHeight`, `visibleTop` memo).
-- `SurfaceSelection.java`: the output-sensitive `LazyFlood` (depth-bounded surface
-  BFS, on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
+- `SurfaceSelection.java`: the arm / `advance` state machine and the dump state
+  retained at completion; `FloodJob`, one budgeted cursor over the expansion and the
+  edge passes; and the output-sensitive `Bfs`
+  (depth-bounded surface BFS, resumable one depth ring per `stepRing`,
+  on-demand column + row exposure via `ensureRows`, per-box `exposeBox` memo,
   the `occluderColumns` shell, `floor(W)+1` neighbour reach, merge-after-flood via
   `RectMath.mergeCoplanarSplitFrontier`), dilation + **headroom** occlusion in
   `exposeBox` (the `(T, T+H]` standing-column predicate, calling

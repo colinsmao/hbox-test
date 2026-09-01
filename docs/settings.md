@@ -55,11 +55,15 @@ category name: `"Generic"`. Screen title lang: `mobwalk.gui.title.configs`.
 | `builtinProfiles` | `ConfigTable` (UI only) | nine builtin seed rows | Same instance as `Configs.Profiles.BUILTIN_PROFILES`; shown on General. Opens `BuiltinProfilesTableEdit` (button `Edit Built-in Profiles`). Persisted slim under `"Profiles"` — see Profiles. |
 | `customProfiles` | `ConfigTable` | empty | Same instance as `Configs.Profiles.CUSTOM_PROFILES`; shown on General. Opens `CustomProfilesTableEdit` (button `Edit Custom Profiles`). Full table JSON under `"Profiles"` — see Profiles. |
 | `floodRadius` | `ConfigInteger` | `20` (min `0`, max `30`, slider) | Flood steps from the seed; world reach scales with mob width. Slider and shift+scroll both write this option (`Configs.setFloodRadius` / MaLiLib set). `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile` (re-floods an active selection). Persisted on config-screen close and on play disconnect. |
+| `floodBudgetMs` | `ConfigInteger` | `10` (min `0`, max `50`, slider) | Wall time a flood may spend per frame (`CollisionSurfaceOverlay.advanceFlood` → `SurfaceSelection.advance`). Sits beside `floodRadius`: that sets how much work a flood is, this sets how fast it is paid for. A flood in progress adds this to every frame, so it costs an even frame-rate dip and lands after `total / (budget * fps)` seconds. `0` means unlimited, which finishes the flood on the frame after the click — the first frame that could have drawn it, so the selection still appears in one step. Read live each frame, so a change applies to the flood already running. |
+| `showFloodProgress` | `ConfigBoolean` | `true` | Draws a ring around the crosshair while a flood is calculating (`FloodProgressOverlay`). `isVisible()` reads it live, so turning it off hides the ring on the next HUD frame without stopping the flood. |
+| `autoUpdate` | `ConfigOptionList` | `Disabled` (`Configs.AutoUpdate`) | When the flood re-runs on a timer: **Disabled**, **Anchor** (re-floods the last clicked block), **Follow Player** (self-starts from `resolveDownward` of `player.blockPosition()`). Runs only when surfaces would paint (`showSurfaces` + wand + enabled profile). Idle ticks count after each flood finishes. Cycle labels from lang `autoUpdate.*`. |
+| `autoUpdateInterval` | `ConfigDouble` | `0.5` (min `0.5`, max `10.0`, slider) | Seconds to wait after a fire before the next one, converted to ticks as `max(1, round(seconds * 20))`. The slider snaps in 0.5 s steps; typing the field keeps any precision in range. Read live each tick. |
 | `swimmableFluids` | `ConfigBoolean` | `true` | When on, vanilla water and lava (`FluidTags`) emit non-occluding fluid surfaces in the flood (see [geometry.md](geometry.md) → Fluid surfaces). Off restores pre-fluid hole beams on pools. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
 | `fluidEscapeHeight` | `ConfigDouble` | `0.375` (min `0`, max `2`, slider) | Rim height above the fluid **block** top that a fluid→non-fluid climb may clear (`ClimbRule`; see [geometry.md](geometry.md) Escape cap). Default matches mob pathing (`6/16`); `0.875` reaches soul sand. At or above the active profile's vertical reach, leaving fluid matches jumping on land. `setValueChangeCallback` → `CollisionSurfaceOverlay.reselectWithMobProfile`. Persisted on config-screen close and on play disconnect. |
 
-Helpers: `Configs.showSurfaces()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
-`Configs.setFloodRadius()`, `Configs.swimmableFluids()`, `Configs.fluidEscapeHeight()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
+Helpers: `Configs.showSurfaces()`, `Configs.autoUpdate()`, `Configs.autoUpdateIntervalSeconds()`, `Configs.wandItem()`, `Configs.mobProfile()`, `Configs.cycleMobProfile()`, `Configs.floodRadius()`,
+`Configs.setFloodRadius()`, `Configs.floodBudgetMs()`, `Configs.showFloodProgress()`, `Configs.swimmableFluids()`, `Configs.fluidEscapeHeight()`, `Configs.saveToDisk()`, `Configs.roster()`, `Configs.hasEnabledProfile()`.
 
 Lang: player-facing `comment.*` tooltip for every option. Row labels use the option
 id when `name.*` is omitted (`Configs.refreshDisplayNames`); an optional `name.*`
@@ -194,7 +198,8 @@ name: `"Debug"`.
 
 Helpers: `Configs.crouchScrollRadius()`, `Configs.crouchSeeThroughWalls()`,
 `Configs.crouchCycleProfile()`, `Configs.shadeByDepth()`,
-`Configs.showCutoffRing()` — read live each use (no value-change callbacks).
+`Configs.showCutoffRing()` — read live each use (no
+value-change callbacks).
 `Configs.showPointProfile()` feeds `ProfileRoster.firstSeed` / `sanitize` and the
 builtin table defaults.
 

@@ -41,7 +41,7 @@ public final class WorldGeometry {
   // One collision sub-box in absolute world coords: its (undilated) XZ footprint
   // plus its vertical extent. The arrangement dilates the footprint by W/2 on
   // demand; yMin/yMax drive the spans-above occlusion test. bx/by/bz are the
-  // source block (LazyFlood's depth-band and seed-block tests run on these).
+  // source block (Bfs's depth-band and seed-block tests run on these).
   // blockCollisionTop / blockOutlineTop are the SOURCE BLOCK's whole-shape tops
   // (collision vs visible/outline, world Y), carried so exposeBox can raise a
   // standable top to the visible face for render-taller-than-collide blocks (soul

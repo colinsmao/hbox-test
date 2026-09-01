@@ -92,7 +92,8 @@ independent of surface class; a frontier winner uses the depth limit and sets
 
 ## What the selection is (the computed result)
 
-`SurfaceSelection.select(level, seed, radius, profile)` produces the set of
+`SurfaceSelection.select(level, seed, radius, profile)` arms a `FloodJob`; the
+published set is the `SelectionSnapshot` swapped when `advance` finishes —
 **dilated, occlusion-aware standable tops reachable from the seed**, merged into
 maximal rectangles for drawing. Independent of how it is computed, the result is
 defined by four rules:
@@ -365,18 +366,60 @@ air-gap midplane, checkerboard, `.S./.../MMM` corner bite, magma-ring corner squ
 
 ## How it is computed: the output-sensitive (lazy) flood
 
-`select` runs **`LazyFlood`**: a surface BFS that exposes geometry only as it
+`select` arms **`Bfs`**: a surface BFS that exposes geometry only as it
 reaches it, so cost tracks the reachable set (and its occluder shells) rather
 than the window volume — a large win in caves / against walls, and asymptotically
 on open ground. Adjacency uses `RectMath.footprintAdjacent`; reach is the
-profile height window in `LazyFlood` (see [`project.md`](project.md)
+profile height window in `Bfs` (see [`project.md`](project.md)
 milestones).
+
+- **Resumable, one depth ring at a time.** `Bfs` is a stateful object holding the
+  whole flood — the `WorldSurfaceIndex`, the `hopCount` visited map, the current and
+  next depth ring, and the `reached` node list — as fields, so a flood can span
+  calls. `seed()` arms it from the click origin (ring 0 from the seed block's own
+  tops, ring 1 pre-seeded from the abutting ones), and each `stepRing()` expands
+  exactly the current depth. Call `k` completes ring `k-1`, so after `k` steps
+  `reached` holds exactly the surfaces at depth `<= k-1` — itself a valid flood at
+  that radius, which is what lets a caller yield between rings. Rings reproduce the
+  order a single FIFO queue gave: BFS over unit-weight edges leaves a queue in
+  nondecreasing depth and, within a depth, in discovery order. That order is worth
+  keeping because the greedy strip merge is order-sensitive.
+- **`Bfs` owns every piece of expansion state**, which makes its lifetime the unit of
+  consistency: dropping the reference releases the flood whole, index included. Its
+  parameters (origin, depth limit, `halfW`, reach, `ClimbRule`, the `ColumnBoxes`
+  port) are captured at construction, so a flood in flight is immutable with respect
+  to settings and a radius/profile change is answered by a fresh `Bfs`. Contract:
+  `FloodRingContractTest` (ring-per-step membership, slice-granularity invariance,
+  a partly advanced flood draining to the same result, stepping past completion, an
+  origin over nothing) — all driven through `stepRing` with no clock, since where a
+  driver yields is what must not matter.
+- **Spread across frames, expansion and finalize alike.** `select` arms a `FloodJob`
+  and returns; each frame spends the General `floodBudgetMs` budget on it
+  (`SurfaceSelection.advance`), and the step that finishes the last pass swaps the
+  published snapshot. `FloodJob` walks one cursor through the whole pipeline — a
+  depth ring per step while expanding, then one whole pass each for the merge, the
+  collision occluders, the drop edges, the paint rim when raises are active, the
+  holes and the hazards — so the finalize costs frames rather than one hitch at the
+  end. A step is always a whole unit of work, which is what the passes require: they
+  read the complete reached set, and each feeds the next. The expansion stays one
+  monotonic queue (no ring is ever re-expanded). Where the yields fall never changes
+  the output for a fixed world; a world edit mid-flood is the one divergence, since
+  the append-only index keeps whatever a column held when it was first scanned.
+  Holding the expansion and the passes behind that one `FloodJob` reference is also
+  what makes a cancel total — see [`rendering.md`](rendering.md) for the driver and
+  lifetime rules.
+- **Cost is dominated by the expansion.** A radius-30 Ravager flood over broken
+  terrain measures ~269 ms total: ~193 ms of BFS, then ~26 ms merge, ~16 ms holes,
+  ~14 ms for each occluder rim computed, and under 3 ms each for the drop edges and
+  hazards. So the merge is the largest single finalize step, and a selection with no
+  raised visuals saves a whole occluder pass. `/mobwalk dump` prints this split as
+  its `phases` line.
 
 - **Nodes are raw per-box dilated tops** (`exposeBox` output, *pre-merge*), each
   tagged with its source cell (`CellSurface`). The union/merge runs **after** the
   flood, on the reached set only (area-preserving, so connectivity is identical with
   or without an early merge).
-- **Neighbour search is column-local.** From a popped surface in cell `c`, candidate
+- **Neighbour search is column-local.** From an expanded surface in cell `c`, candidate
   cells are within Chebyshev `floor(W) + 1` of `c` (`1` for Point/Player, `2` for
   Ravager). This is the cell distance at which two dilated tops can still bridge or
   abut (raw gap `Δ-1 <= W`). It is **not** `ceil(W)`: that is `0` for Point and would
@@ -388,7 +431,7 @@ milestones).
 - **Lazy in Y (`ensureRows`).** A column is scanned only over the narrow block-row
   windows the flood needs near its current height — never the full `[oy-radius-1,
   oy+radius+1]` band. A neighbour cell is scanned for tops within one `reach` step of
-  the popped surface (`collect(cx, cz, h-reach, h+reach)`); each candidate box's
+  the expanded surface (`collect(cx, cz, h-reach, h+reach)`); each candidate box's
   occluder shell is scanned over the rows from `floor(yMax)-1` up to
   `floor(yMax+H)+1` — the upper bound **extended by the headroom `H`** so the
   ceilings/overhangs in the standing column `(T, T+H]` are exposed before
